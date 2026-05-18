@@ -1,0 +1,817 @@
+/**
+ * OpenJDK Build Pipeline - Declarative Version with JSON Configuration
+ *
+ * This declarative pipeline uses JSON configuration files instead of BUILD_CONFIGURATION parameter
+ *
+ * Key Features:
+ * - JSON-based configuration (jdkNN_pipeline_config.json)
+ * - Simple parameters: JDK_VERSION, VARIANT, TARGET_OS, ARCHITECTURE
+ * - Stage-level restart capability
+ * - Reliable artifact management (archiveArtifacts + copyArtifacts)
+ * - Modular script organization
+ * - Clear conditional logic with 'when' blocks
+ * - Consistent behavior on first run and restart
+ *
+ * Core Principle: Every stage archives outputs, every stage copies inputs
+ */
+
+@Library('openjdk-jenkins-helper') _
+
+import groovy.json.*
+
+pipeline {
+    agent none
+    
+    parameters {
+        choice(
+            name: 'JDK_VERSION',
+            choices: ['jdk21u', 'jdk17u', 'jdk11u', 'jdk8u', 'jdk22u', 'jdk23u', 'jdk'],
+            description: 'JDK version to build'
+        )
+        choice(
+            name: 'VARIANT',
+            choices: ['temurin', 'openj9', 'hotspot'],
+            description: 'Build variant'
+        )
+        choice(
+            name: 'TARGET_OS',
+            choices: ['mac', 'linux', 'windows', 'aix'],
+            description: 'Target operating system'
+        )
+        choice(
+            name: 'ARCHITECTURE',
+            choices: ['aarch64', 'x64', 'x32', 'ppc64', 's390x'],
+            description: 'Target architecture'
+        )
+        booleanParam(
+            name: 'RELEASE',
+            defaultValue: false,
+            description: 'Is this a release build?'
+        )
+        booleanParam(
+            name: 'WEEKLY',
+            defaultValue: false,
+            description: 'Is this a weekly build?'
+        )
+        booleanParam(
+            name: 'ENABLE_TESTS',
+            defaultValue: true,
+            description: 'Run AQA tests after build'
+        )
+        booleanParam(
+            name: 'ENABLE_INSTALLERS',
+            defaultValue: true,
+            description: 'Build installers'
+        )
+        booleanParam(
+            name: 'ENABLE_SIGNER',
+            defaultValue: true,
+            description: 'Sign artifacts'
+        )
+        booleanParam(
+            name: 'ENABLE_TCK',
+            defaultValue: false,
+            description: 'Run TCK tests (Temurin only, release/weekly builds)'
+        )
+        booleanParam(
+            name: 'CLEAN_WORKSPACE',
+            defaultValue: true,
+            description: 'Clean workspace before build'
+        )
+        string(
+            name: 'SCM_REF',
+            defaultValue: '',
+            description: 'Override OpenJDK source branch/tag'
+        )
+        string(
+            name: 'CI_REF',
+            defaultValue: '',
+            description: 'Override ci-jenkins-pipelines branch/tag'
+        )
+        string(
+            name: 'BUILD_REF',
+            defaultValue: '',
+            description: 'Override temurin-build branch/tag'
+        )
+        string(
+            name: 'HELPER_REF',
+            defaultValue: '',
+            description: 'Override jenkins-helper branch/tag'
+        )
+    }
+    
+    options {
+        timestamps()
+        timeout(time: 24, unit: 'HOURS')
+        buildDiscarder(logRotator(
+            numToKeepStr: '20',
+            artifactNumToKeepStr: '5',
+            daysToKeepStr: '30'
+        ))
+        disableConcurrentBuilds()
+    }
+    
+    stages {
+        stage('Initialize') {
+            agent {
+                label 'worker'
+            }
+            steps {
+                script {
+                    echo "=== Initializing Build ==="
+                    
+                    // Checkout configurations from ci-jenkins-pipelines
+                    dir('configurations') {
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: params.CI_REF ?: '*/master']],
+                            userRemoteConfigs: [[
+                                url: 'https://github.com/adoptium/ci-jenkins-pipelines.git'
+                            ]],
+                            extensions: [
+                                [$class: 'SparseCheckoutPaths',
+                                 sparseCheckoutPaths: [[path: 'pipelines/jobs/configurations/*']]]
+                            ]
+                        ])
+                        
+                        // Move config files to root of configurations directory
+                        sh '''
+                            if [ -d pipelines/jobs/configurations ]; then
+                                mv pipelines/jobs/configurations/* .
+                                rm -rf pipelines
+                            fi
+                        '''
+                    }
+                    
+                    // Checkout scripts
+                    dir('scripts') {
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: params.CI_REF ?: '*/master']],
+                            userRemoteConfigs: [[
+                                url: 'https://github.com/adoptium/ci-jenkins-pipelines.git'
+                            ]],
+                            extensions: [
+                                [$class: 'SparseCheckoutPaths',
+                                 sparseCheckoutPaths: [[path: 'pipelines/build/refactored/scripts/*']]]
+                            ]
+                        ])
+                        
+                        // Move scripts to root
+                        sh '''
+                            if [ -d pipelines/build/refactored/scripts ]; then
+                                mv pipelines/build/refactored/scripts/* .
+                                rm -rf pipelines
+                            fi
+                        '''
+                    }
+                    
+                    // Build Python command arguments
+                    def pythonArgs = [
+                        "--jdk-version ${params.JDK_VERSION}",
+                        "--variant ${params.VARIANT}",
+                        "--target-os ${params.TARGET_OS}",
+                        "--architecture ${params.ARCHITECTURE}",
+                        "--config-dir ./configurations",
+                        "--output-dir ."
+                    ]
+                    
+                    if (params.RELEASE) {
+                        pythonArgs.add("--release")
+                    }
+                    if (params.WEEKLY) {
+                        pythonArgs.add("--weekly")
+                    }
+                    if (params.SCM_REF) {
+                        pythonArgs.add("--scm-ref ${params.SCM_REF}")
+                    }
+                    if (params.BUILD_REF) {
+                        pythonArgs.add("--build-ref ${params.BUILD_REF}")
+                    }
+                    if (params.CI_REF) {
+                        pythonArgs.add("--ci-ref ${params.CI_REF}")
+                    }
+                    if (params.HELPER_REF) {
+                        pythonArgs.add("--helper-ref ${params.HELPER_REF}")
+                    }
+                    if (!params.ENABLE_TESTS) {
+                        pythonArgs.add("--no-tests")
+                    }
+                    if (!params.ENABLE_INSTALLERS) {
+                        pythonArgs.add("--no-installers")
+                    }
+                    if (!params.ENABLE_SIGNER) {
+                        pythonArgs.add("--no-signer")
+                    }
+                    
+                    // Load JSON configuration and generate pipeline config
+                    sh """
+                        python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}
+                    """
+                    
+                    // Read generated configuration
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Disable TCK for 'jdk' builds
+                    if ('jdk'.equalsIgnoreCase(params.JDK_VERSION?.trim())) {
+                        config.parameters.enableTCK = false
+                    } else {
+                        config.parameters.enableTCK = params.ENABLE_TCK
+                    }
+                    
+                    // Update pipeline-config.json with TCK setting
+                    writeJSON file: 'pipeline-config.json', json: config, pretty: 4
+                    
+                    // Archive configuration
+                    archiveArtifacts artifacts: 'pipeline-config.json',
+                                   fingerprint: true,
+                                   allowEmptyArchive: false
+                    
+                    echo "Build Configuration:"
+                    echo "  JDK Version: ${config.buildConfig.JAVA_TO_BUILD}"
+                    echo "  Variant: ${config.buildConfig.VARIANT}"
+                    echo "  OS: ${config.buildConfig.TARGET_OS}"
+                    echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
+                    echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
+                    echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
+                    echo "  Tests: ${config.buildConfig.TEST_LIST}"
+                    echo "=== Initialization Complete ==="
+                }
+            }
+        }
+        
+        stage('Build') {
+            agent {
+                label getNodeLabel()
+            }
+            steps {
+                script {
+                    echo "=== Building JDK ==="
+                    
+                    // Retrieve configuration
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute build stage script
+                    def buildScript = load 'scripts/stages/02-build.groovy'
+                    buildScript(config)
+                    
+                    echo "=== Build Complete ==="
+                }
+            }
+        }
+        
+        stage('Internal Sign') {
+            agent {
+                label 'eclipse-codesign'
+            }
+            when {
+                allOf {
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableSigner
+                    }
+                    expression {
+                        def config = readJSON file: 'pipeline-config.json'
+                        def bc = config.buildConfig
+                        return (bc.TARGET_OS == 'mac' || bc.TARGET_OS == 'windows') &&
+                               bc.JAVA_TO_BUILD != 'jdk8u'
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Internal Signing (JMOD) ==="
+                    
+                    // Retrieve configuration and build outputs
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/jmods/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute internal sign script
+                    def signScript = load 'scripts/stages/03-internal-sign.groovy'
+                    signScript(config)
+                    
+                    echo "=== Internal Signing Complete ==="
+                }
+            }
+        }
+        
+        stage('Assemble') {
+            agent {
+                label getNodeLabel()
+            }
+            when {
+                allOf {
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableSigner
+                    }
+                    expression {
+                        def config = readJSON file: 'pipeline-config.json'
+                        def bc = config.buildConfig
+                        return (bc.TARGET_OS == 'mac' || bc.TARGET_OS == 'windows') &&
+                               bc.JAVA_TO_BUILD != 'jdk8u'
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Assembling Final Build ==="
+                    
+                    // Retrieve signed JMODs and configuration
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,signed-jmods/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute assemble script
+                    def assembleScript = load 'scripts/stages/04-assemble.groovy'
+                    assembleScript(config)
+                    
+                    echo "=== Assembly Complete ==="
+                }
+            }
+        }
+        
+        stage('Sign Artifacts') {
+            agent {
+                label 'worker'
+            }
+            when {
+                expression { 
+                    def config = readJSON file: 'pipeline-config.json'
+                    return config.parameters.enableSigner
+                }
+            }
+            steps {
+                script {
+                    echo "=== Signing Artifacts ==="
+                    
+                    // Retrieve build artifacts
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute sign script
+                    def signScript = load 'scripts/stages/06-sign.groovy'
+                    signScript(config)
+                    
+                    echo "=== Artifact Signing Complete ==="
+                }
+            }
+        }
+        
+        stage('Build Installers') {
+            agent {
+                label 'worker'
+            }
+            when {
+                expression { 
+                    def config = readJSON file: 'pipeline-config.json'
+                    return config.parameters.enableInstallers
+                }
+            }
+            steps {
+                script {
+                    echo "=== Building Installers ==="
+                    
+                    // Retrieve signed artifacts
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,signed/**/*,workspace/target/metadata/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute installer build script
+                    def installerScript = load 'scripts/stages/07-installer.groovy'
+                    installerScript(config)
+                    
+                    echo "=== Installer Build Complete ==="
+                }
+            }
+        }
+        
+        stage('Sign Installers') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableInstallers
+                    }
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableSigner
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Signing Installers ==="
+                    
+                    // Retrieve installers
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,installers/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute installer sign script
+                    def signInstallerScript = load 'scripts/stages/08-sign-installer.groovy'
+                    signInstallerScript(config)
+                    
+                    echo "=== Installer Signing Complete ==="
+                }
+            }
+        }
+        
+        stage('GPG Sign') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression {
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.buildConfig.VARIANT == 'temurin'
+                    }
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableSigner
+                    }
+                    not { 
+                        expression { env.JOB_NAME.contains('pr-tester') }
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== GPG Signing ==="
+                    
+                    // Retrieve all artifacts to sign
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,signed/**/*,signed-installers/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute GPG sign script
+                    def gpgSignScript = load 'scripts/stages/09-gpg-sign.groovy'
+                    gpgSignScript(config)
+                    
+                    // SBOM signing if applicable
+                    if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
+                        echo "=== SBOM JSF Signing ==="
+                        def sbomSignScript = load 'scripts/stages/10-sbom-sign.groovy'
+                        sbomSignScript(config)
+                    }
+                    
+                    echo "=== GPG Signing Complete ==="
+                }
+            }
+        }
+        
+        stage('Verify Signing') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression {
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.buildConfig.VARIANT == 'temurin'
+                    }
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableSigner
+                    }
+                    not { 
+                        expression { env.JOB_NAME.contains('pr-tester') }
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Verifying Signatures ==="
+                    
+                    // Retrieve signed artifacts
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,signed/**/*,*.sig,*.asc',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute verify script
+                    def verifyScript = load 'scripts/stages/11-verify-signing.groovy'
+                    verifyScript(config)
+                    
+                    echo "=== Signature Verification Complete ==="
+                }
+            }
+        }
+        
+        stage('Validate SBOM') {
+            agent {
+                label 'worker'
+            }
+            when {
+                expression {
+                    def config = readJSON file: 'pipeline-config.json'
+                    return config.buildConfig.BUILD_ARGS?.contains('--create-sbom')
+                }
+            }
+            steps {
+                script {
+                    echo "=== Validating SBOM ==="
+                    
+                    // Retrieve SBOM files
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*sbom*.json',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute SBOM validation script
+                    def validateScript = load 'scripts/stages/12-validate-sbom.groovy'
+                    def result = validateScript(config)
+                    
+                    if (result != 'SUCCESS') {
+                        error("SBOM validation failed")
+                    }
+                    
+                    echo "=== SBOM Validation Complete ==="
+                }
+            }
+        }
+        
+        stage('Smoke Tests') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableTests
+                    }
+                    expression { 
+                        currentBuild.result == null || currentBuild.result == 'SUCCESS'
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Running Smoke Tests ==="
+                    
+                    // Retrieve JDK binary
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute smoke test script
+                    def smokeTestScript = load 'scripts/stages/13-smoke-tests.groovy'
+                    def result = smokeTestScript(config)
+                    
+                    // Save test result
+                    def testMetadata = [
+                        smokeTestsPassed: result == 'SUCCESS',
+                        testedAt: currentBuild.startTimeInMillis
+                    ]
+                    writeJSON file: 'test-metadata.json', json: testMetadata
+                    archiveArtifacts artifacts: 'test-metadata.json', fingerprint: true
+                    
+                    if (result != 'SUCCESS') {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "WARNING: Smoke tests failed - AQA tests will be skipped"
+                    }
+                    
+                    echo "=== Smoke Tests Complete ==="
+                }
+            }
+        }
+        
+        stage('AQA Tests') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableTests
+                    }
+                    expression {
+                        // Check if smoke tests passed
+                        try {
+                            copyArtifacts(
+                                projectName: env.JOB_NAME,
+                                selector: specific(env.BUILD_NUMBER),
+                                filter: 'test-metadata.json',
+                                target: '.'
+                            )
+                            def testMeta = readJSON file: 'test-metadata.json'
+                            return testMeta.smokeTestsPassed
+                        } catch (Exception e) {
+                            return false
+                        }
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Running AQA Tests ==="
+                    
+                    // Retrieve JDK binary
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute AQA test script
+                    def aqaTestScript = load 'scripts/stages/14-aqa-tests.groovy'
+                    aqaTestScript(config)
+                    
+                    echo "=== AQA Tests Complete ==="
+                }
+            }
+        }
+        
+        stage('TCK Tests') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression {
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.buildConfig.VARIANT == 'temurin'
+                    }
+                    expression { 
+                        def config = readJSON file: 'pipeline-config.json'
+                        return config.parameters.enableTCK
+                    }
+                    expression {
+                        // Check if smoke tests passed
+                        try {
+                            def testMeta = readJSON file: 'test-metadata.json'
+                            return testMeta.smokeTestsPassed
+                        } catch (Exception e) {
+                            return false
+                        }
+                    }
+                    not {
+                        allOf {
+                            expression {
+                                def config = readJSON file: 'pipeline-config.json'
+                                return config.buildConfig.JAVA_TO_BUILD == 'jdk8u'
+                            }
+                            expression {
+                                def config = readJSON file: 'pipeline-config.json'
+                                return config.buildConfig.ARCHITECTURE == 's390x'
+                            }
+                            expression {
+                                def config = readJSON file: 'pipeline-config.json'
+                                return config.buildConfig.TARGET_OS == 'linux'
+                            }
+                        }
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Running TCK Tests ==="
+                    
+                    // Retrieve JDK binary
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Execute TCK test script
+                    def tckTestScript = load 'scripts/stages/15-tck-tests.groovy'
+                    tckTestScript(config)
+                    
+                    echo "=== TCK Tests Complete ==="
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "=== Pipeline Cleanup ==="
+                
+                // Cleanup workspace if requested
+                try {
+                    def config = readJSON file: 'pipeline-config.json'
+                    if (config.parameters.cleanWorkspaceAfter) {
+                        node(getNodeLabel()) {
+                            echo "Cleaning workspace..."
+                            cleanWs notFailBuild: true, deleteDirs: true
+                        }
+                    }
+                } catch (Exception e) {
+                    echo "Cleanup skipped: ${e.message}"
+                }
+            }
+        }
+        success {
+            script {
+                echo "✅ Build completed successfully"
+                if (env.JOB_NAME.contains('pr-tester')) {
+                    updateGithubCommitStatus('SUCCESS', 'Build Successful')
+                }
+            }
+        }
+        failure {
+            script {
+                echo "❌ Build failed"
+                if (env.JOB_NAME.contains('pr-tester')) {
+                    updateGithubCommitStatus('FAILURE', 'Build Failed')
+                }
+            }
+        }
+        unstable {
+            script {
+                echo "⚠️ Build unstable"
+                if (env.JOB_NAME.contains('pr-tester')) {
+                    updateGithubCommitStatus('FAILURE', 'Build Unstable')
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Get the appropriate node label for the build
+ */
+def getNodeLabel() {
+    try {
+        def config = readJSON file: 'pipeline-config.json'
+        return config.buildConfig.NODE_LABEL ?: 'worker'
+    } catch (Exception e) {
+        return 'worker'
+    }
+}
+
+/**
+ * Update GitHub commit status for PR tester
+ */
+def updateGithubCommitStatus(String state, String description) {
+    echo "GitHub Status: ${state} - ${description}"
+    // Actual implementation would use GitHub API
+}
+
+// Made with Bob
