@@ -3,7 +3,7 @@
 Load JSON Configuration and Generate Pipeline Config
 
 This script loads the jdkNN_pipeline_config.json file and generates
-the pipeline-config.json and BUILD_CONFIGURATION.json needed by the build stages.
+the pipeline-config.json needed by the build stages.
 
 This is CI-agnostic and can be used by Jenkins, GitLab CI, GitHub Actions, etc.
 
@@ -146,37 +146,7 @@ def load_configuration(args):
     # Build node label
     node_label = build_node_label(target_os, architecture, additional_node_labels)
     
-    # Create BUILD_CONFIGURATION (for compatibility, not used by refactored pipeline)
-    build_configuration = {
-        'ARCHITECTURE': architecture,
-        'TARGET_OS': target_os,
-        'VARIANT': variant,
-        'JAVA_TO_BUILD': jdk_version,
-        'TEST_LIST': test_list,
-        'SCM_REF': scm_ref,
-        'BUILD_REF': build_ref,
-        'BUILD_ARGS': build_args or '',
-        'NODE_LABEL': node_label,
-        'DOCKER_IMAGE': docker_image or '',
-        'DOCKER_FILE': docker_file or '',
-        'DOCKER_REGISTRY': platform_config.get('dockerRegistry', ''),
-        'DOCKER_CREDENTIAL': platform_config.get('dockerCredential', ''),
-        'DOCKER_ARGS': platform_config.get('dockerArgs', ''),
-        'CONFIGURE_ARGS': configure_args or '',
-        'ADDITIONAL_TEST_LABEL': additional_test_labels or '',
-        'ENABLE_TESTS': enable_tests,
-        'ENABLE_INSTALLERS': enable_installers,
-        'ENABLE_SIGNER': enable_signer,
-        'CLEAN_WORKSPACE_AFTER': platform_config.get('cleanWorkspaceAfterBuild', False)
-    }
-    
-    # Add additional test params if present
-    if 'additionalTestParams' in platform_config:
-        variant_test_params = platform_config['additionalTestParams'].get(variant)
-        if variant_test_params:
-            build_configuration['ADDITIONAL_TEST_PARAMS'] = variant_test_params
-    
-    # Create pipeline-config.json (combines build config and parameters)
+    # Create pipeline-config.json (new format only)
     pipeline_config = {
         'buildConfig': {
             'JAVA_TO_BUILD': jdk_version,
@@ -188,14 +158,18 @@ def load_configuration(args):
             'NODE_LABEL': node_label,
             'DOCKER_IMAGE': docker_image or '',
             'DOCKER_FILE': docker_file or '',
-            'TEST_LIST': test_list
+            'DOCKER_REGISTRY': platform_config.get('dockerRegistry', ''),
+            'DOCKER_CREDENTIAL': platform_config.get('dockerCredential', ''),
+            'DOCKER_ARGS': platform_config.get('dockerArgs', ''),
+            'TEST_LIST': test_list,
+            'ADDITIONAL_TEST_LABEL': additional_test_labels or ''
         },
         'parameters': {
             'enableTests': enable_tests,
             'enableInstallers': enable_installers,
             'enableSigner': enable_signer,
             'cleanWorkspace': True,
-            'cleanWorkspaceAfter': build_configuration['CLEAN_WORKSPACE_AFTER']
+            'cleanWorkspaceAfter': platform_config.get('cleanWorkspaceAfterBuild', False)
         },
         'refs': {
             'scmRef': scm_ref,
@@ -203,6 +177,12 @@ def load_configuration(args):
             'buildRepoUrl': build_repo_url
         }
     }
+    
+    # Add additional test params if present
+    if 'additionalTestParams' in platform_config:
+        variant_test_params = platform_config['additionalTestParams'].get(variant)
+        if variant_test_params:
+            pipeline_config['buildConfig']['ADDITIONAL_TEST_PARAMS'] = variant_test_params
     
     # Save configuration
     output_path = Path(output_dir)

@@ -84,9 +84,14 @@ pipeline {
             description: 'Override OpenJDK source branch/tag'
         )
         string(
-            name: 'CI_REF',
-            defaultValue: '',
-            description: 'Override ci-jenkins-pipelines branch/tag'
+            name: 'CONFIG_REPO_URL',
+            defaultValue: 'https://github.com/adoptium/ci-jenkins-pipelines.git',
+            description: 'Git repository URL containing pipeline configurations (JSON files)'
+        )
+        string(
+            name: 'CONFIG_REPO_BRANCH',
+            defaultValue: 'master',
+            description: 'Branch/tag to checkout from configuration repository'
         )
         string(
             name: 'BUILD_REF',
@@ -120,48 +125,49 @@ pipeline {
                 script {
                     echo "=== Initializing Build ==="
                     
-                    // Checkout configurations from ci-jenkins-pipelines
+                    // Checkout pipeline configurations from external repository
+                    // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
                     dir('configurations') {
                         checkout([
                             $class: 'GitSCM',
-                            branches: [[name: params.CI_REF ?: '*/master']],
+                            branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
                             userRemoteConfigs: [[
-                                url: 'https://github.com/adoptium/ci-jenkins-pipelines.git'
+                                url: params.CONFIG_REPO_URL
                             ]],
                             extensions: [
                                 [$class: 'SparseCheckoutPaths',
-                                 sparseCheckoutPaths: [[path: 'pipelines/jobs/configurations/*']]]
+                                 sparseCheckoutPaths: [[path: 'configurations/*']]]
                             ]
                         ])
                         
                         // Move config files to root of configurations directory
                         sh '''
-                            if [ -d pipelines/jobs/configurations ]; then
-                                mv pipelines/jobs/configurations/* .
-                                rm -rf pipelines
+                            if [ -d configurations ]; then
+                                mv configurations/* .
+                                rm -rf configurations
                             fi
                         '''
                     }
                     
-                    // Checkout scripts
+                    // Checkout ci-adoptium-pipelines scripts (this repository)
                     dir('scripts') {
                         checkout([
                             $class: 'GitSCM',
-                            branches: [[name: params.CI_REF ?: '*/master']],
+                            branches: [[name: '*/main']],
                             userRemoteConfigs: [[
-                                url: 'https://github.com/adoptium/ci-jenkins-pipelines.git'
+                                url: 'https://github.com/adoptium/ci-adoptium-pipelines.git'
                             ]],
                             extensions: [
                                 [$class: 'SparseCheckoutPaths',
-                                 sparseCheckoutPaths: [[path: 'pipelines/build/refactored/scripts/*']]]
+                                 sparseCheckoutPaths: [[path: 'scripts/*']]]
                             ]
                         ])
                         
                         // Move scripts to root
                         sh '''
-                            if [ -d pipelines/build/refactored/scripts ]; then
-                                mv pipelines/build/refactored/scripts/* .
-                                rm -rf pipelines
+                            if [ -d scripts ]; then
+                                mv scripts/* .
+                                rm -rf scripts
                             fi
                         '''
                     }
@@ -188,8 +194,11 @@ pipeline {
                     if (params.BUILD_REF) {
                         pythonArgs.add("--build-ref ${params.BUILD_REF}")
                     }
-                    if (params.CI_REF) {
-                        pythonArgs.add("--ci-ref ${params.CI_REF}")
+                    if (params.CONFIG_REPO_URL != 'https://github.com/adoptium/ci-jenkins-pipelines.git') {
+                        pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
+                    }
+                    if (params.CONFIG_REPO_BRANCH != 'master') {
+                        pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
                     }
                     if (params.HELPER_REF) {
                         pythonArgs.add("--helper-ref ${params.HELPER_REF}")
