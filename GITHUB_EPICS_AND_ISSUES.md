@@ -2,6 +2,47 @@
 
 This document provides ready-to-use templates for creating GitHub EPICs and issues to track the pipeline migration project.
 
+---
+
+## Executive Summary
+
+### Why This Refactoring?
+
+The current OpenJDK build pipeline uses a monolithic scripted pipeline architecture that has become increasingly difficult to maintain, debug, and extend. This refactoring addresses critical operational challenges:
+
+**Current Pain Points:**
+1. **No Restart Capability**: Pipeline failures require complete rebuilds from scratch, wasting hours of compute time and developer productivity
+2. **Monolithic Design**: All logic embedded in a single large Groovy script makes changes risky and testing difficult
+3. **Configuration Complexity**: Build configurations mixed with pipeline code makes it hard to add new platforms or variants
+4. **Debugging Challenges**: When builds fail, identifying the root cause requires navigating thousands of lines of Groovy code
+5. **Vendor Lock-in**: Heavy reliance on Jenkins-specific features and shared libraries limits portability
+6. **Limited Reusability**: Other vendors cannot easily adapt the pipeline for their needs
+
+**Benefits of New Architecture:**
+1. **Stage-Level Restart**: Failed stages can be restarted individually, saving hours of rebuild time
+2. **Modular Design**: Each stage is an independent script, making changes safer and testing easier
+3. **Code/Config Separation**: Pipeline code (ci-adoptium-pipelines) separated from vendor configurations (ci-temurin-config)
+4. **Better Debugging**: Clear stage boundaries and structured logging make troubleshooting straightforward
+5. **CI-Agnostic**: 90% of code is portable shell scripts, reducing Jenkins dependency
+6. **Vendor-Friendly**: Other vendors can use the pipeline code with their own configuration repositories
+7. **Improved Reliability**: Declarative syntax with explicit stage dependencies reduces runtime errors
+8. **Faster Iteration**: Developers can test individual stages locally without full Jenkins setup
+
+**Business Impact:**
+- **Reduced Downtime**: Restart capability eliminates hours of wasted rebuild time
+- **Faster Releases**: Modular design enables parallel development and faster iteration
+- **Lower Costs**: Efficient resource usage and reduced compute waste
+- **Better Quality**: Easier testing and validation leads to more reliable builds
+- **Vendor Adoption**: Other organizations can adopt Adoptium's build infrastructure
+
+**Migration Strategy:**
+- Gradual rollout with parallel execution (old and new pipelines run side-by-side)
+- Byte-by-byte comparison ensures identical outputs
+- Start with pilot platform (Linux x64 JDK21u) before expanding
+- Zero downtime migration with fallback capability
+
+---
+
 ## Architecture Overview
 
 The new pipeline architecture separates code from configuration:

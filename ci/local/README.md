@@ -1,0 +1,245 @@
+# Local Pipeline Execution
+
+This directory contains tools for running the Adoptium build pipeline locally without a CI server.
+
+## Files
+
+### run-pipeline.py
+
+Python script for local pipeline execution with full stage orchestration.
+
+## Quick Start
+
+```bash
+# Basic build
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64
+
+# Build without tests or installers
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os linux \
+  --architecture x64 \
+  --no-tests \
+  --no-installers
+
+# Resume from specific stage
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --start-from-stage smoke-tests
+```
+
+## Features
+
+### Stage Orchestration
+
+The runner executes all pipeline stages in order:
+1. **Initialize**: Generate configuration from JSON
+2. **Build**: Compile OpenJDK
+3. **Sign**: Sign artifacts (if enabled)
+4. **Installer**: Create installers (if enabled)
+5. **Smoke Tests**: Run validation tests (if enabled)
+
+### Configuration Repository Support
+
+Automatically clones external configuration repository:
+
+```bash
+# Use default ci-temurin-config repository
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64
+
+# Use custom configuration repository
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os linux \
+  --architecture x64 \
+  --config-repo-url https://github.com/myorg/my-jdk-configs.git \
+  --config-repo-branch develop
+```
+
+### Stage Resume
+
+Resume from any stage after a failure:
+
+```bash
+# Build fails at installer stage
+python3 ci/local/run-pipeline.py ... 
+# (fails)
+
+# Fix the issue, then resume from installer
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --start-from-stage installer
+```
+
+### Workspace Management
+
+Control workspace behavior:
+
+```bash
+# Clean workspace before build (fresh start)
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --clean-workspace
+
+# Use existing workspace (faster for iterative testing)
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64
+```
+
+## Command-Line Options
+
+### Required Arguments
+
+- `--jdk-version`: JDK version (jdk8u, jdk11u, jdk17u, jdk21u, jdk22u, jdk23u, jdk)
+- `--variant`: Build variant (temurin, openj9, hotspot)
+- `--target-os`: Target OS (mac, linux, windows, aix)
+- `--architecture`: Target architecture (aarch64, x64, x32, ppc64, s390x)
+
+### Optional Arguments
+
+**Workspace:**
+- `--workspace`: Workspace directory (default: ~/openjdk-build)
+- `--build-number`: Build number (default: local-YYYYMMDD-HHMMSS)
+- `--clean-workspace`: Remove existing workspace before starting
+
+**Build Type:**
+- `--release`: Release build
+- `--weekly`: Weekly build
+
+**Git References:**
+- `--scm-ref`: OpenJDK source branch/tag
+- `--build-ref`: temurin-build branch/tag
+- `--build-repo-url`: temurin-build repository URL
+
+**Configuration Repository:**
+- `--config-repo-url`: Configuration repository URL (default: ci-temurin-config)
+- `--config-repo-branch`: Configuration branch (default: main)
+
+**Stage Control:**
+- `--start-from-stage`: Start from specific stage (initialize, build, sign, installer, smoke-tests)
+- `--skip-build`: Skip build stage (only generate configuration)
+- `--no-tests`: Disable tests
+- `--no-installers`: Disable installer building
+- `--no-signer`: Disable artifact signing
+
+## Examples
+
+### Development Workflow
+
+```bash
+# 1. Initial build
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --workspace ~/my-jdk-build
+
+# 2. Make code changes to stage scripts
+
+# 3. Re-run from specific stage
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --workspace ~/my-jdk-build \
+  --start-from-stage build
+```
+
+### Testing Configuration Changes
+
+```bash
+# Test with custom configuration
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os linux \
+  --architecture x64 \
+  --config-repo-url file:///path/to/local/config/repo \
+  --config-repo-branch my-test-branch
+```
+
+### Quick Validation
+
+```bash
+# Fast validation without tests/installers
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --no-tests \
+  --no-installers \
+  --no-signer
+```
+
+## Output
+
+All artifacts are stored in the workspace:
+
+```
+~/openjdk-build/
+├── pipeline-config.json          # Generated configuration
+├── workspace/
+│   └── target/                   # All build artifacts
+│       ├── *.tar.gz             # JDK tarballs
+│       ├── *.sig                # Signatures
+│       ├── *.pkg / *.msi        # Installers
+│       └── test-results/        # Test outputs
+└── config-repo/                  # Cloned configuration repository
+```
+
+## Troubleshooting
+
+### Configuration Repository Clone Fails
+
+**Problem**: "Failed to clone configuration repository"
+
+**Solution**: 
+- Verify URL is accessible
+- Check branch name is correct
+- Ensure git is installed and configured
+
+### Stage Script Not Found
+
+**Problem**: "scripts/stages/XX-stage.sh: not found"
+
+**Solution**: Run from ci-adoptium-pipelines repository root
+
+### Permission Denied
+
+**Problem**: "Permission denied" when running scripts
+
+**Solution**: Ensure scripts are executable:
+```bash
+chmod +x scripts/stages/*.sh
+```
+
+## Related Documentation
+
+- [LOCAL_TESTING_GUIDE.md](../../LOCAL_TESTING_GUIDE.md) - Comprehensive local testing guide
+- [PIPELINE_RUNNER_GUIDE.md](../../PIPELINE_RUNNER_GUIDE.md) - Pipeline runner details
+- [CI_AGNOSTIC_ARCHITECTURE.md](../../CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview

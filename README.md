@@ -75,10 +75,9 @@ See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for detailed visual
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  LAYER 3: Orchestration (CI-Specific - 10%)                     │
-│  • Jenkins: Jenkinsfile.declarative                             │
-│  • GitLab: .gitlab-ci.yml                                       │
-│  • GitHub: .github/workflows/build.yml                          │
-│  • Local: run-pipeline.py                                       │
+│  • Jenkins: ci/jenkins/Jenkinsfile.declarative                  │
+│  • Local: ci/local/run-pipeline.py                              │
+│  • Future: ci/gitlab/, ci/github-actions/                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -86,10 +85,14 @@ See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for detailed visual
 
 ```
 ci-adoptium-pipelines/
-├── configurations/              # Layer 1: Configuration
-│   └── jdk21u_pipeline_config.json
+├── ci/                          # Layer 3: CI Integration
+│   ├── jenkins/                 # Jenkins-specific files
+│   │   └── Jenkinsfile.declarative
+│   ├── local/                   # Local execution tools
+│   │   └── run-pipeline.py
+│   └── README.md
 │
-├── scripts/                     # Layer 2: Build Logic
+├── scripts/                     # Layer 2: Build Logic (CI-Agnostic)
 │   ├── lib/                     # Shared utilities
 │   │   ├── config-utils.sh
 │   │   ├── logging-utils.sh
