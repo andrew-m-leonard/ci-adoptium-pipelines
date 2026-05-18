@@ -1,7 +1,14 @@
 /**
  * OpenJDK Build Pipeline - Declarative Version with JSON Configuration
  *
- * This declarative pipeline uses JSON configuration files instead of BUILD_CONFIGURATION parameter
+ * IMPORTANT: This Jenkinsfile expects the ci-adoptium-pipelines repository to be
+ * checked out via Jenkins SCM configuration. The repository should contain:
+ *   - scripts/ directory with stage scripts
+ *   - tools/ directory with helper scripts
+ *   - Jenkinsfile.declarative (this file)
+ *
+ * The pipeline will separately checkout the configuration repository specified
+ * by CONFIG_REPO_URL parameter, which contains the JSON configuration files.
  *
  * Key Features:
  * - JSON-based configuration (jdkNN_pipeline_config.json)
@@ -11,11 +18,10 @@
  * - Modular script organization
  * - Clear conditional logic with 'when' blocks
  * - Consistent behavior on first run and restart
+ * - Code/Config separation (pipeline code vs vendor configs)
  *
  * Core Principle: Every stage archives outputs, every stage copies inputs
  */
-
-@Library('openjdk-jenkins-helper') _
 
 import groovy.json.*
 
@@ -85,12 +91,12 @@ pipeline {
         )
         string(
             name: 'CONFIG_REPO_URL',
-            defaultValue: 'https://github.com/adoptium/ci-jenkins-pipelines.git',
+            defaultValue: 'https://github.com/adoptium/ci-temurin-config.git',
             description: 'Git repository URL containing pipeline configurations (JSON files)'
         )
         string(
             name: 'CONFIG_REPO_BRANCH',
-            defaultValue: 'master',
+            defaultValue: 'main',
             description: 'Branch/tag to checkout from configuration repository'
         )
         string(
@@ -125,6 +131,27 @@ pipeline {
                 script {
                     echo "=== Initializing Build ==="
                     
+                    // Verify ci-adoptium-pipelines repository structure
+                    // This repository should be checked out via Jenkins SCM configuration
+                    sh '''
+                        echo "Verifying ci-adoptium-pipelines repository structure..."
+                        
+                        if [ ! -d "scripts" ]; then
+                            echo "ERROR: scripts/ directory not found"
+                            echo "Please ensure ci-adoptium-pipelines is checked out via Jenkins SCM configuration"
+                            exit 1
+                        fi
+                        
+                        if [ ! -d "tools" ]; then
+                            echo "ERROR: tools/ directory not found"
+                            echo "Please ensure ci-adoptium-pipelines is checked out via Jenkins SCM configuration"
+                            exit 1
+                        fi
+                        
+                        echo "✅ ci-adoptium-pipelines repository structure verified"
+                        ls -la scripts/ tools/
+                    '''
+                    
                     // Checkout pipeline configurations from external repository
                     // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
                     dir('configurations') {
@@ -145,29 +172,6 @@ pipeline {
                             if [ -d configurations ]; then
                                 mv configurations/* .
                                 rm -rf configurations
-                            fi
-                        '''
-                    }
-                    
-                    // Checkout ci-adoptium-pipelines scripts (this repository)
-                    dir('scripts') {
-                        checkout([
-                            $class: 'GitSCM',
-                            branches: [[name: '*/main']],
-                            userRemoteConfigs: [[
-                                url: 'https://github.com/adoptium/ci-adoptium-pipelines.git'
-                            ]],
-                            extensions: [
-                                [$class: 'SparseCheckoutPaths',
-                                 sparseCheckoutPaths: [[path: 'scripts/*']]]
-                            ]
-                        ])
-                        
-                        // Move scripts to root
-                        sh '''
-                            if [ -d scripts ]; then
-                                mv scripts/* .
-                                rm -rf scripts
                             fi
                         '''
                     }
@@ -194,12 +198,8 @@ pipeline {
                     if (params.BUILD_REF) {
                         pythonArgs.add("--build-ref ${params.BUILD_REF}")
                     }
-                    if (params.CONFIG_REPO_URL != 'https://github.com/adoptium/ci-jenkins-pipelines.git') {
-                        pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
-                    }
-                    if (params.CONFIG_REPO_BRANCH != 'master') {
-                        pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
-                    }
+                    pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
+                    pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
                     if (params.HELPER_REF) {
                         pythonArgs.add("--helper-ref ${params.HELPER_REF}")
                     }
@@ -221,12 +221,8 @@ pipeline {
                     // Read generated configuration
                     def config = readJSON file: 'pipeline-config.json'
                     
-                    // Disable TCK for 'jdk' builds
-                    if ('jdk'.equalsIgnoreCase(params.JDK_VERSION?.trim())) {
-                        config.parameters.enableTCK = false
-                    } else {
-                        config.parameters.enableTCK = params.ENABLE_TCK
-                    }
+                    // Set TCK enablement from parameter
+                    config.parameters.enableTCK = params.ENABLE_TCK
                     
                     // Update pipeline-config.json with TCK setting
                     writeJSON file: 'pipeline-config.json', json: config, pretty: 4

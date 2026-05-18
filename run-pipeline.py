@@ -131,6 +131,46 @@ class PipelineRunner:
         # Create workspace directory
         self.workspace.mkdir(parents=True, exist_ok=True)
         
+        # Determine configuration directory
+        if self.args.config_repo_url:
+            # Clone external configuration repository
+            config_dir = self.workspace / 'config-repo'
+            if config_dir.exists():
+                print(f"ℹ️  Configuration repository already exists: {config_dir}")
+                print("   (Use --clean-workspace to re-clone)")
+            else:
+                print(f"📥 Cloning configuration repository...")
+                print(f"   URL: {self.args.config_repo_url}")
+                print(f"   Branch: {self.args.config_repo_branch}")
+                
+                clone_cmd = [
+                    'git', 'clone',
+                    '--branch', self.args.config_repo_branch,
+                    '--depth', '1',
+                    self.args.config_repo_url,
+                    str(config_dir)
+                ]
+                subprocess.run(clone_cmd, check=True)
+                print("✅ Configuration repository cloned")
+            
+            # Use configurations subdirectory
+            config_dir = config_dir / 'configurations'
+            if not config_dir.exists():
+                raise FileNotFoundError(
+                    f"Configuration directory not found: {config_dir}\n"
+                    f"Expected 'configurations/' subdirectory in repository"
+                )
+        else:
+            # Use local configurations directory
+            config_dir = self.script_dir / 'configurations'
+            if not config_dir.exists():
+                raise FileNotFoundError(
+                    f"Configuration directory not found: {config_dir}\n"
+                    f"Please provide --config-repo-url or ensure local configurations exist"
+                )
+        
+        print(f"📁 Using configuration directory: {config_dir}")
+        
         # Build command for load-json-config.py
         cmd = [
             'python3',
@@ -139,7 +179,7 @@ class PipelineRunner:
             '--variant', self.args.variant,
             '--target-os', self.args.target_os,
             '--architecture', self.args.architecture,
-            '--config-dir', str(self.script_dir / 'configurations'),
+            '--config-dir', str(config_dir),
             '--output-dir', str(self.workspace)
         ]
         
@@ -373,6 +413,14 @@ Examples:
                         help='temurin-build branch/tag (default: master)')
     parser.add_argument('--build-repo-url',
                         help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')
+    
+    # Configuration repository
+    parser.add_argument('--config-repo-url',
+                        default='https://github.com/adoptium/ci-temurin-config.git',
+                        help='Configuration repository URL (default: https://github.com/adoptium/ci-temurin-config.git)')
+    parser.add_argument('--config-repo-branch',
+                        default='main',
+                        help='Configuration repository branch (default: main)')
     
     # Workspace control
     parser.add_argument('--clean-workspace', action='store_true',

@@ -2,6 +2,26 @@
 
 This document provides ready-to-use templates for creating GitHub EPICs and issues to track the pipeline migration project.
 
+## Architecture Overview
+
+The new pipeline architecture separates code from configuration:
+
+- **ci-adoptium-pipelines** (Code Repository)
+  - Contains: Jenkinsfile.declarative, scripts/, tools/
+  - Purpose: Pipeline execution code (CI-agnostic where possible)
+  - Checked out via Jenkins SCM configuration
+
+- **ci-temurin-config** (Configuration Repository)
+  - Contains: configurations/ with JSON files
+  - Purpose: Temurin-specific build configurations
+  - Checked out via CONFIG_REPO_URL parameter
+
+This separation allows:
+- Vendors to maintain their own configuration repositories
+- Shared pipeline code across all vendors
+- Independent versioning of code and configurations
+- Easier testing and validation
+
 ---
 
 ## EPIC 1: Foundation Infrastructure
@@ -9,21 +29,23 @@ This document provides ready-to-use templates for creating GitHub EPICs and issu
 **Title**: Foundation Infrastructure for Modular Pipeline
 
 **Description**:
-Establish the foundational infrastructure needed to support the new modular pipeline architecture. This includes repository structure, conversion tools, testing framework, and comparison capabilities.
+Establish the foundational infrastructure needed to support the new modular pipeline architecture with code/config separation. This includes creating both repositories, implementing conversion tools, testing framework, and comparison capabilities.
 
 **Goals**:
-- Create new repository structure for modular scripts
+- Create ci-adoptium-pipelines repository (code)
+- Create ci-temurin-config repository (configurations)
 - Implement configuration conversion tool (Groovy → JSON)
 - Build comparison framework for validating builds
 - Set up parallel execution infrastructure
-- Create comparison dashboard
+- Update Jenkins jobs to use new SCM pattern
 
 **Success Criteria**:
-- [ ] Repository structure created and documented
+- [ ] Both repositories created and documented
 - [ ] Config conversion tool working for all platforms
+- [ ] All 20 JDK configurations converted to JSON
 - [ ] Build comparison tool can detect differences
 - [ ] Parallel execution jobs configured
-- [ ] Dashboard shows comparison results
+- [ ] Jenkins jobs updated to use SCM checkout pattern
 
 **Timeline**: Weeks 1-3
 **Priority**: P0 (Blocker)
@@ -31,56 +53,73 @@ Establish the foundational infrastructure needed to support the new modular pipe
 
 ---
 
-### Issue #1.1: Create New Repository Structure
+### Issue #1.1: Create Repository Structure
 
-**Title**: Create modular pipeline repository structure
+**Title**: Create ci-adoptium-pipelines and ci-temurin-config repositories
 
 **Description**:
-Create the new directory structure to house modular pipeline scripts, configurations, and tools.
+Create both repositories with proper structure to support code/config separation pattern.
 
 **Tasks**:
-- [ ] Create `pipelines/build/modular/` directory
-- [ ] Create `scripts/stages/` subdirectory
-- [ ] Create `scripts/lib/` subdirectory
-- [ ] Create `configurations/` subdirectory
-- [ ] Create `tools/` subdirectory
-- [ ] Add README.md files to each directory
-- [ ] Set up proper file permissions
+- [ ] Create ci-adoptium-pipelines repository
+  - [ ] Create `scripts/stages/` directory
+  - [ ] Create `scripts/lib/` directory
+  - [ ] Create `tools/` directory
+  - [ ] Add Jenkinsfile.declarative
+  - [ ] Add comprehensive README.md
+  - [ ] Add CONTRIBUTING.md
+  - [ ] Add CODE_CONFIG_SEPARATION.md
+- [ ] Create ci-temurin-config repository
+  - [ ] Create `configurations/` directory
+  - [ ] Add README.md
+  - [ ] Add .gitignore
+- [ ] Set up proper file permissions (scripts executable)
+- [ ] Configure branch protection rules
 
 **Acceptance Criteria**:
-- Directory structure matches design document
+- Both repositories created with proper structure
 - All directories have README files
-- File permissions are correct (scripts executable)
+- File permissions correct (scripts executable)
+- Documentation explains code/config separation
+- Branch protection configured
 
-**Estimated Effort**: 2 hours
+**Estimated Effort**: 4 hours
 **Priority**: P0
 **Labels**: `infrastructure`, `setup`
 **Assignee**: TBD
 
 ---
 
-### Issue #1.2: Implement Config Conversion Tool
+### Issue #1.2: Implement Config Conversion Tools
 
-**Title**: Create Groovy to JSON configuration converter
+**Title**: Create Python-based Groovy to JSON configuration converter
 
 **Description**:
-Implement the `convert-groovy-config-to-json.sh` tool that converts existing Groovy pipeline configurations to the new JSON format.
+Implement Python-based tools to convert existing Groovy pipeline configurations to the new JSON format. This includes both single-file and batch conversion capabilities.
 
 **Tasks**:
-- [ ] Create conversion script skeleton
-- [ ] Implement Groovy config parser
-- [ ] Implement JSON generator
-- [ ] Add validation logic
-- [ ] Create test cases for all platforms
-- [ ] Add error handling
-- [ ] Document usage
+- [ ] Create `convert-groovy-to-json.py` (single file converter)
+  - [ ] Implement custom Groovy parser
+  - [ ] Handle nested maps and lists
+  - [ ] Extract variant-specific configurations
+  - [ ] Format test arrays on single lines
+  - [ ] Add blank lines between platform sections
+- [ ] Create `convert-all-legacy-groovy-configs.py` (batch converter)
+  - [ ] Add CLI argument parsing
+  - [ ] Implement dry-run mode
+  - [ ] Add progress reporting
+  - [ ] Include error handling
+- [ ] Convert all 20 JDK configurations (jdk8u through jdk27)
+- [ ] Validate all generated JSON files
+- [ ] Document usage with examples
 
 **Acceptance Criteria**:
-- Converts all existing platform configs correctly
+- Converts all 20 platform configs correctly
 - Validates output JSON schema
 - Handles edge cases gracefully
-- Includes comprehensive tests
-- Documentation complete
+- Batch converter is user-friendly
+- All configurations committed to ci-temurin-config
+- Documentation complete with examples
 
 **Estimated Effort**: 1 week
 **Priority**: P0
