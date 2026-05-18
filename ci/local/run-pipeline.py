@@ -31,18 +31,38 @@ import subprocess
 import json
 from pathlib import Path
 from datetime import datetime
+from workspace_manager import WorkspaceManager
 
 
 class PipelineRunner:
     # Define stage order
-    STAGES = ['initialize', 'build', 'sign', 'installer', 'smoke-tests']
+    STAGES = ['initialize', 'build', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
     
     def __init__(self, args):
         self.args = args
-        self.workspace = Path(args.workspace).expanduser().resolve()
-        self.script_dir = Path(__file__).parent.resolve()
-        self.config_file = self.workspace / 'pipeline-config.json'
+        self.script_dir = Path(__file__).parent.parent.parent.resolve()  # Go up to ci-adoptium-pipelines root
+        
+        # Initialize workspace manager
+        pipeline_workspace = Path(args.workspace).expanduser().resolve()
+        config_file = pipeline_workspace / 'pipeline-config.json'
+        self.workspace_mgr = WorkspaceManager(pipeline_workspace, config_file)
+        
+        # Convenience properties for backward compatibility
+        self.pipeline_workspace = self.workspace_mgr.pipeline_workspace
+        self.stage_workspace = self.workspace_mgr.stage_workspace
+        self.artifacts_dir = self.workspace_mgr.artifacts_dir
+        self.workspace = self.pipeline_workspace
+        self.config_file = self.workspace_mgr.config_file
         self.build_number = args.build_number or f"local-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        
+        # Validate reproducible compare parameters
+        if args.compare_build:
+            if not args.scm_ref:
+                raise ValueError(
+                    "ERROR: --compare-build requires --scm-ref to be specified.\n"
+                    "The SCM reference is needed to download the production binary from Adoptium API.\n"
+                    "Example: --scm-ref jdk-21.0.2+13 --compare-build"
+                )
         
         # Determine which stages to run
         if args.start_from_stage:
@@ -54,7 +74,7 @@ class PipelineRunner:
             print(f"   Will run: {', '.join(self.stages_to_run)}")
         else:
             self.stages_to_run = self.STAGES.copy()
-        
+    
     def run(self):
         """Run the complete pipeline"""
         print("=" * 80)
@@ -64,16 +84,12 @@ class PipelineRunner:
         print(f"Build Number: {self.build_number}")
         print()
         
-        # Handle existing workspace
-        if self.workspace.exists():
-            if self.args.clean_workspace:
-                print(f"⚠️  Cleaning existing workspace: {self.workspace}")
-                import shutil
-                shutil.rmtree(self.workspace)
-                print("✅ Workspace cleaned")
-            else:
-                print(f"ℹ️  Using existing workspace: {self.workspace}")
-                print("   (Use --clean-workspace to start fresh)")
+        # Validate and setup workspace using WorkspaceManager
+        self.workspace_mgr.validate_and_setup(
+            is_restarting=self.args.start_from_stage is not None,
+            clean_requested=self.args.clean_workspace,
+            start_from_stage=self.args.start_from_stage
+        )
         
         try:
             # Stage 1: Initialize (generate configuration)
@@ -96,15 +112,21 @@ class PipelineRunner:
             if 'smoke-tests' in self.stages_to_run and self.args.enable_tests and not self.args.skip_build:
                 self.stage_smoke_tests()
             
+            # Stage 6: Reproducible Compare (if enabled)
+            if 'reproducible-compare' in self.stages_to_run and self.args.compare_build and not self.args.skip_build:
+                self.stage_reproducible_compare()
+            
             print()
             print("=" * 80)
             print("✅ Pipeline completed successfully!")
             print("=" * 80)
-            print(f"\n📦 All artifacts in: {self.workspace / 'workspace' / 'target'}")
+            print(f"\n📦 All artifacts in: {self.artifacts_dir}")
             print(f"   - JDK tarballs")
             print(f"   - Signed artifacts")
             print(f"   - Installers")
             print(f"   - Test results")
+            if self.args.compare_build:
+                print(f"   - Reproducible build comparison results")
             
             return 0
             
@@ -128,8 +150,8 @@ class PipelineRunner:
         print("STAGE 1: Initialize - Generate Configuration")
         print("=" * 80)
         
-        # Create workspace directory
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        # Pre-cleanup: Always clean stage_workspace before stage
+        self.workspace_mgr.cleanup_stage_workspace('pre')
         
         # Determine configuration directory
         if self.args.config_repo_url:
@@ -200,6 +222,8 @@ class PipelineRunner:
             cmd.append('--no-installers')
         if not self.args.enable_signer:
             cmd.append('--no-signer')
+        if self.args.ea_beta_build:
+            cmd.append('--ea-beta-build')
         
         print(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
@@ -215,6 +239,9 @@ class PipelineRunner:
         print("\nGenerated Configuration:")
         print(json.dumps(config, indent=2))
         print("\n✅ Initialize stage complete")
+        
+        # Post-stage cleanup (config now exists, so cleanup can read it)
+        self.workspace_mgr.cleanup_stage_workspace('post')
     
     def stage_build(self):
         """Stage 2: Build OpenJDK"""
@@ -222,28 +249,33 @@ class PipelineRunner:
         print("STAGE 2: Build OpenJDK")
         print("=" * 80)
         
-        # Use workspace/target as the shared artifact directory
-        target_dir = self.workspace / 'workspace' / 'target'
-        target_dir.mkdir(parents=True, exist_ok=True)
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
+        
+        # Ensure artifacts directory exists
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         
         env = os.environ.copy()
-        env['WORKSPACE'] = str(self.workspace)
+        env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(target_dir)  # Shared artifact directory
+        env['TARGET_DIR'] = str(self.artifacts_dir)
         
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '02-build.sh')]
         
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']}")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
         print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
         print(f"  BUILD_NUMBER={env['BUILD_NUMBER']}")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (shared artifact directory)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
         
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Build stage complete")
-        print(f"   Artifacts in: {target_dir}")
+        print(f"   Artifacts in: {self.artifacts_dir}")
+        
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
     
     def stage_sign(self):
         """Stage 3: Sign artifacts"""
@@ -251,24 +283,28 @@ class PipelineRunner:
         print("STAGE 3: Sign Artifacts")
         print("=" * 80)
         
-        # Use shared artifact directory
-        target_dir = self.workspace / 'workspace' / 'target'
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
         
         env = os.environ.copy()
-        env['WORKSPACE'] = str(self.workspace)
+        env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(target_dir)  # Shared artifact directory
+        env['TARGET_DIR'] = str(self.artifacts_dir)
         
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '06-sign.sh')]
         
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (shared artifact directory)")
-        print(f"  Note: Reads artifacts, signs them, writes back to same directory")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  Note: Reads artifacts, signs them, writes back to artifacts_dir")
         
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Sign stage complete")
+        
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
     
     def stage_installer(self):
         """Stage 4: Build installers"""
@@ -276,24 +312,28 @@ class PipelineRunner:
         print("STAGE 4: Build Installers")
         print("=" * 80)
         
-        # Use shared artifact directory
-        target_dir = self.workspace / 'workspace' / 'target'
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
         
         env = os.environ.copy()
-        env['WORKSPACE'] = str(self.workspace)
+        env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(target_dir)  # Shared artifact directory
+        env['TARGET_DIR'] = str(self.artifacts_dir)
         
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '07-installer.sh')]
         
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (shared artifact directory)")
-        print(f"  Note: Reads signed artifacts, creates installers in same directory")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  Note: Reads signed artifacts, creates installers in artifacts_dir")
         
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Installer stage complete")
+        
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
     
     def stage_smoke_tests(self):
         """Stage 5: Run smoke tests"""
@@ -301,24 +341,67 @@ class PipelineRunner:
         print("STAGE 5: Smoke Tests")
         print("=" * 80)
         
-        # Use shared artifact directory
-        target_dir = self.workspace / 'workspace' / 'target'
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
         
         env = os.environ.copy()
-        env['WORKSPACE'] = str(self.workspace)
+        env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(target_dir)  # Shared artifact directory
+        env['TARGET_DIR'] = str(self.artifacts_dir)
         
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '13-smoke-tests.sh')]
         
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (shared artifact directory)")
-        print(f"  Note: Reads JDK artifacts, writes test results to same directory")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  Note: Reads JDK artifacts, writes test results to artifacts_dir")
         
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Smoke tests complete")
+        
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
+    
+    def stage_reproducible_compare(self):
+        """Stage 6: Reproducible build comparison"""
+        print("\n" + "=" * 80)
+        print("STAGE 6: Reproducible Build Comparison")
+        print("=" * 80)
+        
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
+        
+        env = os.environ.copy()
+        env['WORKSPACE'] = str(self.stage_workspace)
+        env['CONFIG_FILE'] = str(self.config_file)
+        env['BUILD_NUMBER'] = self.build_number
+        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['SCM_REF'] = self.args.scm_ref
+        env['RELEASE'] = 'true' if self.args.release else 'false'
+        
+        # Optional: BUILD_REPO_URL and BUILD_REF
+        if self.args.build_repo_url:
+            env['BUILD_REPO_URL'] = self.args.build_repo_url
+        if self.args.build_ref:
+            env['BUILD_REF'] = self.args.build_ref
+        
+        cmd = [str(self.script_dir / 'scripts' / 'stages' / '20-reproducible-compare.sh')]
+        
+        print(f"Running: {' '.join(cmd)}")
+        print(f"Environment:")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  SCM_REF={env['SCM_REF']}")
+        print(f"  RELEASE={env['RELEASE']}")
+        print(f"  Note: Compares locally built JDK against production Adoptium binary")
+        
+        subprocess.run(cmd, env=env, check=True)
+        print("\n✅ Reproducible build comparison complete")
+        
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
 
 
 def main():
@@ -377,6 +460,16 @@ Examples:
       --architecture aarch64 \\
       --start-from-stage installer \\
       --no-tests
+
+  # Build with reproducible comparison
+  python3 run-pipeline.py \\
+      --jdk-version jdk21u \\
+      --variant temurin \\
+      --target-os mac \\
+      --architecture aarch64 \\
+      --scm-ref jdk-21.0.2+13 \\
+      --release \\
+      --compare-build
         """
     )
     
@@ -428,7 +521,7 @@ Examples:
     
     # Stage control
     parser.add_argument('--start-from-stage',
-                        choices=['initialize', 'build', 'sign', 'installer', 'smoke-tests'],
+                        choices=['initialize', 'build', 'sign', 'installer', 'smoke-tests', 'reproducible-compare'],
                         help='Start pipeline from a specific stage (skips earlier stages)')
     parser.add_argument('--skip-build', action='store_true',
                         help='Skip build stage (only generate configuration)')
@@ -438,6 +531,10 @@ Examples:
                         help='Disable installer building')
     parser.add_argument('--no-signer', dest='enable_signer', action='store_false',
                         help='Disable artifact signing')
+    parser.add_argument('--compare-build', action='store_true',
+                        help='Enable reproducible build comparison against production Adoptium binaries (requires --scm-ref)')
+    parser.add_argument('--ea-beta-build', action='store_true',
+                        help='Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
     
     parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
     

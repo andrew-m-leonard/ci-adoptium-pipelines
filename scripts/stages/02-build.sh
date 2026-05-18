@@ -48,10 +48,22 @@ main() {
     local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
     local variant=$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")
     local build_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.BUILD_ARGS" "")
+    local configure_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.CONFIGURE_ARGS" "")
     local scm_ref=$(get_config_value "${CONFIG_FILE}" ".refs.scmRef" "master")
     local build_ref=$(get_config_value "${CONFIG_FILE}" ".refs.buildRef" "master")
     local build_repo_url=$(get_config_value "${CONFIG_FILE}" ".refs.buildRepoUrl" "https://github.com/adoptium/temurin-build.git")
     local clean_workspace=$(get_config_bool "${CONFIG_FILE}" ".parameters.cleanWorkspace" "false")
+    local ea_beta_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.eaBetaBuild" "false")
+    
+    # If EA/Beta build is enabled, append --with-version-opt=ea to configure args
+    if [[ "${ea_beta_build}" == "true" ]]; then
+        if [[ -n "${configure_args}" ]]; then
+            configure_args="${configure_args} --with-version-opt=ea"
+        else
+            configure_args="--with-version-opt=ea"
+        fi
+        log_info "EA/Beta build enabled - added --with-version-opt=ea to configure args"
+    fi
     
     log_info "Build Configuration:"
     log_info "  Java Version: ${java_to_build}"
@@ -62,7 +74,9 @@ main() {
     log_info "  Build Repo URL: ${build_repo_url}"
     log_info "  Build Ref: ${build_ref}"
     log_info "  Build Args: ${build_args}"
+    log_info "  Configure Args: ${configure_args}"
     log_info "  Clean Workspace: ${clean_workspace}"
+    log_info "  EA/Beta Build: ${ea_beta_build}"
     
     # Setup build environment
     setup_build_environment
@@ -77,7 +91,7 @@ main() {
     prepare_output_dir "${TARGET_DIR}"
     
     # Execute build using build-farm/make-adopt-build-farm.sh
-    execute_build "${java_to_build}" "${target_os}" "${architecture}" "${variant}" "${build_args}"
+    execute_build "${java_to_build}" "${target_os}" "${architecture}" "${variant}" "${build_args}" "${scm_ref}" "${configure_args}"
     
     # Extract and save metadata
     extract_build_metadata
@@ -210,6 +224,8 @@ execute_build() {
     local arch=$3
     local variant=$4
     local build_args=$5
+    local scm_ref=$6
+    local configure_args=$7
     
     log_section "Executing JDK Build"
     
@@ -223,6 +239,8 @@ execute_build() {
     log_info "  Architecture: ${arch}"
     log_info "  Variant: ${variant}"
     log_info "  Build Args: ${build_args}"
+    log_info "  Configure Args: ${configure_args}"
+    log_info "  SCM Ref: ${scm_ref}"
     
     # Set build environment variables (matching Jenkins pipeline)
     export JAVA_TO_BUILD="${java_version}"
@@ -232,10 +250,11 @@ execute_build() {
     export BUILD_ARGS="${build_args}"
     export WORKSPACE="${WORKSPACE}"
     export BUILD_NUMBER="${BUILD_NUMBER}"
+    export SCM_REF="${scm_ref}"
+    export CONFIGURE_ARGS="${configure_args}"
     
     # Additional environment variables
     export FILENAME="${FILENAME:-}"
-    export CONFIGURE_ARGS="${CONFIGURE_ARGS:-}"
     export OVERRIDE_FILE_NAME_VERSION="${OVERRIDE_FILE_NAME_VERSION:-}"
     
     log_info "Environment variables set:"
@@ -244,8 +263,10 @@ execute_build() {
     log_debug "  ARCHITECTURE=${ARCHITECTURE}"
     log_debug "  VARIANT=${VARIANT}"
     log_debug "  BUILD_ARGS=${BUILD_ARGS}"
+    log_debug "  CONFIGURE_ARGS=${CONFIGURE_ARGS}"
     log_debug "  WORKSPACE=${WORKSPACE}"
     log_debug "  BUILD_NUMBER=${BUILD_NUMBER}"
+    log_debug "  SCM_REF=${SCM_REF}"
     log_debug "  JAVA_HOME=${JAVA_HOME:-not set}"
     
     log_info "Starting build at $(date)"

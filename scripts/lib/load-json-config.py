@@ -105,6 +105,7 @@ def load_configuration(args):
     enable_tests = args.enable_tests
     enable_installers = args.enable_installers
     enable_signer = args.enable_signer
+    ea_beta_build = args.ea_beta_build
     
     print(f"Loading configuration for: {jdk_version} {variant} {target_os} {architecture}")
     
@@ -168,8 +169,8 @@ def load_configuration(args):
             'enableTests': enable_tests,
             'enableInstallers': enable_installers,
             'enableSigner': enable_signer,
-            'cleanWorkspace': True,
-            'cleanWorkspaceAfter': platform_config.get('cleanWorkspaceAfterBuild', False)
+            'cleanWorkspaceAfterStage': platform_config.get('cleanWorkspaceAfterBuild', True),
+            'eaBetaBuild': ea_beta_build
         },
         'refs': {
             'scmRef': scm_ref,
@@ -256,7 +257,8 @@ Examples:
     parser.add_argument('--no-tests', dest='enable_tests', action='store_false', help='Disable tests')
     parser.add_argument('--no-installers', dest='enable_installers', action='store_false', help='Disable installers')
     parser.add_argument('--no-signer', dest='enable_signer', action='store_false', help='Disable signing')
-    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
+    parser.add_argument('--ea-beta-build', dest='ea_beta_build', action='store_true', help='Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
+    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True, ea_beta_build=False)
     
     args = parser.parse_args()
     

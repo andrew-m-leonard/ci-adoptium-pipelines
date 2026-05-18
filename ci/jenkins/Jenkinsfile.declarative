@@ -80,9 +80,14 @@ pipeline {
             description: 'Run TCK tests (Temurin only, release/weekly builds)'
         )
         booleanParam(
-            name: 'CLEAN_WORKSPACE',
+            name: 'CLEAN_WORKSPACE_AFTER_STAGE',
             defaultValue: true,
-            description: 'Clean workspace before build'
+            description: 'Clean workspace after each stage (recommended for disk space management)'
+        )
+        booleanParam(
+            name: 'EA_BETA_BUILD',
+            defaultValue: false,
+            description: 'Enable EA/Beta build (adds --with-version-opt=ea to configure args)'
         )
         string(
             name: 'SCM_REF',
@@ -131,20 +136,23 @@ pipeline {
                 script {
                     echo "=== Initializing Build ==="
                     
-                    // Verify ci-adoptium-pipelines repository structure
-                    // This repository should be checked out via Jenkins SCM configuration
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
+                    // Verify repository structure
                     sh '''
                         echo "Verifying ci-adoptium-pipelines repository structure..."
                         
                         if [ ! -d "scripts" ]; then
                             echo "ERROR: scripts/ directory not found"
-                            echo "Please ensure ci-adoptium-pipelines is checked out via Jenkins SCM configuration"
                             exit 1
                         fi
                         
                         if [ ! -d "tools" ]; then
                             echo "ERROR: tools/ directory not found"
-                            echo "Please ensure ci-adoptium-pipelines is checked out via Jenkins SCM configuration"
                             exit 1
                         fi
                         
@@ -212,6 +220,9 @@ pipeline {
                     if (!params.ENABLE_SIGNER) {
                         pythonArgs.add("--no-signer")
                     }
+                    if (params.EA_BETA_BUILD) {
+                        pythonArgs.add("--ea-beta-build")
+                    }
                     
                     // Load JSON configuration and generate pipeline config
                     sh """
@@ -241,6 +252,11 @@ pipeline {
                     echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
                     echo "  Tests: ${config.buildConfig.TEST_LIST}"
                     echo "=== Initialization Complete ==="
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                 }
             }
         }
@@ -252,6 +268,12 @@ pipeline {
             steps {
                 script {
                     echo "=== Building JDK ==="
+                    
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
                     
                     // Retrieve configuration
                     copyArtifacts(
@@ -266,6 +288,11 @@ pipeline {
                     // Execute build stage script
                     def buildScript = load 'scripts/stages/02-build.groovy'
                     buildScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Build Complete ==="
                 }
@@ -294,6 +321,12 @@ pipeline {
                 script {
                     echo "=== Internal Signing (JMOD) ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve configuration and build outputs
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -307,6 +340,11 @@ pipeline {
                     // Execute internal sign script
                     def signScript = load 'scripts/stages/03-internal-sign.groovy'
                     signScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Internal Signing Complete ==="
                 }
@@ -335,6 +373,12 @@ pipeline {
                 script {
                     echo "=== Assembling Final Build ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve signed JMODs and configuration
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -348,6 +392,11 @@ pipeline {
                     // Execute assemble script
                     def assembleScript = load 'scripts/stages/04-assemble.groovy'
                     assembleScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Assembly Complete ==="
                 }
@@ -378,9 +427,15 @@ pipeline {
                     
                     def config = readJSON file: 'pipeline-config.json'
                     
+                    // Pre-stage cleanup
+                    cleanupWorkspace('sign', 'pre')
+                    
                     // Execute sign script
                     def signScript = load 'scripts/stages/06-sign.groovy'
                     signScript(config)
+                    
+                    // Post-stage cleanup
+                    cleanupWorkspace('sign', 'post')
                     
                     echo "=== Artifact Signing Complete ==="
                 }
@@ -401,6 +456,12 @@ pipeline {
                 script {
                     echo "=== Building Installers ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve signed artifacts
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -414,6 +475,11 @@ pipeline {
                     // Execute installer build script
                     def installerScript = load 'scripts/stages/07-installer.groovy'
                     installerScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Installer Build Complete ==="
                 }
@@ -440,6 +506,12 @@ pipeline {
                 script {
                     echo "=== Signing Installers ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve installers
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -453,6 +525,11 @@ pipeline {
                     // Execute installer sign script
                     def signInstallerScript = load 'scripts/stages/08-sign-installer.groovy'
                     signInstallerScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Installer Signing Complete ==="
                 }
@@ -482,6 +559,12 @@ pipeline {
                 script {
                     echo "=== GPG Signing ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve all artifacts to sign
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -501,6 +584,11 @@ pipeline {
                         echo "=== SBOM JSF Signing ==="
                         def sbomSignScript = load 'scripts/stages/10-sbom-sign.groovy'
                         sbomSignScript(config)
+                    }
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
                     }
                     
                     echo "=== GPG Signing Complete ==="
@@ -531,6 +619,12 @@ pipeline {
                 script {
                     echo "=== Verifying Signatures ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve signed artifacts
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -544,6 +638,11 @@ pipeline {
                     // Execute verify script
                     def verifyScript = load 'scripts/stages/11-verify-signing.groovy'
                     verifyScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== Signature Verification Complete ==="
                 }
@@ -564,6 +663,12 @@ pipeline {
                 script {
                     echo "=== Validating SBOM ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve SBOM files
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -580,6 +685,11 @@ pipeline {
                     
                     if (result != 'SUCCESS') {
                         error("SBOM validation failed")
+                    }
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
                     }
                     
                     echo "=== SBOM Validation Complete ==="
@@ -606,6 +716,12 @@ pipeline {
                 script {
                     echo "=== Running Smoke Tests ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve JDK binary
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -631,6 +747,11 @@ pipeline {
                     if (result != 'SUCCESS') {
                         currentBuild.result = 'UNSTABLE'
                         echo "WARNING: Smoke tests failed - AQA tests will be skipped"
+                    }
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
                     }
                     
                     echo "=== Smoke Tests Complete ==="
@@ -669,6 +790,12 @@ pipeline {
                 script {
                     echo "=== Running AQA Tests ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve JDK binary
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -682,6 +809,11 @@ pipeline {
                     // Execute AQA test script
                     def aqaTestScript = load 'scripts/stages/14-aqa-tests.groovy'
                     aqaTestScript(config)
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
                     
                     echo "=== AQA Tests Complete ==="
                 }
@@ -733,6 +865,12 @@ pipeline {
                 script {
                     echo "=== Running TCK Tests ==="
                     
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
                     // Retrieve JDK binary
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -747,6 +885,11 @@ pipeline {
                     def tckTestScript = load 'scripts/stages/15-tck-tests.groovy'
                     tckTestScript(config)
                     
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
+                    
                     echo "=== TCK Tests Complete ==="
                 }
             }
@@ -758,17 +901,17 @@ pipeline {
             script {
                 echo "=== Pipeline Cleanup ==="
                 
-                // Cleanup workspace if requested
-                try {
-                    def config = readJSON file: 'pipeline-config.json'
-                    if (config.parameters.cleanWorkspaceAfter) {
+                // Final cleanup: Clean entire workspace if CLEAN_WORKSPACE_AFTER_STAGE=true
+                // Note: Individual stages already perform their own post-cleanup
+                if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                    try {
                         node(getNodeLabel()) {
-                            echo "Cleaning workspace..."
+                            echo "Final workspace cleanup..."
                             cleanWs notFailBuild: true, deleteDirs: true
                         }
+                    } catch (Exception e) {
+                        echo "Final cleanup skipped: ${e.message}"
                     }
-                } catch (Exception e) {
-                    echo "Cleanup skipped: ${e.message}"
                 }
             }
         }
