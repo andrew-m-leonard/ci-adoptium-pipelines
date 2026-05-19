@@ -1,8 +1,51 @@
-# repro_compare.sh Integration Summary
+# Reproducible Build Comparison Integration
 
 ## Overview
 
-This document summarizes the integration of the existing `temurin-build/tooling/reproducible/repro_compare.sh` tool into the pipeline migration validation workflow.
+This document describes the integration of reproducible build comparison into the CI Adoptium Pipelines. The system uses the existing `temurin-build/tooling/reproducible/repro_compare.sh` tool to validate that builds are reproducible by comparing locally built JDKs against production Adoptium binaries.
+
+## Two Use Cases
+
+### 1. Local Pipeline Runner (`--compare-build`)
+
+The local pipeline runner (`ci/local/run-pipeline.py`) includes a `--compare-build` option that enables automatic reproducible build comparison as part of the pipeline execution.
+
+**Usage**:
+```bash
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21u \
+    --variant temurin \
+    --target-os mac \
+    --architecture aarch64 \
+    --scm-ref jdk-21.0.2+13 \
+    --release \
+    --compare-build
+```
+
+**What It Does**:
+1. Builds the JDK locally using the specified parameters
+2. Downloads the corresponding production Adoptium binary using the SCM reference
+3. Runs `repro_compare.sh` to compare the two builds
+4. Stores comparison results in the artifacts directory
+5. Reports success/failure based on reproducibility
+
+**Requirements**:
+- `--scm-ref` must be specified (used to download production binary from Adoptium API)
+- `--release` is recommended for comparing against official releases
+- Stage script: `scripts/stages/20-reproducible-compare.sh`
+
+**Output Location**:
+```
+${WORKSPACE}/artifacts/
+├── reproducible-compare/
+│   ├── reprotest.diff              # List of different files
+│   ├── reproducible_evidence.log  # Detailed comparison log
+│   └── ReproduciblePercent        # Percentage match metric
+```
+
+### 2. Migration Validation Workflow
+
+During migration from the old pipeline to the new pipeline, reproducible comparison validates that both pipelines produce identical builds.
 
 ## What Changed
 
@@ -113,7 +156,52 @@ For migration approval, builds must achieve:
 
 ## Integration Points
 
-### Jenkins Pipeline
+### Local Pipeline Runner
+
+**Stage Implementation**: `scripts/stages/20-reproducible-compare.sh`
+
+```bash
+#!/bin/bash
+# Stage 20: Reproducible Build Comparison
+# Compares locally built JDK against production Adoptium binary
+
+# Environment variables:
+# - WORKSPACE: Stage workspace directory
+# - TARGET_DIR: Artifacts directory (contains locally built JDK)
+# - SCM_REF: Source code reference (e.g., jdk-21.0.2+13)
+# - RELEASE: true/false
+# - CONFIG_FILE: Pipeline configuration
+
+# 1. Download production binary from Adoptium API using SCM_REF
+# 2. Extract both builds
+# 3. Run repro_compare.sh
+# 4. Store results in TARGET_DIR/reproducible-compare/
+```
+
+**Command Line Usage**:
+```bash
+# Full build with reproducible comparison
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21u \
+    --variant temurin \
+    --target-os mac \
+    --architecture aarch64 \
+    --scm-ref jdk-21.0.2+13 \
+    --release \
+    --compare-build
+
+# Resume from comparison stage only
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21u \
+    --variant temurin \
+    --target-os mac \
+    --architecture aarch64 \
+    --scm-ref jdk-21.0.2+13 \
+    --start-from-stage reproducible-compare
+```
+
+### Jenkins Pipeline (Migration Validation)
+
 ```groovy
 stage('Compare Builds') {
     steps {
@@ -132,13 +220,20 @@ stage('Compare Builds') {
 }
 ```
 
-### Validation Workflow
+### Migration Validation Workflow
 1. Old pipeline builds JDK → archives artifact
 2. New pipeline builds JDK → archives artifact
 3. Comparison stage extracts both builds
 4. `repro_compare.sh` compares builds
 5. Results archived and displayed on dashboard
 6. Migration proceeds only if 100% reproducible
+
+### Local Testing Workflow
+1. Local pipeline builds JDK with `--compare-build`
+2. Stage downloads production binary from Adoptium API
+3. `repro_compare.sh` compares local build vs production
+4. Results stored in artifacts directory
+5. Pipeline reports success/failure
 
 ## Platform Support
 
@@ -154,24 +249,62 @@ stage('Compare Builds') {
 | Windows x86-32 | ✅ Supported (CYGWIN) | Ready |
 | AIX ppc64 | ⚠️ Check support | TBD |
 
+## Command Line Reference
+
+### Local Pipeline Runner
+
+```bash
+# Required for --compare-build
+--compare-build              # Enable reproducible build comparison
+--scm-ref <ref>             # SCM reference (e.g., jdk-21.0.2+13) - REQUIRED with --compare-build
+
+# Example: Compare local build against production
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21u \
+    --variant temurin \
+    --target-os mac \
+    --architecture aarch64 \
+    --scm-ref jdk-21.0.2+13 \
+    --release \
+    --compare-build
+```
+
+### Stage Script
+
+```bash
+# Direct execution of comparison stage
+export WORKSPACE=/path/to/stage_workspace
+export TARGET_DIR=/path/to/artifacts
+export CONFIG_FILE=/path/to/pipeline-config.json
+export SCM_REF=jdk-21.0.2+13
+export RELEASE=true
+
+./scripts/stages/20-reproducible-compare.sh
+```
+
 ## References
 
 - **Tool Location**: `temurin-build/tooling/reproducible/repro_compare.sh`
 - **Documentation**: `temurin-build/tooling/reproducible/README.md`
-- **Migration Plan**: `refactored_pipeline_examples/MIGRATION_PLAN.md` (Appendix A)
-- **Visual Guide**: `refactored_pipeline_examples/MIGRATION_VISUAL_GUIDE.md` (Appendix)
-- **GitHub Issues**: `refactored_pipeline_examples/GITHUB_EPICS_AND_ISSUES.md` (Issue #1.3)
+- **Stage Script**: `scripts/stages/20-reproducible-compare.sh`
+- **Local Runner**: `ci/local/run-pipeline.py` (see `--compare-build` option)
+- **Migration Plan**: `MIGRATION_PLAN.md` (Appendix A)
+- **Visual Guide**: `MIGRATION_VISUAL_GUIDE.md` (Appendix)
+- **GitHub Issues**: `GITHUB_EPICS_AND_ISSUES.md` (Issue #1.3)
 
-## Next Steps
+## Implementation Status
 
-1. ✅ Documentation updated with repro_compare.sh integration
-2. ⏭️ Create wrapper scripts for automated comparison
-3. ⏭️ Integrate into parallel execution Jenkins jobs
-4. ⏭️ Set up comparison dashboard
-5. ⏭️ Test with pilot platform (Linux x64)
+1. ✅ `--compare-build` option added to local pipeline runner
+2. ✅ Stage script `20-reproducible-compare.sh` implemented
+3. ✅ Integration with Adoptium API for downloading production binaries
+4. ✅ Automatic comparison as part of pipeline execution
+5. ✅ Results stored in artifacts directory
+6. ⏭️ Jenkins integration for migration validation
+7. ⏭️ Comparison dashboard
+8. ⏭️ Automated alerting
 
 ---
 
-*Document Version: 1.0*  
-*Created: 2026-05-12*  
-*Purpose: Track repro_compare.sh integration into migration workflow*
+*Document Version: 2.0*
+*Last Updated: 2026-05-19*
+*Purpose: Document reproducible build comparison integration in CI Adoptium Pipelines*
