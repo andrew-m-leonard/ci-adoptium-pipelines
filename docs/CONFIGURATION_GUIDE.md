@@ -30,9 +30,11 @@ Input Parameters          Configuration Files              Generated Output
 
 ### Location
 
-Configuration files are stored in:
+Configuration files are stored in a **separate repository** from the pipeline code:
+
+**Configuration Repository** (e.g., `ci-temurin-config/`):
 ```
-refactored_pipeline_examples/configurations/
+ci-temurin-config/configurations/
 ├── jdk8u_pipeline_config.json
 ├── jdk11u_pipeline_config.json
 ├── jdk17u_pipeline_config.json
@@ -40,6 +42,20 @@ refactored_pipeline_examples/configurations/
 ├── jdk22u_pipeline_config.json
 └── ...
 ```
+
+**Pipeline Code Repository** (`ci-adoptium-pipelines/`):
+```
+ci-adoptium-pipelines/
+├── ci/
+│   ├── jenkins/Jenkinsfile.declarative
+│   └── local/run-pipeline.py
+├── scripts/
+│   ├── lib/load-json-config.py
+│   └── stages/
+└── docs/
+```
+
+This separation enables vendor independence and allows different organizations to maintain their own configurations while using the same pipeline code.
 
 ### Structure
 

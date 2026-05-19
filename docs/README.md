@@ -48,6 +48,13 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 - **[MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md)** - Visual guide for migration
 - **[GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md)** - GitHub epics and issues tracking
 
+### Tools & Utilities
+
+- **[Tools Documentation](../tools/README.md)** - ⭐ **NEW** Configuration conversion and workspace management tools
+  - Groovy-to-JSON conversion tools
+  - Batch conversion utilities
+  - Workspace cleanup utilities
+
 ### Testing
 
 - **[TEST_BUILD_UID_GUIDE.md](./TEST_BUILD_UID_GUIDE.md)** - Guide for testing with build UIDs
@@ -77,12 +84,25 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 2. Review [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)
 3. Check [STAGE_INPUT_STRATEGY.md](./STAGE_INPUT_STRATEGY.md)
 
+#### Convert Legacy Configurations
+1. Read [Tools Documentation](../tools/README.md) for conversion tools
+2. Use `convert-groovy-config-to-json.sh` for single file conversion
+3. Use `convert-all-legacy-groovy-configs.py` for batch conversion
+4. Validate converted JSON with pipeline runner
+
 #### Migrate from Old Pipeline
 1. Start with [MIGRATION_PLAN.md](./MIGRATION_PLAN.md)
 2. Use [MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md) for visual reference
 3. Track progress with [GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md)
 
 ## 📝 Recent Updates
+
+### 2026-05-19
+- ⭐ **NEW**: [Tools Documentation](../tools/README.md) - Comprehensive documentation for pipeline tools
+  - Configuration conversion tools (Groovy to JSON)
+  - Batch conversion utilities
+  - Workspace management tools
+  - Migration workflow guide
 
 ### 2026-05-18
 - ⭐ **NEW**: [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) - Local runner workspace/artifacts separation
@@ -94,6 +114,10 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
   - Removed custom cleanup helper function
   - Updated all 12 pipeline stages
   - Improved restartability and reliability
+- **UPDATED**: Multiple documentation files to reflect current architecture
+  - Repository separation (ci-adoptium-pipelines vs ci-temurin-config)
+  - Current directory structure
+  - Two-directory workspace architecture
 
 ## 🤝 Contributing
 

@@ -214,37 +214,67 @@ exit 0
 
 ## Directory Structure
 
+### ci-adoptium-pipelines Repository (Pipeline Code)
 ```
-ci-jenkins-pipelines/
-├── pipelines/
-│   └── build/
-│       └── common/
-│           ├── Jenkinsfile.declarative          # Jenkins orchestration
-│           ├── .gitlab-ci.yml                   # GitLab orchestration
-│           ├── .github/
-│           │   └── workflows/
-│           │       └── build.yml                # GitHub Actions orchestration
-│           └── scripts/
-│               ├── stages/                      # CI-agnostic stage scripts
-│               │   ├── 01-initialize.sh
-│               │   ├── 02-build.sh
-│               │   ├── 03-internal-sign.sh
-│               │   ├── 04-assemble.sh
-│               │   ├── 06-sign.sh
-│               │   ├── 07-installer.sh
-│               │   ├── 08-sign-installer.sh
-│               │   ├── 09-gpg-sign.sh
-│               │   ├── 10-sbom-sign.sh
-│               │   ├── 11-verify-signing.sh
-│               │   ├── 12-validate-sbom.sh
-│               │   ├── 13-smoke-tests.sh
-│               │   ├── 14-aqa-tests.sh
-│               │   └── 15-tck-tests.sh
-│               └── lib/                         # Shared utilities
-│                   ├── artifact-utils.sh
-│                   ├── config-utils.sh
-│                   └── logging-utils.sh
+ci-adoptium-pipelines/
+├── ci/                                          # CI-specific orchestration
+│   ├── jenkins/
+│   │   ├── Jenkinsfile.declarative             # Jenkins declarative pipeline
+│   │   ├── TEST_BUILD_UID.Jenkinsfile          # Test build UID pipeline
+│   │   └── README.md
+│   ├── local/
+│   │   ├── run-pipeline.py                     # Local pipeline runner
+│   │   ├── workspace_manager.py                # Workspace management module
+│   │   └── README.md
+│   └── README.md
+├── scripts/                                     # CI-agnostic stage scripts
+│   ├── stages/
+│   │   ├── 01-initialize.sh                    # Generate configuration
+│   │   ├── 02-build.sh                         # Build OpenJDK
+│   │   ├── 02-build.groovy                     # (Legacy Groovy version)
+│   │   ├── 03-internal-sign.groovy             # (Legacy Groovy version)
+│   │   ├── 06-sign.sh                          # Sign artifacts
+│   │   ├── 07-installer.sh                     # Build installers
+│   │   ├── 13-smoke-tests.sh                   # Run smoke tests
+│   │   ├── 13-smoke-tests.groovy               # (Legacy Groovy version)
+│   │   └── 20-reproducible-compare.sh          # Reproducible build comparison
+│   └── lib/                                     # Shared utilities
+│       ├── artifact-utils.sh                    # Artifact management
+│       ├── config-utils.sh                      # Configuration utilities
+│       ├── load-json-config.py                  # JSON config loader
+│       ├── logging-utils.sh                     # Logging utilities
+│       └── workspace-cleanup.sh                 # Workspace cleanup
+├── docs/                                        # Documentation
+│   ├── CI_AGNOSTIC_ARCHITECTURE.md             # This file
+│   ├── JENKINS_CLEANUP_REFACTORING.md
+│   ├── LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md
+│   ├── RESTARTABILITY_GUIDE.md
+│   └── (other documentation files)
+├── tools/                                       # Helper tools
+│   └── convert-groovy-config-to-json.sh
+├── CONTRIBUTING.md
+└── README.md
 ```
+
+### ci-temurin-config Repository (Vendor Configurations - Separate Repo)
+```
+ci-temurin-config/
+├── configurations/                              # JSON configuration files
+│   ├── jdk8u_pipeline_config.json
+│   ├── jdk11u_pipeline_config.json
+│   ├── jdk17u_pipeline_config.json
+│   ├── jdk21u_pipeline_config.json
+│   ├── jdk22u_pipeline_config.json
+│   ├── jdk23u_pipeline_config.json
+│   └── jdk_pipeline_config.json
+├── .gitignore
+└── README.md
+```
+
+**Note**: The configuration repository is cloned at runtime by the pipeline. This separation allows:
+- Pipeline code (ci-adoptium-pipelines) to be vendor-agnostic
+- Vendor-specific configurations (ci-temurin-config) to be maintained separately
+- Different vendors to maintain their own configuration repositories
 
 ## Shell Script Template
 

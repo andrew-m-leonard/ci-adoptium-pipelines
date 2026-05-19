@@ -5,10 +5,10 @@ The `run-pipeline.py` script allows you to run the complete OpenJDK build pipeli
 ## Quick Start
 
 ```bash
-cd /Users/anleonar/workspace/bob/refactored_pipeline_examples
+cd ci-adoptium-pipelines
 
 # Run full pipeline
-./run-pipeline.py \
+./ci/local/run-pipeline.py \
     --jdk-version jdk21u \
     --variant temurin \
     --target-os mac \

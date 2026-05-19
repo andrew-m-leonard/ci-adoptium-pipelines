@@ -9,44 +9,49 @@ The pipeline uses a clear separation between workspace (ephemeral, stage-specifi
 ### Local Execution (run-pipeline.py)
 
 ```
-${WORKSPACE}/
-├── workspace/              # Ephemeral workspace (cleaned before each stage)
-│   ├── build/             # Build stage workspace
-│   ├── sign/              # Sign stage workspace
-│   ├── installer/         # Installer stage workspace
-│   ├── test-results/      # Test stage workspace
-│   └── reproducible-compare/  # Comparison workspace
+${WORKSPACE}/                    # Base workspace directory
+├── stage_workspace/             # Ephemeral workspace (cleaned before/after each stage)
+│   └── [stage-specific files]  # Temporary files, cloned repos, build outputs
 │
-├── artifacts/             # Persistent artifacts (never auto-cleaned)
-│   ├── jdk/              # Built JDK tarballs
-│   ├── signed/           # Signed artifacts
-│   ├── installers/       # Built installers
-│   ├── metadata/         # Build metadata, SBOMs
-│   └── test-results/     # Test results and reports
+├── artifacts/                   # Persistent artifacts (never auto-cleaned)
+│   ├── jdk/                    # Built JDK tarballs
+│   ├── signed/                 # Signed artifacts
+│   ├── installers/             # Built installers
+│   ├── metadata/               # Build metadata, SBOMs
+│   ├── test-results/           # Test results and reports
+│   └── build-uid.txt           # Workspace validation marker
 │
-├── config-repo/          # Cloned configuration repository
-└── pipeline-config.json  # Generated pipeline configuration
+├── config-repo/                # Cloned configuration repository
+└── pipeline-config.json        # Generated pipeline configuration
 ```
+
+**Key Points**:
+- `stage_workspace/` is cleaned before and optionally after each stage
+- `artifacts/` persists across all stages and is never auto-cleaned
+- Each stage uses `stage_workspace/` for WORKSPACE and `artifacts/` for TARGET_DIR
+- `build-uid.txt` in artifacts/ validates workspace integrity
 
 **Note**: The `artifacts/` directory is specific to local execution. Jenkins uses `archiveArtifacts` and `copyArtifacts` for artifact management instead of a local directory.
 
 ### Jenkins Execution
 
 ```
-${WORKSPACE}/
-├── workspace/              # Ephemeral workspace (cleaned before each stage)
-│   ├── build/             # Build stage workspace
-│   ├── sign/              # Sign stage workspace
-│   ├── installer/         # Installer stage workspace
-│   ├── test-results/      # Test stage workspace
-│   └── reproducible-compare/  # Comparison workspace
+${WORKSPACE}/                    # Jenkins workspace directory
+├── stage_workspace/             # Ephemeral workspace (cleaned via cleanWs())
+│   └── [stage-specific files]  # Temporary files, cloned repos, build outputs
 │
-├── config-repo/          # Cloned configuration repository
-└── pipeline-config.json  # Generated pipeline configuration
+├── config-repo/                # Cloned configuration repository
+└── pipeline-config.json        # Generated pipeline configuration
 
 # Artifacts managed by Jenkins archiveArtifacts/copyArtifacts
 # (not stored in workspace directory)
 ```
+
+**Key Points**:
+- Jenkins uses native `cleanWs()` utility for workspace cleanup
+- Artifacts are managed through Jenkins' artifact system, not local directories
+- Each stage cleans workspace before execution using `cleanWs()`
+- Optional post-stage cleanup controlled by `CLEAN_WORKSPACE_AFTER_STAGE` parameter
 
 ## Key Principles
 
@@ -86,13 +91,23 @@ ${WORKSPACE}/
 
 Every stage follows this pattern:
 
+**Local Execution (run-pipeline.py)**:
 ```
-1. Clean workspace (always)
-2. Retrieve artifacts from previous stages (if needed)
+1. Validate workspace (check build-uid.txt)
+2. Clean stage_workspace/ (always)
+3. Retrieve artifacts from artifacts/ directory (if needed)
+4. Execute stage logic in stage_workspace/
+5. Copy outputs to artifacts/ directory
+6. Optionally clean stage_workspace/ (if cleanWorkspaceAfterStage=true)
+```
+
+**Jenkins Execution**:
+```
+1. Clean workspace with cleanWs() (always, before stage)
+2. Retrieve artifacts using copyArtifacts (if needed)
 3. Execute stage logic in workspace
-4. Copy outputs to artifacts directory
-5. Archive artifacts (Jenkins) or keep in artifacts/ (local)
-6. Optionally clean workspace (if cleanWorkspaceAfterStage=true)
+4. Archive outputs using archiveArtifacts
+5. Optionally clean workspace with cleanWs() (if CLEAN_WORKSPACE_AFTER_STAGE=true)
 ```
 
 ## Configuration

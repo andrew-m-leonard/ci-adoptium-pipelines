@@ -19,11 +19,24 @@ The Adoptium CI Pipelines architecture implements a strict separation between **
 │                    CODE REPOSITORY                               │
 │         github.com/adoptium/ci-adoptium-pipelines                │
 │                                                                  │
+│  ├── ci/                         # CI orchestration              │
+│  │   ├── jenkins/                # Jenkins-specific              │
+│  │   │   └── Jenkinsfile.declarative                            │
+│  │   └── local/                  # Local runner                 │
+│  │       ├── run-pipeline.py                                    │
+│  │       └── workspace_manager.py                               │
 │  ├── scripts/                    # Pipeline implementation       │
 │  │   ├── lib/                    # Shared utilities             │
+│  │   │   ├── config-utils.sh                                    │
+│  │   │   ├── logging-utils.sh                                   │
+│  │   │   ├── artifact-utils.sh                                  │
+│  │   │   └── load-json-config.py                                │
 │  │   └── stages/                 # Stage scripts                │
-│  ├── Jenkinsfile.declarative     # Pipeline orchestration       │
-│  ├── run-pipeline.py             # Local testing tool           │
+│  │       ├── 01-initialize.sh                                   │
+│  │       ├── 02-build.sh                                        │
+│  │       └── ...                                                │
+│  ├── tools/                      # Development utilities         │
+│  │   └── workspace-cleanup.sh                                   │
 │  └── docs/                       # Documentation                │
 │                                                                  │
 │  NO CONFIGURATION DATA HERE                                      │
@@ -31,13 +44,14 @@ The Adoptium CI Pipelines architecture implements a strict separation between **
                               ↓ loads from
 ┌─────────────────────────────────────────────────────────────────┐
 │                  CONFIG REPOSITORY                               │
-│         github.com/adoptium/ci-jenkins-pipelines                 │
-│         (or vendor-specific private repository)                  │
+│         github.com/adoptium/ci-temurin-config                    │
+│         (or other vendor-specific repository)                    │
 │                                                                  │
 │  └── configurations/             # JSON configuration files      │
-│      ├── jdk21u_pipeline_config.json                            │
-│      ├── jdk17u_pipeline_config.json                            │
+│      ├── jdk8u_pipeline_config.json                             │
 │      ├── jdk11u_pipeline_config.json                            │
+│      ├── jdk17u_pipeline_config.json                            │
+│      ├── jdk21u_pipeline_config.json                            │
 │      └── ...                                                     │
 │                                                                  │
 │  ONLY CONFIGURATION DATA HERE                                    │
@@ -56,12 +70,12 @@ The `Jenkinsfile.declarative` accepts two parameters to specify the configuratio
 parameters {
     string(
         name: 'CONFIG_REPO_URL',
-        defaultValue: 'https://github.com/adoptium/ci-jenkins-pipelines.git',
+        defaultValue: 'https://github.com/adoptium/ci-temurin-config.git',
         description: 'Git repository URL containing pipeline configurations (JSON files)'
     )
     string(
         name: 'CONFIG_REPO_BRANCH',
-        defaultValue: 'master',
+        defaultValue: 'main',
         description: 'Branch/tag to checkout from configuration repository'
     )
 }

@@ -83,39 +83,53 @@ See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for detailed visual
 
 ### Directory Structure
 
+**Pipeline Code Repository** (`ci-adoptium-pipelines/`):
 ```
-ci-adoptium-pipelines/
+ci-adoptium-pipelines/           # Pipeline implementation (vendor-agnostic)
 ├── ci/                          # Layer 3: CI Integration
-│   ├── jenkins/                 # Jenkins-specific files
+│   ├── jenkins/                 # Jenkins-specific orchestration
 │   │   └── Jenkinsfile.declarative
-│   ├── local/                   # Local execution tools
-│   │   └── run-pipeline.py
-│   └── README.md
+│   └── local/                   # Local execution tools
+│       ├── run-pipeline.py      # Local pipeline runner
+│       └── workspace_manager.py # Workspace validation/cleanup
 │
 ├── scripts/                     # Layer 2: Build Logic (CI-Agnostic)
 │   ├── lib/                     # Shared utilities
-│   │   ├── config-utils.sh
-│   │   ├── logging-utils.sh
-│   │   ├── artifact-utils.sh
-│   │   └── load-json-config.py
+│   │   ├── config-utils.sh      # Configuration helpers
+│   │   ├── logging-utils.sh     # Logging utilities
+│   │   ├── artifact-utils.sh    # Artifact management
+│   │   └── load-json-config.py  # JSON config loader
 │   │
 │   └── stages/                  # Stage implementations
-│       ├── 01-initialize.sh
-│       ├── 02-build.sh
-│       ├── 06-sign.sh
-│       ├── 07-installer.sh
-│       └── 13-smoke-tests.sh
+│       ├── 01-initialize.sh     # Workspace setup
+│       ├── 02-build.sh          # JDK compilation
+│       ├── 06-sign.sh           # Artifact signing
+│       ├── 07-installer.sh      # Installer creation
+│       ├── 13-smoke-tests.sh    # Smoke testing
+│       └── ...                  # Other stages
 │
-├── Jenkinsfile.declarative      # Layer 3: Jenkins
-├── .gitlab-ci.yml               # Layer 3: GitLab
-├── .github/workflows/           # Layer 3: GitHub Actions
-├── run-pipeline.py              # Layer 3: Local testing
+├── tools/                       # Development utilities
+│   └── workspace-cleanup.sh     # Workspace cleanup utility
 │
 └── docs/                        # Documentation
+    ├── CI_AGNOSTIC_ARCHITECTURE.md
     ├── ARCHITECTURE_COMPARISON.md
     ├── MIGRATION_PLAN.md
     └── ...
 ```
+
+**Configuration Repository** (`ci-temurin-config/` or vendor-specific):
+```
+ci-temurin-config/               # Vendor-specific configuration (separate repo)
+└── configurations/              # Layer 1: Configuration (JSON)
+    ├── jdk8u_pipeline_config.json
+    ├── jdk11u_pipeline_config.json
+    ├── jdk17u_pipeline_config.json
+    ├── jdk21u_pipeline_config.json
+    └── ...
+```
+
+**Key Separation**: Pipeline code and vendor configurations are maintained in separate repositories, enabling vendor independence and code reusability.
 
 ## 🎯 Key Features
 
@@ -265,26 +279,27 @@ See [QUICKSTART_MAC.md](QUICKSTART_MAC.md) for platform-specific setup.
 ## 📖 Documentation
 
 ### Essential Reading
-- **[Architecture Comparison](ARCHITECTURE_COMPARISON.md)** - Visual before/after ⭐
-- **[Migration Plan](MIGRATION_PLAN.md)** - Implementation timeline
+- **[Architecture Comparison](docs/ARCHITECTURE_COMPARISON.md)** - Visual before/after ⭐
+- **[Migration Plan](docs/MIGRATION_PLAN.md)** - Implementation timeline
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
 
 ### Implementation Guides
-- [Configuration Guide](CONFIGURATION_GUIDE.md) - JSON configuration
-- [Pipeline Runner Guide](PIPELINE_RUNNER_GUIDE.md) - Local testing
-- [Restartability Guide](RESTARTABILITY_GUIDE.md) - Stage restart patterns
-- [Local Testing Guide](LOCAL_TESTING_GUIDE.md) - Testing strategies
+- [Configuration Guide](docs/CONFIGURATION_GUIDE.md) - JSON configuration
+- [Pipeline Runner Guide](docs/PIPELINE_RUNNER_GUIDE.md) - Local testing
+- [Restartability Guide](docs/RESTARTABILITY_GUIDE.md) - Stage restart patterns
+- [Local Testing Guide](docs/LOCAL_TESTING_GUIDE.md) - Testing strategies
 
 ### Technical Details
-- [CI-Agnostic Architecture](CI_AGNOSTIC_ARCHITECTURE.md) - Design principles
-- [Stage I/O Specification](STAGE_IO_SPECIFICATION.md) - Stage contracts
-- [Workspace Validation](WORKSPACE_VALIDATION_PATTERN.md) - BUILD_UID pattern
-- [Jenkins Environment Variables](JENKINS_ENVIRONMENT_VARIABLES.md) - Variable persistence
+- [CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md) - Design principles
+- [Stage I/O Specification](docs/STAGE_IO_SPECIFICATION.md) - Stage contracts
+- [Workspace Validation](docs/WORKSPACE_VALIDATION_PATTERN.md) - BUILD_UID pattern
+- [Jenkins Environment Variables](docs/JENKINS_ENVIRONMENT_VARIABLES.md) - Variable persistence
 
 ### Migration Resources
-- [GitHub EPICs and Issues](GITHUB_EPICS_AND_ISSUES.md) - Implementation tasks
-- [Migration Visual Guide](MIGRATION_VISUAL_GUIDE.md) - Timeline diagrams
-- [Repro Compare Integration](REPRO_COMPARE_INTEGRATION.md) - Build verification
+- [GitHub EPICs and Issues](docs/GITHUB_EPICS_AND_ISSUES.md) - Implementation tasks
+- [Migration Visual Guide](docs/MIGRATION_VISUAL_GUIDE.md) - Timeline diagrams
+- [Repro Compare Integration](docs/REPRO_COMPARE_INTEGRATION.md) - Build verification
+- [Tools Documentation](tools/README.md) - Configuration conversion and workspace tools ⭐
 
 ## 🤝 Contributing
 
