@@ -4,6 +4,52 @@
 
 The current refactoring uses Jenkins Groovy scripts for stage implementation, which tightly couples the build logic to Jenkins. To support potential migration to other CI/CD systems (GitLab CI, GitHub Actions, etc.), we need a **CI-agnostic architecture**.
 
+## Old Architecture (Before Refactoring)
+
+The original `openjdk_build_pipeline.groovy` was a monolithic Jenkins Groovy script with all logic embedded:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ openjdk_build_pipeline.groovy (Monolithic Groovy Script)   │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────┐   │
+│ │ Pipeline Definition + Stage Logic (All in Groovy)   │   │
+│ │                                                       │   │
+│ │ • Stage: Build                                       │   │
+│ │   └─> Groovy code calls make-adopt-build-farm.sh    │   │
+│ │                                                       │   │
+│ │ • Stage: Internal Sign                               │   │
+│ │   └─> Groovy code calls downstream job               │   │
+│ │                                                       │   │
+│ │ • Stage: Sign                                        │   │
+│ │   └─> Groovy code calls downstream job               │   │
+│ │                                                       │   │
+│ │ • Stage: Installer                                   │   │
+│ │   └─> Groovy code calls downstream job               │   │
+│ │                                                       │   │
+│ │ • Stage: Smoke Tests                                 │   │
+│ │   └─> Groovy code calls test scripts                │   │
+│ │                                                       │   │
+│ │ • Stage: AQA Tests                                   │   │
+│ │   └─> Groovy code calls downstream job               │   │
+│ └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│ ⚠️  Problems:                                               │
+│ • Tightly coupled to Jenkins                               │
+│ • Cannot run locally without Jenkins                       │
+│ • Cannot migrate to other CI systems                       │
+│ • Difficult to test individual stages                      │
+│ • Mixed concerns (orchestration + logic)                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Issues:**
+- **CI Lock-in**: All logic written in Jenkins Groovy DSL
+- **No Local Testing**: Cannot run pipeline stages outside Jenkins
+- **Maintenance Burden**: Changes require Jenkins expertise
+- **Migration Barrier**: Moving to GitLab/GitHub Actions requires complete rewrite
+- **Testing Difficulty**: Cannot unit test stage logic independently
+
 ## Solution: Separation of Concerns
 
 ### Layer 1: CI Orchestration (CI-Specific)
