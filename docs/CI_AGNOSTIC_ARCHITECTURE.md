@@ -12,7 +12,7 @@ The original `openjdk_build_pipeline.groovy` implementation was a monolithic Jen
 
 **Technical Debt:**
 - Mixed concerns: orchestration logic intertwined with business logic
-- Difficult to test: no unit testing capability for individual stages
+- Difficult to test: stage implementation logic embedded within Jenkins-specific Groovy code prevents unit testing, requires full Jenkins environment for any testing, and makes it impossible to validate stage logic independently or locally
 - Poor maintainability: large monolithic script (~2000+ lines) with complex dependencies, no modularization of stages, making it difficult to understand, modify, or debug individual pipeline stages without affecting others
 - Limited reusability: logic cannot be shared across different CI platforms
 
