@@ -23,27 +23,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/logging-utils.sh"
 source "${SCRIPT_DIR}/../lib/config-utils.sh"
 
-log_header "Stage 20: Reproducible Build Comparison"
+log_section "Stage 20: Reproducible Build Comparison"
 
-# Validate required environment variables
-require_env_var "WORKSPACE"
-require_env_var "CONFIG_FILE"
-require_env_var "TARGET_DIR"
-require_env_var "SCM_REF"
-require_env_var "RELEASE"
+# Validate standard environment (WORKSPACE, CONFIG_FILE, TARGET_DIR)
+validate_standard_environment
 
-# Load configuration
-load_config "${CONFIG_FILE}"
+# Validate additional required environment variables for this stage
+require_env "SCM_REF"
+require_env "RELEASE"
 
 # Extract configuration values
-VARIANT=$(get_config_value ".buildConfig.VARIANT")
-OS=$(get_config_value ".buildConfig.OS")
-ARCHITECTURE=$(get_config_value ".buildConfig.ARCHITECTURE")
-JAVA_TO_BUILD=$(get_config_value ".buildConfig.JAVA_TO_BUILD")
+VARIANT=$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")
+TARGET_OS=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
+ARCHITECTURE=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
+JAVA_TO_BUILD=$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")
 
 log_info "Configuration:"
 log_info "  Variant: ${VARIANT}"
-log_info "  OS: ${OS}"
+log_info "  Target OS: ${TARGET_OS}"
 log_info "  Architecture: ${ARCHITECTURE}"
 log_info "  Java Version: ${JAVA_TO_BUILD}"
 log_info "  SCM Ref: ${SCM_REF}"
@@ -78,7 +75,7 @@ if [ ! -f "${REPRO_COMPARE_SCRIPT}" ]; then
     exit 1
 fi
 
-log_success "temurin-build cloned successfully"
+log_info "temurin-build cloned successfully"
 
 ################################################################################
 # Step 2: Prepare API parameters
@@ -97,12 +94,21 @@ if [ "${RELEASE}" = "false" ]; then
 fi
 
 # Map OS and ARCH to Adoptium API format
-case "${OS}" in
+case "${TARGET_OS}" in
     mac) API_OS="mac" ;;
     linux) API_OS="linux" ;;
     windows) API_OS="windows" ;;
     aix) API_OS="aix" ;;
-    *) log_error "Unsupported OS: ${OS}"; exit 1 ;;
+    *) log_error "Unsupported OS: ${TARGET_OS}"; exit 1 ;;
+esac
+
+# Map TARGET_OS to uname-style OS name for repro_compare.sh
+case "${TARGET_OS}" in
+    mac) REPRO_OS="Darwin" ;;
+    linux) REPRO_OS="Linux" ;;
+    windows) REPRO_OS="CYGWIN" ;;
+    aix) REPRO_OS="AIX" ;;
+    *) log_error "Unsupported OS for repro_compare: ${TARGET_OS}"; exit 1 ;;
 esac
 
 case "${ARCHITECTURE}" in
@@ -130,7 +136,7 @@ log_info "  SBOM: ${API_SBOM_URL}"
 log_section "Downloading production binaries from Adoptium API"
 
 # Determine file extension based on OS
-case "${OS}" in
+case "${TARGET_OS}" in
     windows) JDK_EXT="zip" ;;
     *) JDK_EXT="tar.gz" ;;
 esac
@@ -145,13 +151,13 @@ if ! curl -L -f -o "${UPSTREAM_JDK_FILE}" "${API_JDK_URL}"; then
     log_error "This may indicate the build is not yet published or the version string is incorrect"
     exit 1
 fi
-log_success "JDK binary downloaded: ${UPSTREAM_JDK_FILE}"
+log_info "JDK binary downloaded: ${UPSTREAM_JDK_FILE}"
 
 log_info "Downloading SBOM..."
 if ! curl -L -f -o "${UPSTREAM_SBOM_FILE}" "${API_SBOM_URL}"; then
-    log_warning "Failed to download SBOM (may not be available for this version)"
+    log_warn "Failed to download SBOM (may not be available for this version)"
 else
-    log_success "SBOM downloaded: ${UPSTREAM_SBOM_FILE}"
+    log_info "SBOM downloaded: ${UPSTREAM_SBOM_FILE}"
 fi
 
 ################################################################################
@@ -171,15 +177,18 @@ case "${JDK_EXT}" in
         unzip -q "${UPSTREAM_JDK_FILE}"
         ;;
 esac
-log_success "Upstream JDK unpacked"
+log_info "Upstream JDK unpacked"
 
 # Find the locally built JDK in TARGET_DIR
 log_info "Finding locally built JDK in: ${TARGET_DIR}"
-BUILT_JDK_FILE=$(find "${TARGET_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" -o -name "OpenJDK*jdk-*.${JDK_EXT}" | head -n 1)
+# Try multiple patterns: OpenJDK* (Adoptium naming) or jdk* (temurin-build naming)
+BUILT_JDK_FILE=$(find "${TARGET_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" -o -name "OpenJDK*jdk-*.${JDK_EXT}" -o -name "jdk*-hotspot.${JDK_EXT}" -o -name "jdk*.${JDK_EXT}" | grep -v "debugimage\|testimage\|static-libs\|jre" | head -n 1)
 
 if [ -z "${BUILT_JDK_FILE}" ]; then
     log_error "No locally built JDK found in ${TARGET_DIR}"
-    log_error "Expected pattern: OpenJDK*-jdk_*.${JDK_EXT} or OpenJDK*jdk-*.${JDK_EXT}"
+    log_error "Expected patterns: OpenJDK*-jdk_*.${JDK_EXT}, OpenJDK*jdk-*.${JDK_EXT}, jdk*-hotspot.${JDK_EXT}, or jdk*.${JDK_EXT}"
+    log_error "Files found in ${TARGET_DIR}:"
+    ls -la "${TARGET_DIR}"
     exit 1
 fi
 
@@ -196,7 +205,7 @@ case "${JDK_EXT}" in
         unzip -q "${BUILT_JDK_FILE}"
         ;;
 esac
-log_success "Locally built JDK unpacked"
+log_info "Locally built JDK unpacked"
 
 ################################################################################
 # Step 5: Run reproducible comparison
@@ -205,16 +214,24 @@ log_success "Locally built JDK unpacked"
 log_section "Running reproducible build comparison"
 
 # Find the actual JDK directories (they may be nested)
-UPSTREAM_JDK_DIR=$(find "${JDK_UPSTREAM}" -maxdepth 2 -type d -name "jdk-*" -o -name "jdk*" | head -n 1)
-BUILT_JDK_DIR=$(find "${JDK_BUILT}" -maxdepth 2 -type d -name "jdk-*" -o -name "jdk*" | head -n 1)
+log_info "Searching for JDK directories..."
+UPSTREAM_JDK_DIR=$(find "${JDK_UPSTREAM}" -mindepth 1 -maxdepth 2 -type d \( -name "jdk-*" -o -name "jdk*" \) | head -n 1)
+BUILT_JDK_DIR=$(find "${JDK_BUILT}" -mindepth 1 -maxdepth 2 -type d \( -name "jdk-*" -o -name "jdk*" \) | head -n 1)
+
+log_debug "Found upstream JDK dir: ${UPSTREAM_JDK_DIR}"
+log_debug "Found built JDK dir: ${BUILT_JDK_DIR}"
 
 if [ -z "${UPSTREAM_JDK_DIR}" ]; then
     log_error "Could not find unpacked upstream JDK directory in ${JDK_UPSTREAM}"
+    log_error "Contents of ${JDK_UPSTREAM}:"
+    ls -la "${JDK_UPSTREAM}"
     exit 1
 fi
 
 if [ -z "${BUILT_JDK_DIR}" ]; then
     log_error "Could not find unpacked built JDK directory in ${JDK_BUILT}"
+    log_error "Contents of ${JDK_BUILT}:"
+    ls -la "${JDK_BUILT}"
     exit 1
 fi
 
@@ -228,9 +245,9 @@ cd "${COMPARE_WORKSPACE}"
 
 COMPARE_OUTPUT="${COMPARE_WORKSPACE}/comparison-report.txt"
 
-if bash "${REPRO_COMPARE_SCRIPT}" "${VARIANT}" "pipeline" "${UPSTREAM_JDK_DIR}" "${VARIANT}" "${BUILT_JDK_DIR}" | tee "${COMPARE_OUTPUT}"; then
-    log_success "Reproducible build comparison PASSED"
-    log_success "The locally built JDK matches the production binary"
+if bash "${REPRO_COMPARE_SCRIPT}" "${VARIANT}" "${UPSTREAM_JDK_DIR}" "${VARIANT}" "${BUILT_JDK_DIR}" "${REPRO_OS}" | tee "${COMPARE_OUTPUT}"; then
+    log_info "Reproducible build comparison PASSED"
+    log_info "The locally built JDK matches the production binary"
 else
     COMPARE_EXIT_CODE=$?
     log_error "Reproducible build comparison FAILED (exit code: ${COMPARE_EXIT_CODE})"
@@ -256,6 +273,6 @@ log_info "Comparison report: ${COMPARE_OUTPUT}"
 log_info "Upstream JDK: ${UPSTREAM_JDK_DIR}"
 log_info "Built JDK: ${BUILT_JDK_DIR}"
 
-log_success "Stage 20: Reproducible Build Comparison - Complete"
+log_info "Stage 20: Reproducible Build Comparison - Complete"
 
 # Made with Bob
