@@ -2,7 +2,21 @@
 
 ## Problem Statement
 
-The current refactoring uses Jenkins Groovy scripts for stage implementation, which tightly couples the build logic to Jenkins. To support potential migration to other CI/CD systems (GitLab CI, GitHub Actions, etc.), we need a **CI-agnostic architecture**.
+The original `openjdk_build_pipeline.groovy` implementation was a monolithic Jenkins Groovy script that tightly coupled all build logic to Jenkins. This created several critical challenges:
+
+**Business Impact:**
+- **Vendor Lock-in**: Complete dependency on Jenkins infrastructure and Groovy DSL
+- **Migration Risk**: Moving to alternative CI systems (GitLab CI, GitHub Actions, etc.) would require a complete rewrite
+- **Development Velocity**: Changes required Jenkins expertise and could only be tested in Jenkins environment
+- **Operational Overhead**: No ability to run or debug pipeline stages locally
+
+**Technical Debt:**
+- Mixed concerns: orchestration logic intertwined with business logic
+- Difficult to test: no unit testing capability for individual stages
+- Poor maintainability: large monolithic script with complex dependencies
+- Limited reusability: logic cannot be shared across different CI platforms
+
+To address these issues and future-proof the build infrastructure, we need a **CI-agnostic architecture** that separates orchestration from implementation.
 
 ## Old Architecture (Before Refactoring)
 
