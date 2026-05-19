@@ -13,7 +13,7 @@ The original `openjdk_build_pipeline.groovy` implementation was a monolithic Jen
 **Technical Debt:**
 - Mixed concerns: orchestration logic intertwined with business logic
 - Difficult to test: no unit testing capability for individual stages
-- Poor maintainability: large monolithic script with complex dependencies
+- Poor maintainability: large monolithic script (~2000+ lines) with complex dependencies, no modularization of stages, making it difficult to understand, modify, or debug individual pipeline stages without affecting others
 - Limited reusability: logic cannot be shared across different CI platforms
 
 To address these issues and future-proof the build infrastructure, we need a **CI-agnostic architecture** that separates orchestration from implementation.
