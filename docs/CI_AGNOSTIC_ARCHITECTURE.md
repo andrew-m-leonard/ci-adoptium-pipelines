@@ -68,21 +68,25 @@ The original `openjdk_build_pipeline.groovy` was a monolithic Jenkins Groovy scr
 
 ### Layer 1: CI Orchestration (CI-Specific)
 - **Purpose**: Pipeline definition, stage sequencing, artifact management
-- **Language**: CI-specific (Jenkinsfile, .gitlab-ci.yml, .github/workflows/*.yml)
-- **Responsibility**: 
+- **Language**: CI-specific DSL (Jenkinsfile, .gitlab-ci.yml, .github/workflows/*.yml) or portable scripts (shell/Python)
+- **Responsibility**:
   - Define stages and their order
   - Manage artifacts (archive/retrieve)
   - Handle conditional execution
   - Provide environment variables
+- **Implementation Options**:
+  - CI-native DSL for platform-specific features (Jenkins Groovy, GitLab CI YAML, GitHub Actions YAML)
+  - Portable shell/Python scripts for maximum portability
 
 ### Layer 2: Stage Implementation (CI-Agnostic)
 - **Purpose**: Actual build/test/sign logic
-- **Language**: Shell scripts (bash/sh)
+- **Language**: **Platform-agnostic Bash scripts** (portable across Linux, macOS, Windows/MSYS2)
 - **Responsibility**:
   - Execute the actual work
   - Read inputs from standard locations
   - Write outputs to standard locations
   - Return exit codes for success/failure
+- **Key Benefit**: Same scripts run identically on any CI platform or locally
 
 ### Layer 3: Build Tools (Already CI-Agnostic)
 - **Purpose**: Core build functionality
@@ -93,25 +97,28 @@ The original `openjdk_build_pipeline.groovy` was a monolithic Jenkins Groovy scr
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: CI Orchestration (CI-Specific)                    │
+│ Layer 1: CI Orchestration (CI-Specific or Portable)        │
 │ ┌─────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │ │ Jenkinsfile │  │ .gitlab-ci   │  │ GitHub       │       │
-│ │             │  │ .yml         │  │ Actions      │       │
+│ │ (Groovy)    │  │ .yml         │  │ Actions YAML │       │
+│ │             │  │              │  │              │       │
+│ │ OR          │  │ OR           │  │ OR           │       │
+│ │ Shell/Python│  │ Shell/Python │  │ Shell/Python │       │
 │ └──────┬──────┘  └──────┬───────┘  └──────┬───────┘       │
 └────────┼─────────────────┼──────────────────┼──────────────┘
          │                 │                  │
-         │ Calls shell     │ Calls shell      │ Calls shell
-         │ scripts         │ scripts          │ scripts
+         │ All call same   │ All call same    │ All call same
+         │ bash scripts    │ bash scripts     │ bash scripts
          ▼                 ▼                  ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ Layer 2: Stage Scripts (CI-Agnostic Shell Scripts)         │
+│ Layer 2: Stage Scripts (PLATFORM-AGNOSTIC BASH)            │
 │ ┌──────────────────────────────────────────────────────┐   │
-│ │ scripts/stages/                                      │   │
-│ │ ├── 02-build.sh                                      │   │
-│ │ ├── 03-internal-sign.sh                              │   │
-│ │ ├── 06-sign.sh                                       │   │
-│ │ ├── 07-installer.sh                                  │   │
-│ │ └── 13-smoke-tests.sh                                │   │
+│ │ scripts/stages/ (Portable Bash - Same Everywhere)   │   │
+│ │ ├── 02-build.sh          ✓ Linux                    │   │
+│ │ ├── 03-internal-sign.sh  ✓ macOS                    │   │
+│ │ ├── 06-sign.sh           ✓ Windows/MSYS2            │   │
+│ │ ├── 07-installer.sh      ✓ Any CI Platform          │   │
+│ │ └── 13-smoke-tests.sh    ✓ Local Development        │   │
 │ └──────────────────────────────────────────────────────┘   │
 └────────┬────────────────────────────────────────────────────┘
          │ Calls existing
