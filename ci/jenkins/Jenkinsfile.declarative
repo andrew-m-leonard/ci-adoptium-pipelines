@@ -89,10 +89,15 @@ pipeline {
             defaultValue: false,
             description: 'Enable EA/Beta build (adds --with-version-opt=ea to configure args)'
         )
+        booleanParam(
+            name: 'REPRODUCIBLE_COMPARE_BUILD',
+            defaultValue: false,
+            description: 'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)'
+        )
         string(
             name: 'SCM_REF',
             defaultValue: '',
-            description: 'Override OpenJDK source branch/tag'
+            description: 'Override OpenJDK source branch/tag (required for REPRODUCIBLE_COMPARE_BUILD)'
         )
         string(
             name: 'CONFIG_REPO_URL',
@@ -755,6 +760,121 @@ pipeline {
                     }
                     
                     echo "=== Smoke Tests Complete ==="
+                }
+            }
+        }
+        
+        stage('Reproducible Compare Build') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
+                    expression { params.REPRODUCIBLE_COMPARE_BUILD == true }
+                    expression { params.SCM_REF != null && params.SCM_REF != '' }
+                    expression {
+                        currentBuild.result == null || currentBuild.result == 'SUCCESS'
+                    }
+                }
+            }
+            steps {
+                script {
+                    echo "=== Running Reproducible Build Comparison ==="
+                    
+                    // Pre-cleanup: Always clean workspace for restartability
+                    cleanWs()
+                    
+                    // Checkout ci-adoptium-pipelines repository
+                    checkout scm
+                    
+                    // Retrieve locally built JDK binary and config
+                    copyArtifacts(
+                        projectName: env.JOB_NAME,
+                        selector: specific(env.BUILD_NUMBER),
+                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip',
+                        target: '.'
+                    )
+                    
+                    def config = readJSON file: 'pipeline-config.json'
+                    
+                    // Set environment variables for the comparison script
+                    env.WORKSPACE = "${WORKSPACE}"
+                    env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                    env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                    env.BUILD_NUMBER = env.BUILD_NUMBER
+                    env.SCM_REF = params.SCM_REF
+                    env.RELEASE = params.RELEASE ? 'true' : 'false'
+                    
+                    // Execute reproducible compare script
+                    def comparisonExitCode = sh(
+                        script: '''
+                            #!/bin/bash
+                            set -e
+                            
+                            echo "Running reproducible build comparison..."
+                            echo "  SCM_REF: ${SCM_REF}"
+                            echo "  RELEASE: ${RELEASE}"
+                            echo "  TARGET_DIR: ${TARGET_DIR}"
+                            
+                            # Execute the comparison stage script
+                            bash scripts/stages/20-reproducible-compare.sh
+                        ''',
+                        returnStatus: true
+                    )
+                    
+                    // Archive comparison results
+                    // The script creates: reproducible-compare/comparison-report.txt
+                    // repro_compare.sh may also create: reprotest.diff, reproducible_evidence.log, ReproduciblePercent
+                    archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt',
+                                   fingerprint: true,
+                                   allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'reproducible-compare/reprotest.diff',
+                                   fingerprint: true,
+                                   allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'reproducible-compare/reproducible_evidence.log',
+                                   fingerprint: true,
+                                   allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'reproducible-compare/ReproduciblePercent',
+                                   fingerprint: true,
+                                   allowEmptyArchive: true
+                    
+                    echo "Comparison exit code: ${comparisonExitCode}"
+                    
+                    // Check results
+                    if (comparisonExitCode != 0) {
+                        currentBuild.result = 'UNSTABLE'
+                        echo "WARNING: Reproducible build comparison FAILED"
+                        echo "  Exit code: ${comparisonExitCode}"
+                        
+                        // Show comparison report if available
+                        if (fileExists('reproducible-compare/comparison-report.txt')) {
+                            def reportContent = readFile('reproducible-compare/comparison-report.txt')
+                            echo "Comparison report:"
+                            echo reportContent
+                        }
+                        
+                        // Show reprotest.diff if available
+                        if (fileExists('reproducible-compare/reprotest.diff')) {
+                            def diffContent = readFile('reproducible-compare/reprotest.diff')
+                            echo "Differences found (reprotest.diff):"
+                            echo diffContent
+                        }
+                    } else {
+                        echo "SUCCESS: Build is 100% reproducible (exit code 0)"
+                        
+                        // Show reproducibility percentage if available
+                        if (fileExists('reproducible-compare/ReproduciblePercent')) {
+                            def reproduciblePercent = readFile('reproducible-compare/ReproduciblePercent').trim()
+                            echo "Reproducibility: ${reproduciblePercent}%"
+                        }
+                    }
+                    
+                    // Post-cleanup: Clean workspace if requested
+                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+                        cleanWs()
+                    }
+                    
+                    echo "=== Reproducible Build Comparison Complete ==="
                 }
             }
         }

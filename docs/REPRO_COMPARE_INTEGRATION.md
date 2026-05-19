@@ -294,14 +294,27 @@ export RELEASE=true
 
 ## Implementation Status
 
-1. ✅ `--compare-build` option added to local pipeline runner
-2. ✅ Stage script `20-reproducible-compare.sh` implemented
+### Local Pipeline Runner (✅ Complete)
+1. ✅ `--compare-build` option added to `ci/local/run-pipeline.py`
+2. ✅ Stage script `scripts/stages/20-reproducible-compare.sh` implemented
 3. ✅ Integration with Adoptium API for downloading production binaries
 4. ✅ Automatic comparison as part of pipeline execution
 5. ✅ Results stored in artifacts directory
-6. ⏭️ Jenkins integration for migration validation
-7. ⏭️ Comparison dashboard
-8. ⏭️ Automated alerting
+6. ✅ Stage restartability support (`--start-from-stage reproducible-compare`)
+
+### Jenkins Pipeline (✅ Complete)
+1. ✅ `REPRODUCIBLE_COMPARE_BUILD` boolean parameter added to `ci/jenkins/Jenkinsfile.declarative`
+2. ✅ `Reproducible Compare Build` stage added (after Smoke Tests stage)
+3. ✅ Integration with Adoptium API via `20-reproducible-compare.sh` script
+4. ✅ Archive comparison results as artifacts (comparison-report.txt, reprotest.diff, etc.)
+5. ✅ Conditional execution based on `REPRODUCIBLE_COMPARE_BUILD` parameter
+6. ✅ Requires `SCM_REF` parameter to be set
+7. ✅ Sets build to UNSTABLE if comparison fails (exit code != 0)
+
+### Future Enhancements
+8. ⏭️ Comparison dashboard for tracking reproducibility metrics
+9. ⏭️ Automated alerting for reproducibility failures
+10. ⏭️ Historical trend analysis
 
 ---
 

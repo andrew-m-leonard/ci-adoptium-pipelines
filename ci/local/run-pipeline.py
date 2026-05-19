@@ -397,7 +397,67 @@ class PipelineRunner:
         print(f"  RELEASE={env['RELEASE']}")
         print(f"  Note: Compares locally built JDK against production Adoptium binary")
         
-        subprocess.run(cmd, env=env, check=True)
+        # Run comparison script and capture exit code
+        result = subprocess.run(cmd, env=env, capture_output=False)
+        comparison_exit_code = result.returncode
+        
+        # Check for comparison results in stage_workspace
+        comparison_report = self.stage_workspace / 'reproducible-compare' / 'comparison-report.txt'
+        reprotest_diff = self.stage_workspace / 'reproducible-compare' / 'reprotest.diff'
+        reproducible_percent = self.stage_workspace / 'reproducible-compare' / 'ReproduciblePercent'
+        reproducible_log = self.stage_workspace / 'reproducible-compare' / 'reproducible_evidence.log'
+        
+        print(f"\nComparison exit code: {comparison_exit_code}")
+        
+        # Display results
+        if comparison_exit_code == 0:
+            print("✅ SUCCESS: Build is 100% reproducible")
+            
+            # Show reproducibility percentage if available
+            if reproducible_percent.exists():
+                percent = reproducible_percent.read_text().strip()
+                print(f"   Reproducibility: {percent}%")
+        else:
+            print(f"❌ FAILED: Reproducible build comparison failed (exit code: {comparison_exit_code})")
+            
+            # Show comparison report if available
+            if comparison_report.exists():
+                print("\n📄 Comparison Report:")
+                print(comparison_report.read_text())
+            
+            # Show reprotest.diff if available
+            if reprotest_diff.exists():
+                print("\n📄 Differences (reprotest.diff):")
+                diff_content = reprotest_diff.read_text()
+                # Show first 50 lines to avoid overwhelming output
+                diff_lines = diff_content.split('\n')
+                if len(diff_lines) > 50:
+                    print('\n'.join(diff_lines[:50]))
+                    print(f"\n... ({len(diff_lines) - 50} more lines, see {reprotest_diff})")
+                else:
+                    print(diff_content)
+            
+            # Show reproducibility percentage if available
+            if reproducible_percent.exists():
+                percent = reproducible_percent.read_text().strip()
+                print(f"\n   Reproducibility: {percent}%")
+        
+        # List all comparison artifacts
+        print(f"\n📁 Comparison artifacts saved to: {self.stage_workspace / 'reproducible-compare'}")
+        if comparison_report.exists():
+            print(f"   - comparison-report.txt")
+        if reprotest_diff.exists():
+            print(f"   - reprotest.diff")
+        if reproducible_percent.exists():
+            print(f"   - ReproduciblePercent")
+        if reproducible_log.exists():
+            print(f"   - reproducible_evidence.log")
+        
+        # Fail the stage if comparison failed
+        if comparison_exit_code != 0:
+            print("\n⚠️  Stage failed due to reproducibility issues")
+            raise subprocess.CalledProcessError(comparison_exit_code, cmd)
+        
         print("\n✅ Reproducible build comparison complete")
         
         # Post-stage cleanup
