@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CI Status](https://img.shields.io/badge/CI-In%20Development-yellow.svg)]()
-[![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen.svg)](./ARCHITECTURE_COMPARISON.md)
+[![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen.svg)](./docs/CI_AGNOSTIC_ARCHITECTURE.md)
 
 Modern, modular, and CI-agnostic build pipeline architecture for Eclipse Adoptium OpenJDK builds.
 
@@ -24,9 +24,8 @@ This repository contains a comprehensive refactoring of the Adoptium OpenJDK bui
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
 
 ### Architecture & Design
-- **[Architecture Comparison](ARCHITECTURE_COMPARISON.md)** - Visual before/after comparison ⭐
-- **[CI-Agnostic Architecture](CI_AGNOSTIC_ARCHITECTURE.md)** - 3-layer design principles
-- **[Migration Plan](MIGRATION_PLAN.md)** - 10-14 week migration strategy
+- **[CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md)** - 3-layer design with before/after comparison ⭐
+- **[Migration Plan](docs/MIGRATION_PLAN.md)** - 10-14 week migration strategy
 
 ### Implementation Guides
 - **[Configuration Guide](CONFIGURATION_GUIDE.md)** - JSON configuration system
@@ -52,7 +51,7 @@ The current Jenkins-specific scripted pipeline has served well but faces signifi
 - **Parallel Development**: Multiple developers, fewer merge conflicts
 - **Reusable Components**: Stage scripts become building blocks
 
-See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for detailed visual comparison.
+See [CI_AGNOSTIC_ARCHITECTURE.md](docs/CI_AGNOSTIC_ARCHITECTURE.md) for detailed architecture overview and visual comparison.
 
 ## 📊 Architecture Overview
 
@@ -113,7 +112,6 @@ ci-adoptium-pipelines/           # Pipeline implementation (vendor-agnostic)
 │
 └── docs/                        # Documentation
     ├── CI_AGNOSTIC_ARCHITECTURE.md
-    ├── ARCHITECTURE_COMPARISON.md
     ├── MIGRATION_PLAN.md
     └── ...
 ```
@@ -279,7 +277,7 @@ See [QUICKSTART_MAC.md](QUICKSTART_MAC.md) for platform-specific setup.
 ## 📖 Documentation
 
 ### Essential Reading
-- **[Architecture Comparison](docs/ARCHITECTURE_COMPARISON.md)** - Visual before/after ⭐
+- **[CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md)** - Architecture overview with before/after comparison ⭐
 - **[Migration Plan](docs/MIGRATION_PLAN.md)** - Implementation timeline
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
 

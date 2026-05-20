@@ -10,8 +10,7 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 
 ### Architecture & Design
 
-- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** - Overview of the CI-agnostic architecture design
-- **[ARCHITECTURE_COMPARISON.md](./ARCHITECTURE_COMPARISON.md)** - Comparison of different architectural approaches
+- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** - Overview of the CI-agnostic architecture design with before/after comparison ⭐
 - **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** - Separation of pipeline code and configuration
 - **[STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)** - Input/output specifications for pipeline stages
 - **[UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)** - Universal pattern for stage implementation
@@ -69,9 +68,8 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 3. Use [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) for detailed runner usage
 
 #### Understand the Architecture
-1. Read [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) for the overall design
+1. Read [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) for the overall design and before/after comparison
 2. Review [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) for configuration approach
-3. Check [ARCHITECTURE_COMPARISON.md](./ARCHITECTURE_COMPARISON.md) for design decisions
 
 #### Work with Restartable Pipelines
 1. Start with [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md)
