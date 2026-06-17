@@ -1,6 +1,6 @@
 # Jenkins Integration
 
-This directory contains Jenkins-specific pipeline definitions for the Adoptium build infrastructure.
+This directory contains Jenkins-specific pipeline definitions and Job DSL automation for the Adoptium build infrastructure.
 
 ## Files
 
@@ -12,13 +12,56 @@ Declarative Jenkins pipeline with the following features:
 - **Code/Config Separation**: Pipeline code separated from vendor configurations
 - **JSON Configuration**: Uses JSON config files from external repository
 - **Modular Design**: Each stage calls CI-agnostic shell scripts
-- **No Shared Libraries**: Removed dependency on Jenkins-specific shared libraries
+- **BUILD_UID Tracking**: Unique build identification across restarts
+
+### job-dsl/
+
+Job DSL scripts that automate Jenkins job creation:
+
+- **`seed-job.groovy`**: Creates the seed job (self-updating)
+- **`openjdk-build-pipeline.groovy`**: Creates all pipeline jobs dynamically
+
+These scripts read configuration from the ci-temurin-config repository to determine which JDK versions are active.
+
+### lib/
+
+Shared Groovy libraries:
+
+- **`BuildUidHelper.groovy`**: Helper functions for BUILD_UID tracking and stage result management
+
+## Job DSL Automation
+
+All Jenkins jobs are created automatically using Job DSL scripts. See [Job DSL Automation Guide](../../docs/JOB_DSL_AUTOMATION.md) for complete setup instructions.
+
+### Quick Setup
+
+1. **Prerequisites**: Ensure your Jenkins instance has:
+   - Job DSL Plugin
+   - Pipeline Plugin
+   - Git Plugin
+   - Script Security configured
+
+2. **Create Seed Job**:
+   - New Freestyle project named `seed-job`
+   - SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`
+   - Build Step: Process Job DSLs → `ci/jenkins/job-dsl/*.groovy`
+
+3. **Run Seed Job**:
+   - Click "Build Now"
+   - Jobs will be created for all active JDK versions (8, 11, 17, 21, 25, 26, 27)
+
+### Configuration
+
+Active JDK versions and job parameters are defined in:
+**`ci-temurin-config/jenkins_job_config.json`**
+
+To add/remove versions, edit this file and run the seed job.
 
 ## Jenkins Job Configuration
 
 ### SCM Setup
 
-Configure the Jenkins job to checkout this repository:
+The seed job checks out this repository and runs the Job DSL scripts. The generated pipeline jobs are configured to:
 
 ```groovy
 Pipeline script from SCM
@@ -30,23 +73,12 @@ Pipeline script from SCM
 
 ### Parameters
 
-The pipeline accepts these parameters:
+The pipeline accepts these parameters (configured via Job DSL):
 
 **Build Configuration:**
-- `JDK_VERSION`: JDK version to build (jdk8u, jdk11u, jdk17u, jdk21u, etc.)
-- `VARIANT`: Build variant (temurin, openj9, hotspot)
-- `TARGET_OS`: Target operating system (mac, linux, windows, aix)
-- `ARCHITECTURE`: Target architecture (aarch64, x64, x32, ppc64, s390x)
-
-**Build Type:**
-- `RELEASE`: Is this a release build?
-- `WEEKLY`: Is this a weekly build?
-
-**Feature Toggles:**
-- `ENABLE_TESTS`: Run AQA tests after build
-- `ENABLE_INSTALLERS`: Build installers
-- `ENABLE_SIGNER`: Sign artifacts
-- `ENABLE_TCK`: Run TCK tests (Temurin only, release/weekly builds)
+- `JDK_VERSION`: JDK version to build (8, 11, 17, 21, 25, 26, 27)
+- `PLATFORM`: Target platform (linux-x64, linux-aarch64, windows-x64, mac-x64, mac-aarch64, etc.)
+- `BUILD_VARIANT`: Build variant (temurin, openj9, hotspot)
 
 **Configuration Repository:**
 - `CONFIG_REPO_URL`: Git repository URL containing JSON configurations
@@ -54,13 +86,12 @@ The pipeline accepts these parameters:
 - `CONFIG_REPO_BRANCH`: Branch to checkout from configuration repository
   - Default: `main`
 
-**Git References:**
-- `SCM_REF`: Override OpenJDK source branch/tag
-- `BUILD_REF`: Override temurin-build branch/tag
-- `HELPER_REF`: Override jenkins-helper branch/tag
-
-**Workspace:**
-- `CLEAN_WORKSPACE`: Clean workspace before build
+**Feature Toggles:**
+- `CLEAN_WORKSPACE_AFTER_STAGE`: Clean workspace after each stage
+- `RUN_TESTS`: Run test stages
+- `SIGN_ARTIFACTS`: Sign artifacts
+- `PUBLISH_ARTIFACTS`: Publish to release repository
+- `RUN_REPRODUCIBLE_COMPARE`: Run reproducible build comparison
 
 ## Pipeline Stages
 
@@ -68,9 +99,18 @@ The declarative pipeline orchestrates these stages:
 
 1. **Initialize**: Generate pipeline configuration from JSON
 2. **Build**: Compile OpenJDK from source
-3. **Sign**: Sign build artifacts (if enabled)
-4. **Installer**: Create platform installers (if enabled)
-5. **Smoke Tests**: Run basic validation tests (if enabled)
+3. **Internal Sign**: Sign JMODs (if enabled)
+4. **Assemble**: Create final JDK image
+5. **Sign Artifacts**: Sign build artifacts (if enabled)
+6. **Build Installers**: Create platform installers (if enabled)
+7. **Sign Installers**: Sign installers (if enabled)
+8. **GPG Sign**: GPG sign artifacts (if enabled)
+9. **Verify Signing**: Verify all signatures
+10. **Validate SBOM**: Validate Software Bill of Materials
+11. **Smoke Tests**: Run basic validation tests
+12. **Reproducible Compare**: Compare with previous build (if enabled)
+13. **AQA Tests**: Run Adoptium Quality Assurance tests (if enabled)
+14. **TCK Tests**: Run Technology Compatibility Kit tests (if enabled)
 
 Each stage calls CI-agnostic shell scripts from the `scripts/stages/` directory.
 
@@ -86,12 +126,15 @@ The pipeline fetches build configurations from an external repository specified 
 
 ```
 ci-temurin-config/
+├── jenkins_job_config.json          # Job DSL configuration
 └── configurations/
     ├── jdk8u_pipeline_config.json
     ├── jdk11u_pipeline_config.json
     ├── jdk17u_pipeline_config.json
     ├── jdk21u_pipeline_config.json
-    └── ...
+    ├── jdk25u_pipeline_config.json
+    ├── jdk26u_pipeline_config.json
+    └── jdk27_pipeline_config.json
 ```
 
 ## Restart Capability
@@ -101,7 +144,7 @@ The declarative pipeline supports stage-level restart:
 1. Navigate to the failed build in Jenkins
 2. Click "Restart from Stage"
 3. Select the stage to restart from
-4. The pipeline resumes from that stage using archived artifacts
+4. The pipeline resumes from that stage using BUILD_UID tracking
 
 This saves hours of rebuild time when builds fail late in the pipeline.
 
@@ -118,7 +161,7 @@ python3 ci/local/run-pipeline.py \
   --architecture aarch64
 ```
 
-See [LOCAL_TESTING_GUIDE.md](../../LOCAL_TESTING_GUIDE.md) for details.
+See [Local Testing Guide](../local/README.md) for details.
 
 ## Troubleshooting
 
@@ -140,73 +183,16 @@ See [LOCAL_TESTING_GUIDE.md](../../LOCAL_TESTING_GUIDE.md) for details.
 
 **Solution**: Verify ci-adoptium-pipelines repository is checked out correctly via SCM
 
-## Jenkins Automation (Configuration as Code)
+### Seed Job Fails
 
-This directory also contains automation for creating "throwaway-able" Jenkins instances where all configuration and jobs are defined as code.
+**Problem**: Seed job fails with "Configuration not found"
 
-### Quick Start
-
-```bash
-cd ci/jenkins
-./start-jenkins.sh --password mySecurePassword
-```
-
-Access Jenkins at: http://localhost:8080 (Username: `admin`)
-
-### Automation Components
-
-**Jenkins Configuration as Code (JCasC)**
-- File: `jcasc/jenkins.yaml`
-- Configures Jenkins itself (security, tools, plugins)
-- No manual setup required
-
-**Job DSL Scripts**
-- Directory: `job-dsl/`
-- Creates and manages all pipeline jobs from code
-- Automatic job updates via seed job
-
-**Docker Deployment**
-- File: `docker-compose.yml`
-- Containerized Jenkins with all dependencies
-- File: `plugins.txt` - Required Jenkins plugins
-
-**Quick Start Script**
-- File: `start-jenkins.sh`
-- One-command Jenkins deployment
-- Includes backup/restore functionality
-
-### Usage Examples
-
-```bash
-# Start Jenkins
-./start-jenkins.sh --password mySecurePassword
-
-# Stop Jenkins
-./start-jenkins.sh --stop
-
-# View logs
-./start-jenkins.sh --logs
-
-# Create backup
-./start-jenkins.sh --backup
-
-# Restore from backup
-./start-jenkins.sh --restore backups/jenkins-backup-YYYYMMDD-HHMMSS.tar.gz
-```
-
-### Benefits
-
-- **Throwaway-able**: Destroy and recreate Jenkins anytime
-- **Reproducible**: Same configuration every time
-- **Version Controlled**: All changes tracked in Git
-- **Automated**: No manual job creation
-
-For complete automation documentation, see [JENKINS_AUTOMATION.md](../../docs/JENKINS_AUTOMATION.md)
+**Solution**: Ensure `jenkins_job_config.json` exists in ci-temurin-config repository
 
 ## Related Documentation
 
-- [JENKINS_AUTOMATION.md](../../docs/JENKINS_AUTOMATION.md) - Complete automation guide
-- [BUILD_UID_INTEGRATION.md](../../docs/BUILD_UID_INTEGRATION.md) - Pipeline restart safety
-- [JENKINS_RESTART_BEHAVIOR.md](../../docs/JENKINS_RESTART_BEHAVIOR.md) - Restart behavior details
-- [CODE_CONFIG_SEPARATION.md](../../docs/CODE_CONFIG_SEPARATION.md) - Code/config separation pattern
-- [CI_AGNOSTIC_ARCHITECTURE.md](../../docs/CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
+- [Job DSL Automation Guide](../../docs/JOB_DSL_AUTOMATION.md) - Complete Job DSL setup
+- [BUILD_UID Integration](../../docs/BUILD_UID_INTEGRATION.md) - Pipeline restart safety
+- [Jenkins Restart Behavior](../../docs/JENKINS_RESTART_BEHAVIOR.md) - Restart behavior details
+- [Migration Guide](../../docs/MIGRATION_IMPLEMENTATION_GUIDE.md) - Migrating from old pipeline
+- [CI Agnostic Architecture](../../docs/CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview

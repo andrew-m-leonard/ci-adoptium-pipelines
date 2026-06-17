@@ -23,6 +23,10 @@ This repository contains a comprehensive refactoring of the Adoptium OpenJDK bui
 - **[Local Testing Guide](LOCAL_TESTING_GUIDE.md)** - Test pipelines locally
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
 
+### Jenkins Setup
+- **[Job DSL Automation](docs/JOB_DSL_AUTOMATION.md)** - Automate Jenkins job creation ⭐
+- **[Jenkins Integration](ci/jenkins/README.md)** - Jenkins-specific setup and configuration
+
 ### Architecture & Design
 - **[CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md)** - 3-layer design with before/after comparison ⭐
 - **[Migration Plan](docs/MIGRATION_PLAN.md)** - 10-14 week migration strategy
