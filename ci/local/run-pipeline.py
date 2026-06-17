@@ -224,6 +224,8 @@ class PipelineRunner:
             cmd.append('--no-signer')
         if self.args.ea_beta_build:
             cmd.append('--ea-beta-build')
+        if self.args.compare_build:
+            cmd.append('--compare-build')
         
         print(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)

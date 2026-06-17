@@ -106,6 +106,7 @@ def load_configuration(args):
     enable_installers = args.enable_installers
     enable_signer = args.enable_signer
     ea_beta_build = args.ea_beta_build
+    compare_build = args.compare_build
     
     print(f"Loading configuration for: {jdk_version} {variant} {target_os} {architecture}")
     
@@ -170,7 +171,9 @@ def load_configuration(args):
             'enableInstallers': enable_installers,
             'enableSigner': enable_signer,
             'cleanWorkspaceAfterStage': platform_config.get('cleanWorkspaceAfterBuild', True),
-            'eaBetaBuild': ea_beta_build
+            'eaBetaBuild': ea_beta_build,
+            'compareBuild': compare_build,
+            'release': is_release
         },
         'refs': {
             'scmRef': scm_ref,
@@ -258,7 +261,8 @@ Examples:
     parser.add_argument('--no-installers', dest='enable_installers', action='store_false', help='Disable installers')
     parser.add_argument('--no-signer', dest='enable_signer', action='store_false', help='Disable signing')
     parser.add_argument('--ea-beta-build', dest='ea_beta_build', action='store_true', help='Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
-    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True, ea_beta_build=False)
+    parser.add_argument('--compare-build', dest='compare_build', action='store_true', help='Enable reproducible build comparison with path padding (requires --scm-ref)')
+    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True, ea_beta_build=False, compare_build=False)
     
     args = parser.parse_args()
     

@@ -26,6 +26,8 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 - **[JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md)** - Jenkins-specific restart behavior
 - **[REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md)** - Reproducible build comparison integration
 - **[REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md)** - Reproducible build comparison details
+- **[REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md)** - ⭐ **NEW** Automatic path padding for reproducible builds
+- **[PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md)** - ⭐ **NEW** Quick reference for path padding implementation
 
 ### Workspace Management
 
@@ -77,6 +79,12 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 3. Learn about workspace management in [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)
 4. See the latest cleanup approach in [JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md) ⭐
 
+#### Work with Reproducible Builds
+1. Read [REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md) for path padding feature ⭐
+2. Use [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md) for quick reference ⭐
+3. Review [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md) for comparison integration
+4. Check [REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md) for comparison details
+
 #### Implement a New Stage
 1. Follow the [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)
 2. Review [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)
@@ -94,6 +102,21 @@ Welcome to the CI Adoptium Pipelines documentation. This directory contains comp
 3. Track progress with [GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md)
 
 ## 📝 Recent Updates
+
+### 2026-06-17
+- ⭐ **NEW**: [REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md) - Automatic workspace path padding for reproducible builds
+  - Solves LC_UUID mismatch on macOS by matching upstream workspace path lengths
+  - Automatic SBOM download and BUILD_WORKSPACE_DIRECTORY extraction
+  - Cross-platform support (macOS, Linux, Windows, AIX)
+  - Graceful error handling with detailed logging
+- ⭐ **NEW**: [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md) - Quick reference guide
+  - Implementation overview and flow diagram
+  - Configuration examples and testing procedures
+  - Key features and limitations
+- **UPDATED**: [`scripts/stages/02-build.sh`](../scripts/stages/02-build.sh) - Added path padding logic
+  - New `compareBuild` parameter support
+  - Three new helper functions for path resolution and padding
+  - Integrated SBOM download before build execution
 
 ### 2026-05-19
 - ⭐ **NEW**: [Tools Documentation](../tools/README.md) - Comprehensive documentation for pipeline tools

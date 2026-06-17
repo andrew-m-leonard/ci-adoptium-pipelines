@@ -54,6 +54,7 @@ main() {
     local build_repo_url=$(get_config_value "${CONFIG_FILE}" ".refs.buildRepoUrl" "https://github.com/adoptium/temurin-build.git")
     local clean_workspace=$(get_config_bool "${CONFIG_FILE}" ".parameters.cleanWorkspace" "false")
     local ea_beta_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.eaBetaBuild" "false")
+    local compare_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.compareBuild" "false")
     
     # If EA/Beta build is enabled, append --with-version-opt=ea to configure args
     if [[ "${ea_beta_build}" == "true" ]]; then
@@ -77,11 +78,18 @@ main() {
     log_info "  Configure Args: ${configure_args}"
     log_info "  Clean Workspace: ${clean_workspace}"
     log_info "  EA/Beta Build: ${ea_beta_build}"
+    log_info "  Compare Build: ${compare_build}"
     
     # Setup build environment
     setup_build_environment
     
-    # Clone temurin-build repository
+    # Setup path padding for reproducible builds if compare-build is enabled
+    # This must happen BEFORE cloning temurin-build so it clones into the padded workspace
+    if [[ "${compare_build}" == "true" ]]; then
+        setup_reproducible_build_padding "${scm_ref}"
+    fi
+    
+    # Clone temurin-build repository (after padding so it goes into the right place)
     setup_temurin_build "${build_repo_url}" "${build_ref}"
     
     # Prepare workspace
@@ -191,6 +199,153 @@ setup_temurin_build() {
     
     log_info "temurin-build repository ready at: ${build_repo_dir}"
     log_info "Build script: ${build_script}"
+}
+
+# Resolve canonical path (handles . and .. components)
+resolve_path() {
+    local path="$1"
+    
+    # Make absolute
+    [[ "$path" != /* ]] && path="$PWD/$path"
+    
+    # Process path components
+    local -a parts resolved=()
+    IFS='/' read -ra parts <<< "$path"
+    
+    for part in "${parts[@]}"; do
+        case "$part" in
+            ""|".") continue ;;
+            "..") 
+                # Remove last element (bash 3.2+ compatible)
+                if [[ ${#resolved[@]} -gt 0 ]]; then
+                    unset "resolved[${#resolved[@]}-1]"
+                fi
+                ;;
+            *) resolved+=("$part") ;;
+        esac
+    done
+    
+    # Reconstruct path
+    printf "/%s" "${resolved[@]}" | sed 's|/$||; s|^$|/|'
+}
+
+# Pad build directory to match target length for reproducible builds
+pad_build_dir_to_same_length() {
+    local target_build_dir_to_match
+    target_build_dir_to_match=$(resolve_path "$1")
+    local ws_build_dir
+    ws_build_dir=$(resolve_path "$2")
+    local ws_build_folder="$3"
+    
+    local ws_dir="${ws_build_dir}/${ws_build_folder}"
+    
+    local padding_length=$((${#target_build_dir_to_match} - ${#ws_dir}))
+    if [[ "$padding_length" -eq 0 ]]; then
+        log_info "Build directories are already same length"
+        echo ""
+    elif [[ "$padding_length" -lt 0 ]] || [[ "$padding_length" -eq 1 ]]; then
+        log_warn "Unable to pad ${ws_dir} to necessary length of ${target_build_dir_to_match}, padding required: ${padding_length}"
+        echo ""
+    else
+        padding_length=$((padding_length - 1))
+        local padding
+        padding=$(printf "P%.0s" $(seq 1 $padding_length))
+        local padded="${ws_build_dir}/${padding}"
+        log_info "Padded ${ws_build_dir} with sub-folder to ${padded}"
+        echo "${padded}"
+    fi
+}
+
+# Setup reproducible build padding by fetching SBOM and extracting BUILD_WORKSPACE_DIRECTORY
+setup_reproducible_build_padding() {
+    local scm_ref=$1
+    
+    log_section "Setting up reproducible build path padding"
+    
+    # Extract configuration for API URL construction
+    local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
+    local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
+    local release=$(get_config_bool "${CONFIG_FILE}" ".parameters.release" "false")
+    
+    # Remove "_adopt" suffix from SCM_REF if present
+    local scm_ref_for_api="${scm_ref/_adopt/}"
+    log_info "SCM_REF for API: ${scm_ref_for_api}"
+    
+    # Add "-ea-beta" suffix for EA builds
+    if [[ "${release}" == "false" ]]; then
+        scm_ref_for_api="${scm_ref_for_api}-ea-beta"
+        log_info "EA build detected, using: ${scm_ref_for_api}"
+    fi
+    
+    # Map OS to Adoptium API format
+    case "${target_os}" in
+        mac) local api_os="mac" ;;
+        linux) local api_os="linux" ;;
+        windows) local api_os="windows" ;;
+        aix) local api_os="aix" ;;
+        *) log_error "Unsupported OS: ${target_os}"; return 1 ;;
+    esac
+    
+    # Map architecture to Adoptium API format
+    case "${architecture}" in
+        aarch64) local api_arch="aarch64" ;;
+        x64) local api_arch="x64" ;;
+        x32) local api_arch="x32" ;;
+        ppc64) local api_arch="ppc64" ;;
+        ppc64le) local api_arch="ppc64le" ;;
+        s390x) local api_arch="s390x" ;;
+        *) log_error "Unsupported architecture: ${architecture}"; return 1 ;;
+    esac
+    
+    # Construct SBOM API URL
+    local api_sbom_url="https://api.adoptium.net/v3/binary/version/${scm_ref_for_api}/${api_os}/${api_arch}/sbom/hotspot/normal/eclipse?project=jdk"
+    
+    log_info "Fetching SBOM from: ${api_sbom_url}"
+    
+    # Download SBOM to temporary file
+    local sbom_file="${WORKSPACE}/upstream-sbom.json"
+    if curl -L -f -s -o "${sbom_file}" "${api_sbom_url}"; then
+        log_info "SBOM downloaded successfully"
+        
+        # Extract BUILD_WORKSPACE_DIRECTORY from SBOM
+        local build_workspace_directory
+        build_workspace_directory=$(jq -r '.components[0] | .properties[] | select(.name == "Build Workspace Directory") | .value' "${sbom_file}" 2>/dev/null)
+        
+        if [[ -n "${build_workspace_directory}" && "${build_workspace_directory}" != "null" ]]; then
+            log_info "Found BUILD_WORKSPACE_DIRECTORY in SBOM: ${build_workspace_directory}"
+            
+            # Calculate padded workspace directory
+            # The build will create: ${WORKSPACE}/temurin-build/workspace/build/src
+            local build_folder="temurin-build/workspace/build/src"
+            local padded_workspace
+            padded_workspace=$(pad_build_dir_to_same_length "${build_workspace_directory}" "${WORKSPACE}" "${build_folder}")
+            
+            if [[ -n "${padded_workspace}" ]]; then
+                log_info "Applying workspace padding for reproducible build"
+                log_info "Original WORKSPACE: ${WORKSPACE}"
+                log_info "Padded WORKSPACE: ${padded_workspace}"
+                
+                # Create padded directory
+                mkdir -p "${padded_workspace}"
+                
+                # Update WORKSPACE environment variable for the build
+                export WORKSPACE="${padded_workspace}"
+                log_info "WORKSPACE updated to: ${WORKSPACE}"
+            else
+                log_info "No padding needed - workspace paths already match"
+            fi
+        else
+            log_warn "BUILD_WORKSPACE_DIRECTORY not found in SBOM - skipping path padding"
+        fi
+        
+        # Clean up SBOM file
+        rm -f "${sbom_file}"
+    else
+        log_warn "Failed to download SBOM from ${api_sbom_url}"
+        log_warn "Path padding will be skipped - this may affect reproducibility"
+    fi
+    
+    log_info "Reproducible build path padding setup complete"
 }
 
 # Prepare workspace for build
