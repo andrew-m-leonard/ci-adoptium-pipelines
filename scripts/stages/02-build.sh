@@ -35,13 +35,13 @@ BUILD_NUMBER="${BUILD_NUMBER:-local}"
 # Main execution
 main() {
     log_section "Build Stage - Start"
-    
+
     # Validate environment
     validate_standard_environment
-    
+
     # Load configuration
     log_info "Loading configuration from ${CONFIG_FILE}"
-    
+
     # Extract build configuration (pass file path directly)
     local java_to_build=$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")
     local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
@@ -55,7 +55,7 @@ main() {
     local clean_workspace=$(get_config_bool "${CONFIG_FILE}" ".parameters.cleanWorkspace" "false")
     local ea_beta_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.eaBetaBuild" "false")
     local compare_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.compareBuild" "false")
-    
+
     # If EA/Beta build is enabled, append --with-version-opt=ea to configure args
     if [[ "${ea_beta_build}" == "true" ]]; then
         if [[ -n "${configure_args}" ]]; then
@@ -65,7 +65,7 @@ main() {
         fi
         log_info "EA/Beta build enabled - added --with-version-opt=ea to configure args"
     fi
-    
+
     log_info "Build Configuration:"
     log_info "  Java Version: ${java_to_build}"
     log_info "  Target OS: ${target_os}"
@@ -79,57 +79,57 @@ main() {
     log_info "  Clean Workspace: ${clean_workspace}"
     log_info "  EA/Beta Build: ${ea_beta_build}"
     log_info "  Compare Build: ${compare_build}"
-    
+
     # Setup build environment
     setup_build_environment
-    
+
     # Setup path padding for reproducible builds if compare-build is enabled
     # This must happen BEFORE cloning temurin-build so it clones into the padded workspace
     if [[ "${compare_build}" == "true" ]]; then
         setup_reproducible_build_padding "${scm_ref}"
     fi
-    
+
     # Clone temurin-build repository (after padding so it goes into the right place)
     setup_temurin_build "${build_repo_url}" "${build_ref}"
-    
+
     # Prepare workspace
     prepare_workspace "${clean_workspace}"
-    
+
     # Prepare target directory
     prepare_output_dir "${TARGET_DIR}"
-    
+
     # Execute build using build-farm/make-adopt-build-farm.sh
     execute_build "${java_to_build}" "${target_os}" "${architecture}" "${variant}" "${build_args}" "${scm_ref}" "${configure_args}"
-    
+
     # Extract and save metadata
     extract_build_metadata
-    
+
     # Copy outputs to standard location
     organize_build_outputs
-    
+
     # Create checksums
     create_checksums "${TARGET_DIR}"
-    
+
     # Create stage metadata
     create_stage_metadata "${STAGE_NAME}" "success"
-    
+
     # List final artifacts
     list_artifacts "${TARGET_DIR}"
-    
+
     log_section "Build Stage - Complete"
 }
 
 # Setup build environment
 setup_build_environment() {
     log_info "Setting up build environment"
-    
+
     # Detect OS and architecture
     local detected_os=$(uname -s | tr '[:upper:]' '[:lower:]')
     local detected_arch=$(uname -m)
-    
+
     log_info "Detected OS: ${detected_os}"
     log_info "Detected Architecture: ${detected_arch}"
-    
+
     # Check for required tools
     local required_tools=("git" "make" "bash")
     for tool in "${required_tools[@]}"; do
@@ -139,7 +139,7 @@ setup_build_environment() {
         fi
         log_debug "Found tool: ${tool}"
     done
-    
+
     # Check for Java (boot JDK)
     if ! command -v java &> /dev/null; then
         log_error "Boot JDK not found in PATH - required for building OpenJDK"
@@ -148,7 +148,7 @@ setup_build_environment() {
     else
         local java_version=$(java -version 2>&1 | head -n 1)
         log_info "Boot JDK: ${java_version}"
-        
+
         # Set JAVA_HOME if not set
         if [[ -z "${JAVA_HOME:-}" ]]; then
             if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -159,7 +159,7 @@ setup_build_environment() {
             fi
         fi
     fi
-    
+
     log_info "Build environment ready"
 }
 
@@ -168,17 +168,17 @@ setup_temurin_build() {
     local build_repo_url=$1
     local build_ref=$2
     local build_repo_dir="${WORKSPACE}/temurin-build"
-    
+
     log_section "Setting up temurin-build repository"
     log_info "Repository URL: ${build_repo_url}"
     log_info "Branch/Ref: ${build_ref}"
-    
+
     # Remove existing directory if present (ensures clean state)
     if [[ -d "${build_repo_dir}" ]]; then
         log_info "Removing existing repository directory..."
         rm -rf "${build_repo_dir}"
     fi
-    
+
     # Clone repository
     log_info "Cloning repository..."
     if git clone --branch "${build_ref}" "${build_repo_url}" "${build_repo_dir}"; then
@@ -188,7 +188,7 @@ setup_temurin_build() {
         log_error "Branch/ref: ${build_ref}"
         exit 1
     fi
-    
+
     # Verify build script exists
     local build_script="${build_repo_dir}/build-farm/make-adopt-build-farm.sh"
     if [[ ! -f "${build_script}" ]]; then
@@ -196,7 +196,7 @@ setup_temurin_build() {
         log_error "Expected: build-farm/make-adopt-build-farm.sh"
         exit 1
     fi
-    
+
     log_info "temurin-build repository ready at: ${build_repo_dir}"
     log_info "Build script: ${build_script}"
 }
@@ -204,18 +204,18 @@ setup_temurin_build() {
 # Resolve canonical path (handles . and .. components)
 resolve_path() {
     local path="$1"
-    
+
     # Make absolute
     [[ "$path" != /* ]] && path="$PWD/$path"
-    
+
     # Process path components
     local -a parts resolved=()
     IFS='/' read -ra parts <<< "$path"
-    
+
     for part in "${parts[@]}"; do
         case "$part" in
             ""|".") continue ;;
-            "..") 
+            "..")
                 # Remove last element (bash 3.2+ compatible)
                 if [[ ${#resolved[@]} -gt 0 ]]; then
                     unset "resolved[${#resolved[@]}-1]"
@@ -224,7 +224,7 @@ resolve_path() {
             *) resolved+=("$part") ;;
         esac
     done
-    
+
     # Reconstruct path
     printf "/%s" "${resolved[@]}" | sed 's|/$||; s|^$|/|'
 }
@@ -236,9 +236,9 @@ pad_build_dir_to_same_length() {
     local ws_build_dir
     ws_build_dir=$(resolve_path "$2")
     local ws_build_folder="$3"
-    
+
     local ws_dir="${ws_build_dir}/${ws_build_folder}"
-    
+
     local padding_length=$((${#target_build_dir_to_match} - ${#ws_dir}))
     if [[ "$padding_length" -eq 0 ]]; then
         log_info "Build directories are already same length"
@@ -259,24 +259,24 @@ pad_build_dir_to_same_length() {
 # Setup reproducible build padding by fetching SBOM and extracting BUILD_WORKSPACE_DIRECTORY
 setup_reproducible_build_padding() {
     local scm_ref=$1
-    
+
     log_section "Setting up reproducible build path padding"
-    
+
     # Extract configuration for API URL construction
     local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
     local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
     local release=$(get_config_bool "${CONFIG_FILE}" ".parameters.release" "false")
-    
+
     # Remove "_adopt" suffix from SCM_REF if present
     local scm_ref_for_api="${scm_ref/_adopt/}"
     log_info "SCM_REF for API: ${scm_ref_for_api}"
-    
+
     # Add "-ea-beta" suffix for EA builds
     if [[ "${release}" == "false" ]]; then
         scm_ref_for_api="${scm_ref_for_api}-ea-beta"
         log_info "EA build detected, using: ${scm_ref_for_api}"
     fi
-    
+
     # Map OS to Adoptium API format
     case "${target_os}" in
         mac) local api_os="mac" ;;
@@ -285,7 +285,7 @@ setup_reproducible_build_padding() {
         aix) local api_os="aix" ;;
         *) log_error "Unsupported OS: ${target_os}"; return 1 ;;
     esac
-    
+
     # Map architecture to Adoptium API format
     case "${architecture}" in
         aarch64) local api_arch="aarch64" ;;
@@ -296,38 +296,38 @@ setup_reproducible_build_padding() {
         s390x) local api_arch="s390x" ;;
         *) log_error "Unsupported architecture: ${architecture}"; return 1 ;;
     esac
-    
+
     # Construct SBOM API URL
     local api_sbom_url="https://api.adoptium.net/v3/binary/version/${scm_ref_for_api}/${api_os}/${api_arch}/sbom/hotspot/normal/eclipse?project=jdk"
-    
+
     log_info "Fetching SBOM from: ${api_sbom_url}"
-    
+
     # Download SBOM to temporary file
     local sbom_file="${WORKSPACE}/upstream-sbom.json"
     if curl -L -f -s -o "${sbom_file}" "${api_sbom_url}"; then
         log_info "SBOM downloaded successfully"
-        
+
         # Extract BUILD_WORKSPACE_DIRECTORY from SBOM
         local build_workspace_directory
         build_workspace_directory=$(jq -r '.components[0] | .properties[] | select(.name == "Build Workspace Directory") | .value' "${sbom_file}" 2>/dev/null)
-        
+
         if [[ -n "${build_workspace_directory}" && "${build_workspace_directory}" != "null" ]]; then
             log_info "Found BUILD_WORKSPACE_DIRECTORY in SBOM: ${build_workspace_directory}"
-            
+
             # Calculate padded workspace directory
             # The build will create: ${WORKSPACE}/temurin-build/workspace/build/src
             local build_folder="temurin-build/workspace/build/src"
             local padded_workspace
             padded_workspace=$(pad_build_dir_to_same_length "${build_workspace_directory}" "${WORKSPACE}" "${build_folder}")
-            
+
             if [[ -n "${padded_workspace}" ]]; then
                 log_info "Applying workspace padding for reproducible build"
                 log_info "Original WORKSPACE: ${WORKSPACE}"
                 log_info "Padded WORKSPACE: ${padded_workspace}"
-                
+
                 # Create padded directory
                 mkdir -p "${padded_workspace}"
-                
+
                 # Update WORKSPACE environment variable for the build
                 export WORKSPACE="${padded_workspace}"
                 log_info "WORKSPACE updated to: ${WORKSPACE}"
@@ -337,33 +337,33 @@ setup_reproducible_build_padding() {
         else
             log_warn "BUILD_WORKSPACE_DIRECTORY not found in SBOM - skipping path padding"
         fi
-        
+
         # Clean up SBOM file
         rm -f "${sbom_file}"
     else
         log_warn "Failed to download SBOM from ${api_sbom_url}"
         log_warn "Path padding will be skipped - this may affect reproducibility"
     fi
-    
+
     log_info "Reproducible build path padding setup complete"
 }
 
 # Prepare workspace for build
 prepare_workspace() {
     local clean=$1
-    
+
     if [[ "${clean}" == "true" ]]; then
         log_info "Cleaning workspace build directories"
-        
+
         # Clean build output directories but preserve temurin-build repo
         rm -rf "${WORKSPACE}/workspace/build" || true
         rm -rf "${WORKSPACE}/workspace/target" || true
-        
+
         log_info "Workspace cleaned"
     else
         log_info "Skipping workspace clean"
     fi
-    
+
     # Always clean any previous openjdk build directory
     local openjdk_build_dir="${WORKSPACE}/workspace/build/src/build"
     if [[ -d "${openjdk_build_dir}" ]]; then
@@ -381,12 +381,12 @@ execute_build() {
     local build_args=$5
     local scm_ref=$6
     local configure_args=$7
-    
+
     log_section "Executing JDK Build"
-    
+
     local build_repo_dir="${WORKSPACE}/temurin-build"
     local build_script="build-farm/make-adopt-build-farm.sh"
-    
+
     log_info "Build parameters:"
     log_info "  Script: ${build_script}"
     log_info "  Java Version: ${java_version}"
@@ -396,7 +396,7 @@ execute_build() {
     log_info "  Build Args: ${build_args}"
     log_info "  Configure Args: ${configure_args}"
     log_info "  SCM Ref: ${scm_ref}"
-    
+
     # Set build environment variables (matching Jenkins pipeline)
     export JAVA_TO_BUILD="${java_version}"
     export TARGET_OS="${os}"
@@ -407,11 +407,11 @@ execute_build() {
     export BUILD_NUMBER="${BUILD_NUMBER}"
     export SCM_REF="${scm_ref}"
     export CONFIGURE_ARGS="${configure_args}"
-    
+
     # Additional environment variables
     export FILENAME="${FILENAME:-}"
     export OVERRIDE_FILE_NAME_VERSION="${OVERRIDE_FILE_NAME_VERSION:-}"
-    
+
     log_info "Environment variables set:"
     log_debug "  JAVA_TO_BUILD=${JAVA_TO_BUILD}"
     log_debug "  TARGET_OS=${TARGET_OS}"
@@ -423,17 +423,17 @@ execute_build() {
     log_debug "  BUILD_NUMBER=${BUILD_NUMBER}"
     log_debug "  SCM_REF=${SCM_REF}"
     log_debug "  JAVA_HOME=${JAVA_HOME:-not set}"
-    
+
     log_info "Starting build at $(date)"
     log_info "Build command: bash ${build_script}"
-    
+
     # Change to temurin-build directory
     cd "${build_repo_dir}"
-    
+
     # Execute build script directly (timeout removed to allow stdin)
     # Note: Jenkins uses a 12-hour timeout, but we run without timeout to allow interactive input
     log_info "Starting build (no timeout - will run until completion)"
-    
+
     if bash "${build_script}"; then
         log_info "Build completed successfully at $(date)"
     else
@@ -442,35 +442,35 @@ execute_build() {
         cd "${WORKSPACE}"
         exit 1
     fi
-    
+
     cd "${WORKSPACE}"
-    
+
     log_info "Build execution complete"
 }
 
 # Extract build metadata
 extract_build_metadata() {
     log_info "Extracting build metadata"
-    
+
     local build_repo_dir="${WORKSPACE}/temurin-build"
     local target_dir="${build_repo_dir}/workspace/target"
-    
+
     # Look for version information
     local version="unknown"
     local version_file=""
-    
+
     # Try different possible locations for version/release file
     for possible_file in \
         "${target_dir}/metadata/version.txt" \
         "${target_dir}/version.txt" \
         "${WORKSPACE}/workspace/build/src/build/"*/images/jdk/release; do
-        
+
         if [[ -f "${possible_file}" ]]; then
             version_file="${possible_file}"
             break
         fi
     done
-    
+
     if [[ -n "${version_file}" ]]; then
         if [[ "${version_file}" == */release ]]; then
             # Extract version from release file
@@ -482,7 +482,7 @@ extract_build_metadata() {
     else
         log_warn "Version file not found"
     fi
-    
+
     # Create build metadata JSON
     cat > "${WORKSPACE}/build-metadata.json" <<EOF
 {
@@ -498,9 +498,9 @@ extract_build_metadata() {
   "variant": "$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")"
 }
 EOF
-    
+
     log_info "Build metadata saved to build-metadata.json"
-    
+
     # Display metadata
     if command -v jq &> /dev/null; then
         log_debug "Build metadata:"
@@ -511,28 +511,28 @@ EOF
 # Organize build outputs into standard structure
 organize_build_outputs() {
     log_info "Organizing build outputs"
-    
+
     local build_repo_dir="${WORKSPACE}/temurin-build"
     local target_dir="${build_repo_dir}/workspace/target"
-    
+
     if [[ ! -d "${target_dir}" ]]; then
         log_error "Target directory not found: ${target_dir}"
         exit 1
     fi
-    
+
     log_info "Found build outputs in: ${target_dir}"
-    
+
     # Find and copy JDK artifacts
     log_info "Searching for JDK artifacts..."
     local artifacts_found=0
-    
+
     # Look for tar.gz and zip files
     while IFS= read -r -d '' artifact; do
         log_info "Found artifact: $(basename ${artifact})"
         cp "${artifact}" "${TARGET_DIR}/"
         artifacts_found=$((artifacts_found + 1))
     done < <(find "${target_dir}" -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print0)
-    
+
     if [[ ${artifacts_found} -eq 0 ]]; then
         log_error "No tar.gz or zip artifacts found in ${target_dir}"
         log_info "Directory contents:"
@@ -541,15 +541,15 @@ organize_build_outputs() {
     else
         log_info "Copied ${artifacts_found} artifact(s)"
     fi
-    
+
     # Copy metadata files
     if [[ -f "${WORKSPACE}/build-metadata.json" ]]; then
         cp "${WORKSPACE}/build-metadata.json" "${TARGET_DIR}/"
     fi
-    
+
     # Copy any buildinfo or release files
     find "${target_dir}" -type f \( -name "buildinfo.json" -o -name "release" \) -exec cp {} "${TARGET_DIR}/" \; 2>/dev/null || true
-    
+
     log_info "Build outputs organized in: ${TARGET_DIR}"
 }
 
@@ -557,14 +557,14 @@ organize_build_outputs() {
 error_handler() {
     local line_number=$1
     log_error "Build stage failed at line ${line_number}"
-    
+
     # Try to capture build logs
     local build_log="${WORKSPACE}/temurin-build/workspace/logs/build.log"
     if [[ -f "${build_log}" ]]; then
         log_error "Last 50 lines of build log:"
         tail -n 50 "${build_log}" || true
     fi
-    
+
     create_stage_metadata "${STAGE_NAME}" "failed"
     exit 1
 }

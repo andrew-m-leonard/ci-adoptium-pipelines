@@ -236,7 +236,7 @@ To test path padding locally:
    export CONFIG_FILE=pipeline-config.json
    export TARGET_DIR=$(pwd)/target
    export BUILD_NUMBER=local
-   
+
    ./scripts/stages/02-build.sh
    ```
 
@@ -266,10 +266,10 @@ After building with path padding:
    ```bash
    # Extract LC_UUID from local build
    otool -l ${TARGET_DIR}/jdk-*/Contents/Home/lib/server/libjvm.dylib | grep uuid
-   
+
    # Extract LC_UUID from upstream build
    otool -l upstream-jdk/jdk-*/Contents/Home/lib/server/libjvm.dylib | grep uuid
-   
+
    # UUIDs should match
    ```
 

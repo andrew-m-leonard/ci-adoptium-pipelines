@@ -83,10 +83,10 @@ Added automatic workspace path padding to the build stage to ensure reproducible
 
 ## Key Features
 
-✅ **Automatic**: No manual path calculation needed  
-✅ **Cross-platform**: Works on macOS, Linux, Windows, AIX  
-✅ **Safe**: Graceful fallback if SBOM unavailable  
-✅ **Logged**: Detailed logging for debugging  
+✅ **Automatic**: No manual path calculation needed
+✅ **Cross-platform**: Works on macOS, Linux, Windows, AIX
+✅ **Safe**: Graceful fallback if SBOM unavailable
+✅ **Logged**: Detailed logging for debugging
 ✅ **Tested**: Based on proven logic from `macos_repro_build_compare.sh`
 
 ## Testing

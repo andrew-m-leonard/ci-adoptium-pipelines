@@ -83,7 +83,7 @@ Scenario: Linux x64 Build Pipeline
 
 Build Stages:
 ├─ Compile:    ✅ SUCCESS
-├─ Sign:       ✅ SUCCESS  
+├─ Sign:       ✅ SUCCESS
 ├─ Installer:  ✅ SUCCESS
 └─ SBOM:       ✅ SUCCESS
 
@@ -94,7 +94,7 @@ AQA Tests (triggered as downstream):
 
 Pipeline Status: ❌ UNSTABLE
 
-⚠️  PROBLEM: 
+⚠️  PROBLEM:
 - Build was 100% successful
 - Only 1 test out of 45,000 failed (99.998% pass rate)
 - But pipeline shows UNSTABLE
@@ -235,7 +235,7 @@ Linux x64 Build Pipeline: ❌ UNSTABLE
 Linux x64 Build Pipeline: ✅ SUCCESS
 └─ All build stages completed successfully
 
-Linux x64 Test Pipeline: ❌ UNSTABLE  
+Linux x64 Test Pipeline: ❌ UNSTABLE
 └─ 1 test failed out of 45,000 (99.998% pass rate)
 ```
 
@@ -398,7 +398,7 @@ New Architecture:
 ```
 Dashboard shows:
 ├─ Linux x64: UNSTABLE
-├─ Mac x64: UNSTABLE  
+├─ Mac x64: UNSTABLE
 └─ Windows x64: SUCCESS
 
 Question: Did builds fail or tests fail?

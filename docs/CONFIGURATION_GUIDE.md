@@ -477,7 +477,7 @@ export VARIANT=hotspot
 ```groovy
 pipeline {
     agent any
-    
+
     environment {
         WORKSPACE = "${WORKSPACE}"
         JAVA_VERSION = 'jdk21u'
@@ -486,14 +486,14 @@ pipeline {
         VARIANT = 'temurin'
         CONFIG_DIR = "${WORKSPACE}/configurations"
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
                 sh './scripts/stages/01-initialize.sh'
             }
         }
-        
+
         stage('Build') {
             steps {
                 sh '''
@@ -544,7 +544,7 @@ jobs:
     steps:
       - name: Initialize
         run: ./scripts/stages/01-initialize.sh
-      
+
       - name: Upload config
         uses: actions/upload-artifact@v3
         with:
@@ -552,7 +552,7 @@ jobs:
           path: |
             BUILD_CONFIGURATION.json
             pipeline-config.json
-  
+
   build:
     needs: initialize
     runs-on: ubuntu-latest
@@ -561,7 +561,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: build-config
-      
+
       - name: Build
         run: |
           export CONFIG_FILE=${GITHUB_WORKSPACE}/pipeline-config.json
@@ -574,7 +574,7 @@ jobs:
 
 **Error**: `Configuration file not found: configurations/jdk21u_pipeline_config.json`
 
-**Solution**: 
+**Solution**:
 1. Check `CONFIG_DIR` is set correctly
 2. Verify the file exists: `ls -la ${CONFIG_DIR}/`
 3. Ensure filename matches pattern: `{JAVA_VERSION}_pipeline_config.json`

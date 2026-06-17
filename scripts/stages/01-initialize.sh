@@ -41,14 +41,14 @@ BUILD_NUMBER="${BUILD_NUMBER:-local}"
 # Main execution
 main() {
     log_section "Initialize Stage - Start"
-    
+
     # Validate required environment variables
     require_env "WORKSPACE"
     require_env "JAVA_VERSION"
     require_env "TARGET_OS"
     require_env "ARCHITECTURE"
     require_env "VARIANT"
-    
+
     # Set defaults for optional variables
     export CONFIG_DIR="${CONFIG_DIR:-${WORKSPACE}/configurations}"
     export SCM_REF="${SCM_REF:-}"
@@ -58,7 +58,7 @@ main() {
     export AQA_REF="${AQA_REF:-}"
     export RELEASE="${RELEASE:-false}"
     export WEEKLY="${WEEKLY:-false}"
-    
+
     log_info "Initialize Configuration:"
     log_info "  Java Version: ${JAVA_VERSION}"
     log_info "  Target OS: ${TARGET_OS}"
@@ -67,21 +67,21 @@ main() {
     log_info "  Config Directory: ${CONFIG_DIR}"
     log_info "  Release: ${RELEASE}"
     log_info "  Weekly: ${WEEKLY}"
-    
+
     # Load version-specific configuration
     local config_file=$(find_config_file "${JAVA_VERSION}")
     log_info "Using configuration file: ${config_file}"
-    
+
     # Find platform configuration key
     local platform_key=$(get_platform_key "${TARGET_OS}" "${ARCHITECTURE}")
     log_info "Platform key: ${platform_key}"
-    
+
     # Generate BUILD_CONFIGURATION
     generate_build_configuration "${config_file}" "${platform_key}"
-    
+
     # Create stage metadata
     create_stage_metadata "${STAGE_NAME}" "success"
-    
+
     log_section "Initialize Stage - Complete"
 }
 
@@ -89,14 +89,14 @@ main() {
 find_config_file() {
     local java_version=$1
     local config_file="${CONFIG_DIR}/${java_version}_pipeline_config.json"
-    
+
     if [[ ! -f "${config_file}" ]]; then
         log_error "Configuration file not found: ${config_file}"
         log_error "Available configurations:"
         ls -1 "${CONFIG_DIR}"/*.json 2>/dev/null || log_error "No configurations found in ${CONFIG_DIR}"
         exit 1
     fi
-    
+
     echo "${config_file}"
 }
 
@@ -104,7 +104,7 @@ find_config_file() {
 get_platform_key() {
     local os=$1
     local arch=$2
-    
+
     # Normalize architecture name
     local arch_normalized="${arch}"
     case "${arch}" in
@@ -118,7 +118,7 @@ get_platform_key() {
             arch_normalized="x32"
             ;;
     esac
-    
+
     # Normalize OS name
     local os_normalized="${os}"
     case "${os}" in
@@ -141,7 +141,7 @@ get_platform_key() {
             os_normalized="Solaris"
             ;;
     esac
-    
+
     # Construct platform key (e.g., "aarch64Mac", "x64Linux")
     echo "${arch_normalized}${os_normalized}"
 }
@@ -150,9 +150,9 @@ get_platform_key() {
 generate_build_configuration() {
     local config_file=$1
     local platform_key=$2
-    
+
     log_section "Generating BUILD_CONFIGURATION"
-    
+
     # Check if platform exists in config
     local platform_exists=$(jq -r ".buildConfigurations.${platform_key} != null" "${config_file}")
     if [[ "${platform_exists}" != "true" ]]; then
@@ -161,17 +161,17 @@ generate_build_configuration() {
         jq -r '.buildConfigurations | keys[]' "${config_file}"
         exit 1
     fi
-    
+
     # Extract platform configuration
     local platform_config=$(jq ".buildConfigurations.${platform_key}" "${config_file}")
-    
+
     # Get variant-specific values
     local build_args=$(echo "${platform_config}" | jq -r ".buildArgs.${VARIANT} // .buildArgs // \"\"")
     local configure_args=$(echo "${platform_config}" | jq -r ".configureArgs.${VARIANT} // .configureArgs // \"\"")
     local docker_file=$(echo "${platform_config}" | jq -r ".dockerFile.${VARIANT} // .dockerFile // \"\"")
     local additional_node_labels=$(echo "${platform_config}" | jq -r ".additionalNodeLabels.${VARIANT} // .additionalNodeLabels // \"\"")
     local additional_test_labels=$(echo "${platform_config}" | jq -r ".additionalTestLabels.${VARIANT} // \"\"")
-    
+
     # Get test list based on build type
     local test_list
     if [[ "${WEEKLY}" == "true" ]]; then
@@ -181,7 +181,7 @@ generate_build_configuration() {
     else
         test_list=$(echo "${platform_config}" | jq -c '.test.nightly // .test.weekly // []')
     fi
-    
+
     # Get other platform values
     local os=$(echo "${platform_config}" | jq -r '.os')
     local arch=$(echo "${platform_config}" | jq -r '.arch')
@@ -190,13 +190,13 @@ generate_build_configuration() {
     local docker_credential=$(echo "${platform_config}" | jq -r '.dockerCredential // ""')
     local docker_args=$(echo "${platform_config}" | jq -r '.dockerArgs // ""')
     local clean_workspace_after=$(echo "${platform_config}" | jq -r '.cleanWorkspaceAfterBuild // false')
-    
+
     # Construct node label
     local node_label="build&&${os}&&${arch}"
     if [[ -n "${additional_node_labels}" ]]; then
         node_label="${additional_node_labels}&&${node_label}"
     fi
-    
+
     # Determine SCM_REF if not provided
     if [[ -z "${SCM_REF}" ]]; then
         if [[ "${RELEASE}" == "true" ]]; then
@@ -207,7 +207,7 @@ generate_build_configuration() {
             SCM_REF="master"
         fi
     fi
-    
+
     # Generate BUILD_CONFIGURATION JSON
     cat > "${WORKSPACE}/BUILD_CONFIGURATION.json" <<EOF
 {
@@ -252,15 +252,15 @@ generate_build_configuration() {
   "CLEAN_WORKSPACE_BUILD_OUTPUT_ONLY_AFTER": true
 }
 EOF
-    
+
     log_info "BUILD_CONFIGURATION generated successfully"
-    
+
     # Display the configuration
     if command -v jq &> /dev/null; then
         log_info "Generated BUILD_CONFIGURATION:"
         cat "${WORKSPACE}/BUILD_CONFIGURATION.json" | jq .
     fi
-    
+
     # Also create a simplified version for the build stage
     cat > "${WORKSPACE}/pipeline-config.json" <<EOF
 {
@@ -297,7 +297,7 @@ EOF
   "timestamp": $(date +%s)
 }
 EOF
-    
+
     log_info "Simplified pipeline-config.json also created"
 }
 

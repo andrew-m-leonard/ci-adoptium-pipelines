@@ -6,15 +6,15 @@
 Build #100 (original run):
   Build: Creates workspace, BUILD_UID=abc123
   Sign: Uses workspace from #100, BUILD_UID=abc123
-  
+
 Someone clicks "Rebuild" on #100:
   Build #101 (rebuild of #100):
     Build: Creates NEW workspace, BUILD_UID=def456
-    
+
   Build #102 (restart from Sign of #101):
     Sign: Tries #102 (fails), falls back to #101
     Sign: Gets workspace with BUILD_UID=def456 ✅ CORRECT
-    
+
 BUT if Sign has network error:
   Build #103 (restart from Sign of #102):
     Sign: Tries #103 (fails), falls back to #102
@@ -33,12 +33,12 @@ Generate a unique BUILD_UID at pipeline start and validate it in every stage.
 ```groovy
 pipeline {
     agent none
-    
+
     parameters {
-        string(name: 'BUILD_UID', defaultValue: '', 
+        string(name: 'BUILD_UID', defaultValue: '',
                description: 'Unique ID for this pipeline run (auto-generated if empty)')
     }
-    
+
     stages {
         stage('Initialize') {
             agent any
@@ -54,13 +54,13 @@ pipeline {
                         env.BUILD_UID = params.BUILD_UID
                         println "Reusing BUILD_UID: ${env.BUILD_UID}"
                     }
-                    
+
                     // Store BUILD_UID for downstream stages
                     currentBuild.description = "BUILD_UID: ${env.BUILD_UID}"
                 }
             }
         }
-        
+
         // ... other stages
     }
 }
@@ -75,20 +75,20 @@ stage('Stage Name') {
         script {
             println "=== Stage Name - Start ==="
             println "BUILD_UID: ${env.BUILD_UID}"
-            
+
             // 1. Clean workspace
             cleanWs()
-            
+
             // 2. Retrieve workspace with BUILD_UID validation
             def buildNumber = env.BUILD_NUMBER
             def workspaceValid = false
             def maxAttempts = 10  // Prevent infinite loop
             def attempt = 0
-            
+
             while (!workspaceValid && attempt < maxAttempts) {
                 attempt++
                 println "Attempt ${attempt}: Trying build ${buildNumber}..."
-                
+
                 try {
                     // Retrieve workspace
                     copyArtifacts(
@@ -99,11 +99,11 @@ stage('Stage Name') {
                         optional: false,
                         fingerprintArtifacts: true
                     )
-                    
+
                     // Validate BUILD_UID
                     if (fileExists('workspace/pipeline-metadata.json')) {
                         def metadata = readJSON file: 'workspace/pipeline-metadata.json'
-                        
+
                         if (metadata.BUILD_UID == env.BUILD_UID) {
                             // Validate required stages and artifacts
                             if (validateWorkspace('Stage Name', metadata)) {
@@ -124,13 +124,13 @@ stage('Stage Name') {
                 } catch (Exception e) {
                     println "⚠️ Could not retrieve from build ${buildNumber}: ${e.message}"
                 }
-                
+
                 // If not valid, try previous build
                 if (!workspaceValid) {
                     def previousBuild = Jenkins.instance.getItemByFullName(env.JOB_NAME)
                                                .getBuildByNumber(buildNumber.toInteger())
                                                ?.getPreviousBuild()
-                    
+
                     if (previousBuild) {
                         buildNumber = previousBuild.number.toString()
                         cleanWs()  // Clean before retry
@@ -139,22 +139,22 @@ stage('Stage Name') {
                     }
                 }
             }
-            
+
             if (!workspaceValid) {
                 error("❌ No valid workspace found with BUILD_UID: ${env.BUILD_UID}")
             }
-            
+
             // 3. Do the work
             sh './do-stage-work.sh'
-            
+
             // 4. Update metadata (preserving BUILD_UID)
             updateWorkspaceMetadata('Stage Name', env.BUILD_UID)
-            
+
             // 5. Archive workspace
             archiveArtifacts artifacts: 'workspace/**/*',
                            fingerprint: true,
                            allowEmptyArchive: false
-            
+
             println "=== Stage Name - Complete ==="
         }
     }
@@ -176,7 +176,7 @@ def createWorkspaceMetadata(String buildUid) {
         lastUpdated: currentBuild.startTimeInMillis,
         pipelineVersion: '1.0'
     ]
-    
+
     writeJSON file: 'workspace/pipeline-metadata.json', json: metadata, pretty: 4
     println "Created metadata with BUILD_UID: ${buildUid}"
 }
@@ -186,21 +186,21 @@ def updateWorkspaceMetadata(String stageName, String buildUid) {
     if (!fileExists('workspace/pipeline-metadata.json')) {
         error("Metadata file missing!")
     }
-    
+
     def metadata = readJSON file: 'workspace/pipeline-metadata.json'
-    
+
     // Verify BUILD_UID hasn't changed
     if (metadata.BUILD_UID != buildUid) {
         error("BUILD_UID mismatch! Expected: ${buildUid}, Found: ${metadata.BUILD_UID}")
     }
-    
+
     // Update metadata
     if (!metadata.completedStages.contains(stageName)) {
         metadata.completedStages.add(stageName)
     }
     metadata.stageBuilds[stageName] = env.BUILD_NUMBER
     metadata.lastUpdated = currentBuild.startTimeInMillis
-    
+
     writeJSON file: 'workspace/pipeline-metadata.json', json: metadata, pretty: 4
     println "Updated metadata: ${metadata.completedStages.join(' → ')}"
 }
@@ -212,16 +212,16 @@ def validateWorkspace(String currentStage, def metadata) {
         println "❌ No BUILD_UID in metadata"
         return false
     }
-    
+
     // Determine required previous stages
     def stageOrder = ['Build', 'Sign', 'Installer', 'Test']
     def currentIndex = stageOrder.indexOf(currentStage)
-    
+
     if (currentIndex == -1) {
         println "⚠️ Unknown stage: ${currentStage}"
         return false
     }
-    
+
     // Check all previous stages completed
     for (int i = 0; i < currentIndex; i++) {
         def requiredStage = stageOrder[i]
@@ -230,7 +230,7 @@ def validateWorkspace(String currentStage, def metadata) {
             return false
         }
     }
-    
+
     // Verify key artifacts exist
     def requiredArtifacts = getRequiredArtifacts(currentStage)
     for (artifact in requiredArtifacts) {
@@ -239,7 +239,7 @@ def validateWorkspace(String currentStage, def metadata) {
             return false
         }
     }
-    
+
     return true
 }
 
@@ -261,13 +261,13 @@ def getRequiredArtifacts(String stageName) {
 ```groovy
 pipeline {
     agent none
-    
+
     parameters {
-        string(name: 'BUILD_UID', defaultValue: '', 
+        string(name: 'BUILD_UID', defaultValue: '',
                description: 'Unique ID for this pipeline run')
         choice(name: 'JDK_VERSION', choices: ['jdk21u', 'jdk17u'])
     }
-    
+
     stages {
         stage('Initialize') {
             agent any
@@ -281,28 +281,28 @@ pipeline {
                         env.BUILD_UID = params.BUILD_UID
                         println "♻️ Reusing BUILD_UID: ${env.BUILD_UID}"
                     }
-                    
+
                     currentBuild.description = "BUILD_UID: ${env.BUILD_UID}"
-                    
+
                     // Store BUILD_UID for restart
                     // When user clicks "Restart from Stage", this BUILD_UID will be passed
                     env.RESTART_BUILD_UID = env.BUILD_UID
                 }
             }
         }
-        
+
         stage('Build') {
             agent { label 'build-node' }
             steps {
                 script {
                     println "=== Build - Start ==="
                     println "BUILD_UID: ${env.BUILD_UID}"
-                    
+
                     cleanWs()
                     checkout scm
-                    
+
                     sh './build-jdk.sh'
-                    
+
                     // Create metadata with BUILD_UID
                     def metadata = [
                         BUILD_UID: env.BUILD_UID,
@@ -312,33 +312,33 @@ pipeline {
                         lastUpdated: currentBuild.startTimeInMillis
                     ]
                     writeJSON file: 'workspace/pipeline-metadata.json', json: metadata, pretty: 4
-                    
+
                     archiveArtifacts artifacts: 'workspace/**/*', fingerprint: true
-                    
+
                     println "=== Build - Complete ==="
                 }
             }
         }
-        
+
         stage('Sign') {
             agent { label 'sign-node' }
             steps {
                 script {
                     println "=== Sign - Start ==="
                     println "BUILD_UID: ${env.BUILD_UID}"
-                    
+
                     cleanWs()
-                    
+
                     // Retrieve workspace with BUILD_UID validation
                     def buildNumber = env.BUILD_NUMBER
                     def workspaceValid = false
                     def maxAttempts = 10
                     def attempt = 0
-                    
+
                     while (!workspaceValid && attempt < maxAttempts) {
                         attempt++
                         println "Attempt ${attempt}: Checking build ${buildNumber}..."
-                        
+
                         try {
                             copyArtifacts(
                                 projectName: env.JOB_NAME,
@@ -347,12 +347,12 @@ pipeline {
                                 target: '.',
                                 optional: false
                             )
-                            
+
                             if (fileExists('workspace/pipeline-metadata.json')) {
                                 def metadata = readJSON file: 'workspace/pipeline-metadata.json'
-                                
+
                                 if (metadata.BUILD_UID == env.BUILD_UID) {
-                                    if (metadata.completedStages?.contains('Build') && 
+                                    if (metadata.completedStages?.contains('Build') &&
                                         fileExists('workspace/target')) {
                                         workspaceValid = true
                                         println "✅ Valid workspace from build ${buildNumber}"
@@ -364,7 +364,7 @@ pipeline {
                         } catch (Exception e) {
                             println "⚠️ Error retrieving from build ${buildNumber}"
                         }
-                        
+
                         if (!workspaceValid) {
                             def previousBuild = Jenkins.instance.getItemByFullName(env.JOB_NAME)
                                                        .getBuildByNumber(buildNumber.toInteger())
@@ -377,23 +377,23 @@ pipeline {
                             }
                         }
                     }
-                    
+
                     if (!workspaceValid) {
                         error("❌ No valid workspace found with BUILD_UID: ${env.BUILD_UID}")
                     }
-                    
+
                     // Do the work
                     sh './sign-artifacts.sh'
-                    
+
                     // Update metadata
                     def metadata = readJSON file: 'workspace/pipeline-metadata.json'
                     metadata.completedStages.add('Sign')
                     metadata.stageBuilds['Sign'] = env.BUILD_NUMBER
                     metadata.lastUpdated = currentBuild.startTimeInMillis
                     writeJSON file: 'workspace/pipeline-metadata.json', json: metadata, pretty: 4
-                    
+
                     archiveArtifacts artifacts: 'workspace/**/*', fingerprint: true
-                    
+
                     println "=== Sign - Complete ==="
                 }
             }
@@ -440,10 +440,10 @@ Build #101 (restart from Sign of #100):
 ```
 Build #100:
   BUILD_UID=abc123
-  
+
 Build #101 (rebuild of #100):
   BUILD_UID=def456 (NEW UID)
-  
+
 Build #102 (restart from Sign of #101):
   Sign: Looks for BUILD_UID=def456
   Sign: Tries #102 (not found)
@@ -453,11 +453,11 @@ Build #102 (restart from Sign of #101):
 
 ## Benefits
 
-✅ **Prevents wrong workspace** - BUILD_UID must match  
-✅ **Works across rebuilds** - Each pipeline run has unique UID  
-✅ **Works across restarts** - UID is preserved  
-✅ **Clear validation** - Know exactly which pipeline run workspace came from  
-✅ **Fail fast** - Reject workspace from different pipeline run immediately  
+✅ **Prevents wrong workspace** - BUILD_UID must match
+✅ **Works across rebuilds** - Each pipeline run has unique UID
+✅ **Works across restarts** - UID is preserved
+✅ **Clear validation** - Know exactly which pipeline run workspace came from
+✅ **Fail fast** - Reject workspace from different pipeline run immediately
 
 ## Summary
 

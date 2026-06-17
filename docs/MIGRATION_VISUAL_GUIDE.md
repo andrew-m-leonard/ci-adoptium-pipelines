@@ -742,12 +742,12 @@ After running the comparison, the following files are generated:
    Comparing: /tmp/old-jdk/jdk-21.0.12+1
    Against:   /tmp/new-jdk/jdk-21.0.12+1
    Platform:  Linux
-   
+
    File count: 15,234 (both builds)
    Files compared: 15,234
    Files identical: 15,234
    Files different: 0
-   
+
    ReproduciblePercent: 100%
    ```
 
@@ -767,7 +767,7 @@ stage('Compare Builds') {
                 tar -xzf ${OLD_BUILD_ARTIFACT} -C /tmp/comparison/old
                 tar -xzf ${NEW_BUILD_ARTIFACT} -C /tmp/comparison/new
             '''
-            
+
             // Run comparison
             def compareResult = sh(
                 script: '''
@@ -779,16 +779,16 @@ stage('Compare Builds') {
                 ''',
                 returnStatus: true
             )
-            
+
             // Archive results
             archiveArtifacts artifacts: 'temurin-build/tooling/reproducible/reprotest.diff', allowEmptyArchive: true
             archiveArtifacts artifacts: 'temurin-build/tooling/reproducible/reproducible_evidence.log'
-            
+
             // Fail if not identical
             if (compareResult != 0) {
                 error("Build comparison failed - builds are not identical!")
             }
-            
+
             echo "✓ Build comparison PASSED - builds are identical"
         }
     }

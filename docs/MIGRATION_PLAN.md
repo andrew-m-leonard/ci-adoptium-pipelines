@@ -709,11 +709,11 @@ stage('Compare Builds') {
                   temurin ${OLD_BUILD_DIR}/jdk-${VERSION} \
                   temurin ${NEW_BUILD_DIR}/jdk-${VERSION} \
                   ${PLATFORM}
-                
+
                 # Archive results
                 cp reprotest.diff ${WORKSPACE}/comparison-results/
                 cp reproducible_evidence.log ${WORKSPACE}/comparison-results/
-                
+
                 # Fail if not 100% reproducible
                 if [ $? -ne 0 ]; then
                     echo "ERROR: Builds are not identical!"

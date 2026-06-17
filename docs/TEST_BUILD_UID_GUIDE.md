@@ -35,12 +35,12 @@ Test whether BUILD_UID can be reliably passed across stages and preserved during
    ```
    STAGE 1: Initialize
    🆕 Generated NEW BUILD_UID: 1704067200000-a1b2c3d4
-   
+
    STAGE 2: Process
    ✅ env.BUILD_UID is available: 1704067200000-a1b2c3d4
    ✅ Unstashed build_uid.txt
    ✅ UIDs match!
-   
+
    STAGE 3: Finalize
    ✅ env.BUILD_UID is available: 1704067200000-a1b2c3d4
    ✅ Unstashed build_uid.txt
@@ -58,7 +58,7 @@ Test whether BUILD_UID can be reliably passed across stages and preserved during
    STAGE 2: Process
    📝 Test 1: Environment Variable
    ??? env.BUILD_UID is available: ???
-   
+
    📦 Test 2: Unstash UID file
    ??? Unstashed build_uid.txt
    ```

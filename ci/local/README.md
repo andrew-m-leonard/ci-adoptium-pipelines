@@ -75,7 +75,7 @@ Resume from any stage after a failure:
 
 ```bash
 # Build fails at installer stage
-python3 ci/local/run-pipeline.py ... 
+python3 ci/local/run-pipeline.py ...
 # (fails)
 
 # Fix the issue, then resume from installer
@@ -223,7 +223,7 @@ All artifacts are stored in the workspace using a two-directory structure:
 
 **Problem**: "Failed to clone configuration repository"
 
-**Solution**: 
+**Solution**:
 - Verify URL is accessible
 - Check branch name is correct
 - Ensure git is installed and configured
@@ -351,9 +351,9 @@ self.workspace_mgr.validate_and_setup(
 def stage_build(self):
     # Pre-cleanup: Always clean stage_workspace
     self.workspace_mgr.cleanup_stage_workspace('pre')
-    
+
     # Execute stage logic...
-    
+
     # Post-cleanup: Clean if cleanWorkspaceAfterStage=true
     self.workspace_mgr.cleanup_stage_workspace('post')
 ```

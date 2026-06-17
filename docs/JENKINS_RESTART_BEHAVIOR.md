@@ -27,7 +27,7 @@ Pipeline with 4 stages: Build → Sign → Installer → Test
 **Original Run:**
 ```
 Build     ✅ SUCCESS
-Sign      ✅ SUCCESS  
+Sign      ✅ SUCCESS
 Installer ❌ FAILED
 Test      ⊘ SKIPPED (because Installer failed)
 ```
@@ -70,10 +70,10 @@ stage('Sign') {
                 filter: 'workspace/target/**/*',
                 target: '.'
             )
-            
+
             // Do signing work
             sh './sign-artifacts.sh'
-            
+
             // Archive outputs for next stage
             archiveArtifacts artifacts: 'signed/**/*'
         }
@@ -161,7 +161,7 @@ stage('Sign') {
                 filter: 'target/**/*',
                 target: '.'
             )
-            
+
             sh './sign-artifacts.sh'
             archiveArtifacts artifacts: 'signed/**/*'
         }
@@ -218,10 +218,10 @@ stage('Any Stage Except First') {
                 filter: 'path/to/inputs/**/*',
                 target: '.'
             )
-            
+
             // Do work
             // ...
-            
+
             // Archive outputs
             archiveArtifacts artifacts: 'path/to/outputs/**/*'
         }
@@ -241,7 +241,7 @@ stage('Any Stage') {
         script {
             // Do work
             // ...
-            
+
             // ALWAYS archive outputs
             archiveArtifacts artifacts: '''
                 outputs/**/*,
@@ -287,14 +287,14 @@ Archive metadata alongside artifacts:
 stage('Build') {
     steps {
         sh './build.sh'
-        
+
         def buildMetadata = [
             version: '21.0.1',
             buildNumber: env.BUILD_NUMBER,
             timestamp: currentBuild.startTimeInMillis
         ]
         writeJSON file: 'build-metadata.json', json: buildMetadata
-        
+
         archiveArtifacts artifacts: '''
             target/**/*,
             build-metadata.json
@@ -315,13 +315,13 @@ stage('Sign') {
         script {
             // Clean any previous outputs
             sh 'rm -rf signed/'
-            
+
             // Retrieve inputs
             copyArtifacts(...)
-            
+
             // Do work (deterministic)
             sh './sign-artifacts.sh'
-            
+
             // Archive outputs
             archiveArtifacts artifacts: 'signed/**/*'
         }

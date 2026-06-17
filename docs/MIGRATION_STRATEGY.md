@@ -4,9 +4,9 @@
 
 This document outlines the strategic approach for migrating from the legacy monolithic Jenkins pipeline to a new modularized declarative pipeline architecture. The migration follows a phased, incremental rollout strategy designed to minimize risk while ensuring continuous validation and the ability to rollback at any point.
 
-**Total Duration**: 20 weeks (approximately 5 months)  
-**Approach**: Incremental, platform-by-platform rollout  
-**Validation**: Reproducible build comparison at each phase  
+**Total Duration**: 20 weeks (approximately 5 months)
+**Approach**: Incremental, platform-by-platform rollout
+**Validation**: Reproducible build comparison at each phase
 **Risk Mitigation**: Parallel operation with legacy, rollback capability
 
 ## Migration Principles
@@ -78,7 +78,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Stage restart functionality works
 - Build time comparable to legacy (±10%)
 
-**Risk Level**: Low  
+**Risk Level**: Low
 **Rollback**: Continue using legacy pipeline
 
 ---
@@ -106,7 +106,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Parameters are correctly populated
 - Process is documented and repeatable
 
-**Risk Level**: Low  
+**Risk Level**: Low
 **Rollback**: Manual job creation
 
 ---
@@ -134,7 +134,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Artifacts match legacy build
 - Stage restart works from any stage
 
-**Risk Level**: Medium (signing integration complexity)  
+**Risk Level**: Medium (signing integration complexity)
 **Rollback**: Continue using legacy Windows pipeline
 
 ---
@@ -162,7 +162,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Code signing works (if applicable)
 - Build runs on Mac hardware
 
-**Risk Level**: Medium (platform-specific features)  
+**Risk Level**: Medium (platform-specific features)
 **Rollback**: Continue using legacy Mac pipeline
 
 ---
@@ -190,7 +190,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Installers match legacy functionality
 - Installation process validated
 
-**Risk Level**: Medium (installer tooling complexity)  
+**Risk Level**: Medium (installer tooling complexity)
 **Rollback**: Build without installers, use legacy for installer creation
 
 ---
@@ -218,7 +218,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Integration with TRSS working
 - Test execution matches legacy
 
-**Risk Level**: Low (triggering mechanism only)  
+**Risk Level**: Low (triggering mechanism only)
 **Rollback**: Manual test triggering
 
 ---
@@ -246,7 +246,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Checksums generated
 - No actual publishing occurs
 
-**Risk Level**: Low (dry-run only)  
+**Risk Level**: Low (dry-run only)
 **Rollback**: N/A (no actual publishing)
 
 ---
@@ -274,7 +274,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Compliance validated
 - Integration working correctly
 
-**Risk Level**: Low (similar to AQA integration)  
+**Risk Level**: Low (similar to AQA integration)
 **Rollback**: Manual JCK test triggering
 
 ---
@@ -311,7 +311,7 @@ Use Early Access (EA) builds as the validation environment before switching prod
 - Platform-specific issues documented and resolved
 - Build times acceptable
 
-**Risk Level**: Medium (multiple platforms, potential platform-specific issues)  
+**Risk Level**: Medium (multiple platforms, potential platform-specific issues)
 **Rollback**: Per-platform rollback to legacy
 
 ---
@@ -365,7 +365,7 @@ For each EA build:
 - Team confident in new pipeline
 - All stakeholders approve cutover
 
-**Risk Level**: High (full system validation)  
+**Risk Level**: High (full system validation)
 **Rollback**: Continue legacy operation, address issues before retry
 
 ---
@@ -429,7 +429,7 @@ If critical issues occur:
 - Team comfortable with new system
 - Stakeholders satisfied with results
 
-**Risk Level**: High (production cutover)  
+**Risk Level**: High (production cutover)
 **Rollback**: Full rollback to legacy pipeline
 
 ---
@@ -474,7 +474,7 @@ If critical issues occur:
 **1. Windows Internal Signing**
 - **Risk**: Signing integration may fail or produce invalid signatures
 - **Impact**: Windows builds cannot be released
-- **Mitigation**: 
+- **Mitigation**:
   - Extensive testing in non-production environment
   - Fallback to legacy signing process
   - Manual signing process documented

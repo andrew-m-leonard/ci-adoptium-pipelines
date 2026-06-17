@@ -158,7 +158,7 @@ The stage uses `repro_compare.sh` from the temurin-build repository, which:
 
 **Cause**: The specified SCM reference doesn't exist in the Adoptium API
 
-**Solution**: 
+**Solution**:
 - Verify the SCM reference is correct
 - Check if it's a release or EA build and adjust the `--release` flag accordingly
 - Visit https://api.adoptium.net/v3/info/available_releases to see available versions

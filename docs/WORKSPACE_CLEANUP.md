@@ -26,7 +26,7 @@ The cleanup behavior is controlled by two parameters in the pipeline configurati
 
 ### cleanWorkspaceAfter
 
-- **Type**: Boolean  
+- **Type**: Boolean
 - **Default**: `false`
 - **Description**: Clean stage-specific workspace directories **after** each stage completes
 - **Use Case**: Free up disk space immediately after stage completion, useful for space-constrained environments
@@ -77,7 +77,7 @@ The local pipeline runner integrates cleanup via the `cleanup_workspace()` metho
 def cleanup_workspace(self, stage_name, cleanup_type):
     """
     Run workspace cleanup for a stage.
-    
+
     Args:
         stage_name: Name of the stage (e.g., 'build', 'sign')
         cleanup_type: Either 'pre' or 'post'
@@ -87,7 +87,7 @@ def cleanup_workspace(self, stage_name, cleanup_type):
     env['CONFIG_FILE'] = str(self.config_file)
     env['STAGE_NAME'] = stage_name
     env['CLEANUP_TYPE'] = cleanup_type
-    
+
     cleanup_script = self.script_dir / 'scripts' / 'lib' / 'workspace-cleanup.sh'
     subprocess.run([str(cleanup_script)], env=env, check=True)
 ```
@@ -99,9 +99,9 @@ def stage_build(self):
     """Stage 2: Build OpenJDK"""
     # Pre-stage cleanup
     self.cleanup_workspace('build', 'pre')
-    
+
     # ... stage execution ...
-    
+
     # Post-stage cleanup
     self.cleanup_workspace('build', 'post')
 ```
@@ -134,14 +134,14 @@ stage('Build') {
             // Retrieve configuration
             copyArtifacts(...)
             def config = readJSON file: 'pipeline-config.json'
-            
+
             // Pre-stage cleanup
             cleanupWorkspace('build', 'pre')
-            
+
             // Execute stage
             def buildScript = load 'scripts/stages/02-build.groovy'
             buildScript(config)
-            
+
             // Post-stage cleanup
             cleanupWorkspace('build', 'post')
         }

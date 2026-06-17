@@ -28,49 +28,49 @@ BUILD_NUMBER="${BUILD_NUMBER:-local}"
 # Main execution
 main() {
     log_section "Build Installer Stage - Start"
-    
+
     # Validate environment
     validate_standard_environment
     require_dir "${TARGET_DIR}"
-    
+
     # Load configuration
     log_info "Loading configuration from ${CONFIG_FILE}"
-    
+
     # Extract configuration (pass file path directly)
     local java_version=$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")
     local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
     local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
     local variant=$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")
-    
+
     log_info "Installer Configuration:"
     log_info "  Java Version: ${java_version}"
     log_info "  Target OS: ${target_os}"
     log_info "  Architecture: ${architecture}"
     log_info "  Variant: ${variant}"
-    
+
     # Prepare output directory
     prepare_output_dir "${TARGET_DIR}"
-    
+
     # Determine installer types for platform
     local installer_types=$(determine_installer_types "${target_os}")
     log_info "Installer types for ${target_os}: ${installer_types}"
-    
+
     # Build installers
     build_installers "${target_os}" "${architecture}" "${installer_types}"
-    
+
     # Create stage metadata
     create_installer_metadata "${installer_types}"
-    
+
     # List installers
     list_artifacts "${TARGET_DIR}"
-    
+
     log_section "Build Installer Stage - Complete"
 }
 
 # Determine which installer types to build for the platform
 determine_installer_types() {
     local os=$1
-    
+
     case "${os}" in
         windows)
             echo "msi"
@@ -93,28 +93,28 @@ build_installers() {
     local os=$1
     local arch=$2
     local types=$3
-    
+
     log_section "Building Installers"
-    
+
     # Create installers directory
     mkdir -p "${TARGET_DIR}/installers"
-    
+
     # Find JDK artifact
     local jdk_artifact=$(find "${TARGET_DIR}" -name "*.tar.gz" -o -name "*.zip" | head -n 1)
-    
+
     if [[ -z "${jdk_artifact}" ]]; then
         log_error "No JDK artifact found in ${TARGET_DIR}"
         exit 1
     fi
-    
+
     log_info "Using JDK artifact: $(basename ${jdk_artifact})"
-    
+
     # Build each installer type
     for type in ${types}; do
         log_info "Building ${type} installer..."
         build_installer_type "${type}" "${jdk_artifact}" "${os}" "${arch}"
     done
-    
+
     log_info "All installers built"
 }
 
@@ -124,10 +124,10 @@ build_installer_type() {
     local jdk_artifact=$2
     local os=$3
     local arch=$4
-    
+
     local installer_name="OpenJDK-${arch}-${os}.${type}"
     local installer_path="${TARGET_DIR}/installers/${installer_name}"
-    
+
     case "${type}" in
         msi)
             build_msi_installer "${jdk_artifact}" "${installer_path}"
@@ -149,7 +149,7 @@ build_installer_type() {
             log_warn "Unknown installer type: ${type}"
             ;;
     esac
-    
+
     if [[ -f "${installer_path}" ]]; then
         log_info "Created: ${installer_name}"
     else
@@ -162,14 +162,14 @@ build_installer_type() {
 build_msi_installer() {
     local jdk_artifact=$1
     local output=$2
-    
+
     log_info "Building MSI installer..."
-    
+
     # In production, this would call WiX toolset or similar
     # For now, create a placeholder
     touch "${output}"
     echo "MSI installer placeholder" > "${output}"
-    
+
     log_debug "MSI installer created (placeholder)"
 }
 
@@ -177,14 +177,14 @@ build_msi_installer() {
 build_pkg_installer() {
     local jdk_artifact=$1
     local output=$2
-    
+
     log_info "Building PKG installer..."
-    
+
     # In production, this would call pkgbuild/productbuild
     # For now, create a placeholder
     touch "${output}"
     echo "PKG installer placeholder" > "${output}"
-    
+
     log_debug "PKG installer created (placeholder)"
 }
 
@@ -192,14 +192,14 @@ build_pkg_installer() {
 build_deb_installer() {
     local jdk_artifact=$1
     local output=$2
-    
+
     log_info "Building DEB installer..."
-    
+
     # In production, this would call dpkg-deb
     # For now, create a placeholder
     touch "${output}"
     echo "DEB installer placeholder" > "${output}"
-    
+
     log_debug "DEB installer created (placeholder)"
 }
 
@@ -207,21 +207,21 @@ build_deb_installer() {
 build_rpm_installer() {
     local jdk_artifact=$1
     local output=$2
-    
+
     log_info "Building RPM installer..."
-    
+
     # In production, this would call rpmbuild
     # For now, create a placeholder
     touch "${output}"
     echo "RPM installer placeholder" > "${output}"
-    
+
     log_debug "RPM installer created (placeholder)"
 }
 
 # Create installer metadata
 create_installer_metadata() {
     local types=$1
-    
+
     cat > "${WORKSPACE}/installer-metadata.json" <<EOF
 {
   "stage": "${STAGE_NAME}",
@@ -234,7 +234,7 @@ $(find "${TARGET_DIR}/installers" -type f -exec basename {} \; | sed 's/^/    "/
   ]
 }
 EOF
-    
+
     log_info "Installer metadata created"
 }
 

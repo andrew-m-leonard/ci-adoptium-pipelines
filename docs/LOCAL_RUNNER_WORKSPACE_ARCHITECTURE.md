@@ -74,19 +74,19 @@ Every stage follows this pattern:
 ```python
 def stage_example(self):
     """Example stage implementation"""
-    
+
     # 1. Pre-cleanup: Clean stage_workspace
     self.cleanup_stage_workspace('pre')
-    
+
     # 2. Copy inputs from artifacts/ to stage_workspace/
     # (if needed from previous stages)
-    
+
     # 3. Execute stage logic in stage_workspace/
     # ...
-    
+
     # 4. Move outputs from stage_workspace/ to artifacts/
     # (before post-cleanup!)
-    
+
     # 5. Post-cleanup: Clean stage_workspace if configured
     self.cleanup_stage_workspace('post')
 ```
@@ -202,7 +202,7 @@ def cleanup_stage_workspace(self, cleanup_type):
         # Always clean before stage
         shutil.rmtree(self.stage_workspace)
         self.stage_workspace.mkdir(parents=True)
-    
+
     elif cleanup_type == 'post':
         # Clean after stage if configured
         config = read_config()

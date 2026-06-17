@@ -34,10 +34,10 @@ stage('Stage Name') {
                     target: '.'
                 )
             }
-            
+
             // 2. Do the work
             performWork()
-            
+
             // 3. Archive outputs for next stage
             archiveArtifacts artifacts: 'path/to/outputs/**/*',
                            fingerprint: true
@@ -81,12 +81,12 @@ stage('Build') {
     steps {
         script {
             println "=== Building JDK ==="
-            
+
             // No inputs - this is the first stage
-            
+
             // Execute build
             sh './build-jdk.sh'
-            
+
             // Create build metadata for downstream stages
             def buildMetadata = [
                 version: extractVersion(),
@@ -96,7 +96,7 @@ stage('Build') {
                 variant: buildConfig.VARIANT
             ]
             writeJSON file: 'build-metadata.json', json: buildMetadata
-            
+
             // Archive EVERYTHING needed by downstream stages
             archiveArtifacts artifacts: '''
                 workspace/target/**/*.tar.gz,
@@ -105,7 +105,7 @@ stage('Build') {
                 build-metadata.json,
                 build-config.json
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Build Complete - Artifacts Archived ==="
         }
     }
@@ -128,7 +128,7 @@ stage('Sign Artifacts') {
     steps {
         script {
             println "=== Signing Artifacts ==="
-            
+
             // Reliably retrieve build outputs
             println "Retrieving build artifacts from archive..."
             copyArtifacts(
@@ -143,16 +143,16 @@ stage('Sign Artifacts') {
                 target: '.',
                 fingerprintArtifacts: true
             )
-            
+
             // Load metadata
             def buildMetadata = readJSON file: 'build-metadata.json'
             def buildConfig = readJSON file: 'build-config.json'
-            
+
             println "Signing ${buildMetadata.variant} version ${buildMetadata.version}"
-            
+
             // Perform signing
             sh './sign-artifacts.sh'
-            
+
             // Create signing metadata
             def signingMetadata = [
                 signedAt: currentBuild.startTimeInMillis,
@@ -160,7 +160,7 @@ stage('Sign Artifacts') {
                 originalBuild: buildMetadata.buildNumber
             ]
             writeJSON file: 'signing-metadata.json', json: signingMetadata
-            
+
             // Archive signed artifacts
             archiveArtifacts artifacts: '''
                 signed/**/*.tar.gz,
@@ -168,7 +168,7 @@ stage('Sign Artifacts') {
                 signing-metadata.json,
                 checksums.txt
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Signing Complete - Artifacts Archived ==="
         }
     }
@@ -191,7 +191,7 @@ stage('Build Installers') {
     steps {
         script {
             println "=== Building Installers ==="
-            
+
             // Retrieve signed artifacts
             println "Retrieving signed artifacts from archive..."
             copyArtifacts(
@@ -204,15 +204,15 @@ stage('Build Installers') {
                 ''',
                 target: '.'
             )
-            
+
             // Load metadata
             def buildMetadata = readJSON file: 'build-metadata.json'
-            
+
             println "Building installers for version ${buildMetadata.version}"
-            
+
             // Build installers
             sh './build-installers.sh'
-            
+
             // Create installer metadata
             def installerMetadata = [
                 builtAt: currentBuild.startTimeInMillis,
@@ -220,13 +220,13 @@ stage('Build Installers') {
                 installerTypes: ['msi', 'pkg', 'deb', 'rpm']
             ]
             writeJSON file: 'installer-metadata.json', json: installerMetadata
-            
+
             // Archive installers
             archiveArtifacts artifacts: '''
                 installers/**/*,
                 installer-metadata.json
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Installers Complete - Artifacts Archived ==="
         }
     }
@@ -248,7 +248,7 @@ stage('Smoke Tests') {
     steps {
         script {
             println "=== Running Smoke Tests ==="
-            
+
             // Retrieve JDK to test
             println "Retrieving JDK binary from archive..."
             copyArtifacts(
@@ -260,18 +260,18 @@ stage('Smoke Tests') {
                 ''',
                 target: '.'
             )
-            
+
             // Load metadata
             def buildMetadata = readJSON file: 'build-metadata.json'
-            
+
             println "Testing version ${buildMetadata.version}"
-            
+
             // Run tests
             def testResult = sh(
                 script: './run-smoke-tests.sh',
                 returnStatus: true
             )
-            
+
             // Create test metadata
             def testMetadata = [
                 testedAt: currentBuild.startTimeInMillis,
@@ -279,17 +279,17 @@ stage('Smoke Tests') {
                 testedVersion: buildMetadata.version
             ]
             writeJSON file: 'test-metadata.json', json: testMetadata
-            
+
             // Archive test results
             archiveArtifacts artifacts: '''
                 test-results/**/*,
                 test-metadata.json
             ''', fingerprint: true, allowEmptyArchive: true
-            
+
             if (testResult != 0) {
                 error("Smoke tests failed")
             }
-            
+
             println "=== Tests Complete - Results Archived ==="
         }
     }

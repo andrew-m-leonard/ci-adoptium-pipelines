@@ -247,21 +247,21 @@ Introduce a **Release UUID** (Universally Unique Identifier) that:
 // Jenkinsfile for release trigger pipeline
 pipeline {
     agent any
-    
+
     environment {
         // Generate UUID at pipeline start
         RELEASE_UUID = sh(
             script: 'uuidgen',
             returnStdout: true
         ).trim()
-        
+
         RELEASE_VERSION = "JDK 21.0.5+11"
         RELEASE_TIMESTAMP = sh(
             script: 'date -u +"%Y-%m-%dT%H:%M:%SZ"',
             returnStdout: true
         ).trim()
     }
-    
+
     stages {
         stage('Initialize Release') {
             steps {
@@ -269,36 +269,36 @@ pipeline {
                     echo "Release UUID: ${RELEASE_UUID}"
                     echo "Release Version: ${RELEASE_VERSION}"
                     echo "Release Timestamp: ${RELEASE_TIMESTAMP}"
-                    
+
                     // Store in Jenkins build description for easy viewing
                     currentBuild.description = """
                         UUID: ${RELEASE_UUID}
                         Release: ${RELEASE_VERSION}
                     """.stripIndent()
-                    
+
                     // Store in artifact metadata file
                     writeJSON file: 'release-metadata.json', json: [
                         releaseUuid: env.RELEASE_UUID,
                         releaseVersion: env.RELEASE_VERSION,
                         releaseTimestamp: env.RELEASE_TIMESTAMP
                     ]
-                    
+
                     // Archive metadata
                     archiveArtifacts artifacts: 'release-metadata.json'
                 }
             }
         }
-        
+
         stage('Trigger Platform Builds') {
             steps {
                 script {
                     def platforms = [
-                        'linux-x64', 'linux-aarch64', 'mac-x64', 
+                        'linux-x64', 'linux-aarch64', 'mac-x64',
                         'mac-aarch64', 'windows-x64', 'windows-x86-32',
                         'aix-ppc64', 'solaris-x64', 'alpine-linux-x64',
                         'alpine-linux-aarch64', 'linux-ppc64le', 'linux-s390x'
                     ]
-                    
+
                     platforms.each { platform ->
                         build job: "build-${platform}",
                               parameters: [
@@ -321,13 +321,13 @@ pipeline {
 // Platform build pipeline
 pipeline {
     agent any
-    
+
     parameters {
         string(name: 'RELEASE_UUID', description: 'Release UUID for this build')
         string(name: 'RELEASE_VERSION', description: 'Release Version (e.g., JDK 21.0.5+11)')
         string(name: 'PLATFORM', description: 'Build Platform (e.g., linux-x64)')
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -335,25 +335,25 @@ pipeline {
                     echo "Release UUID: ${params.RELEASE_UUID}"
                     echo "Release: ${params.RELEASE_VERSION}"
                     echo "Platform: ${params.PLATFORM}"
-                    
+
                     // Store in build description for easy viewing
                     currentBuild.description = """
                         UUID: ${params.RELEASE_UUID}
                         Release: ${params.RELEASE_VERSION}
                         Platform: ${params.PLATFORM}
                     """.stripIndent()
-                    
+
                     // UUID is automatically stored in build parameters
                     // and is queryable via Jenkins API
                 }
             }
         }
-        
+
         stage('Build') {
             steps {
                 script {
                     // Build stages...
-                    
+
                     // Store UUID in artifact metadata
                     writeJSON file: 'artifacts/metadata.json', json: [
                         releaseUuid: params.RELEASE_UUID,
@@ -366,12 +366,12 @@ pipeline {
                             returnStdout: true
                         ).trim()
                     ]
-                    
+
                     archiveArtifacts artifacts: 'artifacts/metadata.json'
                 }
             }
         }
-        
+
         stage('Trigger Tests') {
             steps {
                 script {
@@ -380,7 +380,7 @@ pipeline {
                         'performance', 'jck', 'external', 'system',
                         'openjdk', 'perf', 'stress', 'integration'
                     ]
-                    
+
                     testSuites.each { suite ->
                         build job: "test-${params.PLATFORM}-${suite}",
                               parameters: [
@@ -405,7 +405,7 @@ pipeline {
 // Test pipeline
 pipeline {
     agent any
-    
+
     parameters {
         string(name: 'RELEASE_UUID', description: 'Release UUID')
         string(name: 'RELEASE_VERSION', description: 'Release Version')
@@ -413,7 +413,7 @@ pipeline {
         string(name: 'TEST_SUITE', description: 'Test Suite Name')
         string(name: 'BUILD_NUMBER', description: 'Build Pipeline Build Number')
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -425,12 +425,12 @@ pipeline {
                         Suite: ${params.TEST_SUITE}
                         Build: #${params.BUILD_NUMBER}
                     """.stripIndent()
-                    
+
                     // UUID automatically stored in build parameters
                 }
             }
         }
-        
+
         stage('Run Tests') {
             steps {
                 script {
@@ -496,7 +496,7 @@ class JenkinsPoller:
         self.auth = auth
         self.trss_db = trss_db
         self.indexed_builds: Set[str] = set()  # Cache of indexed builds
-        
+
     def get_relevant_jobs(self) -> List[str]:
         """
         Get list of jobs that might contain RELEASE_UUID.
@@ -505,19 +505,19 @@ class JenkinsPoller:
         api_url = f"{self.jenkins_url}/api/json?tree=jobs[name]"
         response = requests.get(api_url, auth=self.auth)
         response.raise_for_status()
-        
+
         all_jobs = response.json()['jobs']
-        
+
         # Filter by naming convention
         relevant_jobs = [
             job['name'] for job in all_jobs
-            if job['name'].startswith('build-') or 
+            if job['name'].startswith('build-') or
                job['name'].startswith('test-') or
                job['name'].startswith('release-')
         ]
-        
+
         return relevant_jobs
-    
+
     def get_recent_builds(
         self,
         job_name: str,
@@ -527,34 +527,34 @@ class JenkinsPoller:
         Get builds from last N days that haven't been indexed yet.
         """
         cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
-        
+
         # Query builds with parameters
         api_url = f"{self.jenkins_url}/job/{job_name}/api/json"
         params = {
             'tree': 'builds[number,timestamp,result,url,actions[parameters[name,value]]]'
         }
-        
+
         response = requests.get(api_url, params=params, auth=self.auth)
         response.raise_for_status()
-        
+
         all_builds = response.json().get('builds', [])
-        
+
         # Filter by timestamp and indexed status
         recent_builds = []
         for build in all_builds:
             # Check timestamp
             if build['timestamp'] < cutoff_timestamp:
                 continue
-            
+
             # Check if already indexed
             build_key = f"{job_name}#{build['number']}"
             if build_key in self.indexed_builds:
                 continue
-            
+
             recent_builds.append(build)
-        
+
         return recent_builds
-    
+
     def extract_release_uuid(self, build: Dict) -> str:
         """
         Extract RELEASE_UUID from build parameters.
@@ -566,7 +566,7 @@ class JenkinsPoller:
                 if param.get('name') == 'RELEASE_UUID':
                     return param.get('value')
         return None
-    
+
     def index_build(self, job_name: str, build: Dict, release_uuid: str):
         """
         Store build information in TRSS database.
@@ -580,78 +580,78 @@ class JenkinsPoller:
             'timestamp': datetime.fromtimestamp(build['timestamp'] / 1000),
             'indexed_at': datetime.now()
         }
-        
+
         # Store in database
         self.trss_db.insert_build(build_data)
-        
+
         # Mark as indexed
         build_key = f"{job_name}#{build['number']}"
         self.indexed_builds.add(build_key)
-    
+
     def poll_once(self):
         """
         Perform one polling cycle.
         """
         print(f"[{datetime.now()}] Starting polling cycle...")
-        
+
         # Get relevant jobs
         jobs = self.get_relevant_jobs()
         print(f"Found {len(jobs)} relevant jobs")
-        
+
         total_builds_found = 0
         total_builds_indexed = 0
-        
+
         # Process each job
         for job_name in jobs:
             try:
                 # Get recent builds
                 builds = self.get_recent_builds(job_name, days=14)
                 total_builds_found += len(builds)
-                
+
                 # Process each build
                 for build in builds:
                     # Extract RELEASE_UUID
                     release_uuid = self.extract_release_uuid(build)
-                    
+
                     if release_uuid:
                         # Index this build
                         self.index_build(job_name, build, release_uuid)
                         total_builds_indexed += 1
                         print(f"  Indexed: {job_name} #{build['number']} -> {release_uuid[:8]}...")
-                
+
             except Exception as e:
                 print(f"  Error processing {job_name}: {e}")
                 continue
-        
+
         print(f"Polling complete: {total_builds_indexed}/{total_builds_found} builds indexed")
-    
+
     def run_continuous(self, interval_minutes: int = 10):
         """
         Run polling service continuously.
         """
         print(f"Starting continuous polling (every {interval_minutes} minutes)...")
-        
+
         while True:
             try:
                 self.poll_once()
             except Exception as e:
                 print(f"Error in polling cycle: {e}")
-            
+
             # Wait before next poll
             time.sleep(interval_minutes * 60)
 
 # Usage
 if __name__ == '__main__':
     from trss_database import TRSSDatabase
-    
+
     db = TRSSDatabase(connection_string="postgresql://...")
-    
+
     poller = JenkinsPoller(
         jenkins_url="https://ci.adoptium.net",
         auth=("username", "api_token"),
         trss_db=db
     )
-    
+
     # Run continuous polling every 10 minutes
     poller.run_continuous(interval_minutes=10)
 ```
@@ -748,7 +748,7 @@ CREATE INDEX idx_test_results_release_uuid_platform ON test_results(release_uuid
 class TRSSQueryAPI:
     def __init__(self, db):
         self.db = db
-    
+
     def get_builds_by_release_uuid(self, release_uuid: str) -> List[Dict]:
         """
         Get all builds for a release.
@@ -760,7 +760,7 @@ class TRSSQueryAPI:
             ORDER BY timestamp DESC
         """
         return self.db.execute(query, (release_uuid,))
-    
+
     def get_latest_build_per_platform(self, release_uuid: str) -> Dict[str, Dict]:
         """
         Get the most recent build for each platform.
@@ -774,9 +774,9 @@ class TRSSQueryAPI:
             ORDER BY platform, timestamp DESC
         """
         results = self.db.execute(query, (release_uuid,))
-        
+
         return {row['platform']: row for row in results}
-    
+
     def get_release_status(self, release_uuid: str) -> Dict:
         """
         Get complete release status.
@@ -784,7 +784,7 @@ class TRSSQueryAPI:
         # Get builds
         builds = self.get_builds_by_release_uuid(release_uuid)
         latest_builds = self.get_latest_build_per_platform(release_uuid)
-        
+
         # Get tests
         tests_query = """
             SELECT * FROM test_results
@@ -792,7 +792,7 @@ class TRSSQueryAPI:
             ORDER BY timestamp DESC
         """
         tests = self.db.execute(tests_query, (release_uuid,))
-        
+
         # Aggregate status
         return {
             'releaseUuid': release_uuid,
@@ -913,7 +913,7 @@ Answer: Must manually check Jenkins history and timestamps
 **After:**
 ```
 Query: SELECT * FROM builds WHERE release_uuid='550e8400-...' AND platform='mac-x64'
-Result: 
+Result:
   - Build #1236 (FAILED, attempt 1, 11:45)
   - Build #1237 (SUCCESS, attempt 2, 12:15) ← This is the one
 ```

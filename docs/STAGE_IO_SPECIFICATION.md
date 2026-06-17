@@ -233,7 +233,7 @@ ${WORKSPACE}/signed/*.tar.gz
 Installer Stage
     ↓ (creates)
 ${WORKSPACE}/installers/*.pkg
-    
+
 Smoke Tests Stage (parallel, uses outputs/)
     ↓ (creates)
 ${WORKSPACE}/test-results/*

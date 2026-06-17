@@ -272,9 +272,9 @@ stage('Build') {
             env.WORKSPACE = pwd()
             env.CONFIG_FILE = "${env.WORKSPACE}/pipeline-config.json"
             env.OUTPUT_DIR = "${env.WORKSPACE}/outputs"
-            
+
             sh './scripts/stages/02-build.sh'
-            
+
             archiveArtifacts artifacts: 'outputs/**/*,stage-metadata.json'
         }
     }

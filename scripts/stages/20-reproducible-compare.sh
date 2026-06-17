@@ -252,13 +252,13 @@ else
     COMPARE_EXIT_CODE=$?
     log_error "Reproducible build comparison FAILED (exit code: ${COMPARE_EXIT_CODE})"
     log_error "Differences detected between locally built and production binaries"
-    
+
     # Show comparison report
     if [ -f "${COMPARE_OUTPUT}" ]; then
         log_info "Comparison report:"
         cat "${COMPARE_OUTPUT}"
     fi
-    
+
     exit ${COMPARE_EXIT_CODE}
 fi
 

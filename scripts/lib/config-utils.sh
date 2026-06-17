@@ -39,12 +39,12 @@ require_dir() {
 load_config() {
     local config_file=$1
     require_file "${config_file}"
-    
+
     if ! command -v jq &> /dev/null; then
         log_error "jq is required but not installed"
         exit 1
     fi
-    
+
     cat "${config_file}"
 }
 
@@ -53,7 +53,7 @@ get_config_value() {
     local config=$1
     local json_path=$2
     local default_value=${3:-}
-    
+
     # If config looks like a file path, read directly from file
     if [[ -f "${config}" ]]; then
         local value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
@@ -61,7 +61,7 @@ get_config_value() {
         # Otherwise treat as JSON string
         local value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
     fi
-    
+
     if [[ "${value}" == "null" ]] || [[ -z "${value}" ]]; then
         if [[ -n "${default_value}" ]]; then
             echo "${default_value}"
@@ -79,7 +79,7 @@ get_config_bool() {
     local config=$1
     local json_path=$2
     local default_value=${3:-false}
-    
+
     # If config looks like a file path, read directly from file
     if [[ -f "${config}" ]]; then
         local value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
@@ -87,7 +87,7 @@ get_config_bool() {
         # Otherwise treat as JSON string
         local value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
     fi
-    
+
     if [[ "${value}" == "true" ]]; then
         echo "true"
     elif [[ "${value}" == "false" ]]; then
@@ -100,14 +100,14 @@ get_config_bool() {
 # Validate standard environment
 validate_standard_environment() {
     log_info "Validating environment..."
-    
+
     require_env "WORKSPACE"
     require_env "CONFIG_FILE"
     require_file "${CONFIG_FILE}"
-    
+
     # Set default directory if not set
     export TARGET_DIR="${TARGET_DIR:-${WORKSPACE}/workspace/target}"
-    
+
     log_info "Environment validated successfully"
     log_debug "WORKSPACE=${WORKSPACE}"
     log_debug "CONFIG_FILE=${CONFIG_FILE}"

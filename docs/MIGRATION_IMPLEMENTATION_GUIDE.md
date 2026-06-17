@@ -66,7 +66,7 @@ pipeline {
     agent {
         label 'linux-x64-build'
     }
-    
+
     parameters {
         string(
             name: 'RELEASE_UUID',
@@ -94,14 +94,14 @@ pipeline {
             description: 'Run reproducible build comparison'
         )
     }
-    
+
     environment {
         CONFIG_FILE = "${WORKSPACE}/configurations/jdk21u_linux_x64_config.json"
         PLATFORM = 'linux-x64'
         TARGET_OS = 'linux'
         TARGET_ARCH = 'x64'
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -112,13 +112,13 @@ pipeline {
                             ${CONFIG_FILE} \
                             --export-env > env.properties
                     """
-                    
+
                     // Load environment
                     def props = readProperties file: 'env.properties'
                     props.each { key, value ->
                         env[key] = value
                     }
-                    
+
                     // Run initialization script
                     sh 'bash scripts/stages/01-initialize.sh'
                 }
@@ -136,7 +136,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Build JDK') {
             steps {
                 script {
@@ -159,7 +159,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Reproducible Build Comparison') {
             when {
                 expression { params.ENABLE_REPRODUCIBLE_COMPARE }
@@ -168,12 +168,12 @@ pipeline {
                 script {
                     // Download legacy build artifact
                     def legacyBuildUrl = "https://ci.adoptium.net/job/build-scripts/job/jobs/job/jdk21u/job/jdk21u-linux-x64-temurin/lastSuccessfulBuild"
-                    
+
                     sh """
                         # Download legacy artifact
                         wget ${legacyBuildUrl}/artifact/workspace/target/OpenJDK21U-jdk_x64_linux_hotspot_*.tar.gz \
                             -O legacy_jdk.tar.gz
-                        
+
                         # Run reproducible comparison
                         bash scripts/stages/20-reproducible-compare.sh
                     """
@@ -190,7 +190,7 @@ pipeline {
             }
         }
     }
-    
+
     post {
         always {
             script {
@@ -246,8 +246,8 @@ pipeline {
 - ✅ EA Beta builds running successfully
 - ✅ Documentation updated with any learnings
 
-**Duration**: 2 weeks  
-**Risk Level**: Low (single platform, build only)  
+**Duration**: 2 weeks
+**Risk Level**: Low (single platform, build only)
 **Rollback**: Continue using legacy pipeline
 
 ---
@@ -285,11 +285,11 @@ class JenkinsJobGenerator:
     def __init__(self, config_file: Path, template_dir: Path):
         self.config = self._load_config(config_file)
         self.template_dir = template_dir
-        
+
     def _load_config(self, config_file: Path) -> Dict:
         with open(config_file) as f:
             return json.load(f)
-    
+
     def generate_job_xml(self, job_type: str = 'build') -> str:
         """
         Generate Jenkins job XML configuration.
@@ -298,29 +298,29 @@ class JenkinsJobGenerator:
         template_file = self.template_dir / f'{job_type}-job-template.xml'
         tree = ET.parse(template_file)
         root = tree.getroot()
-        
+
         # Update job parameters
         self._update_parameters(root)
-        
+
         # Update SCM configuration
         self._update_scm(root)
-        
+
         # Update triggers
         self._update_triggers(root)
-        
+
         # Update build steps
         self._update_build_steps(root)
-        
+
         return ET.tostring(root, encoding='unicode')
-    
+
     def _update_parameters(self, root: ET.Element):
         """Update job parameters from configuration."""
         params_def = root.find('.//hudson.model.ParametersDefinitionProperty')
         if params_def is None:
             return
-        
+
         param_defs = params_def.find('parameterDefinitions')
-        
+
         # Add RELEASE_UUID parameter
         self._add_string_parameter(
             param_defs,
@@ -328,7 +328,7 @@ class JenkinsJobGenerator:
             '',
             'Release UUID for tracking'
         )
-        
+
         # Add JDK_VERSION parameter
         self._add_string_parameter(
             param_defs,
@@ -336,7 +336,7 @@ class JenkinsJobGenerator:
             self.config.get('jdkVersion', 'jdk21u'),
             'JDK version to build'
         )
-        
+
         # Add platform-specific parameters
         platform = self.config.get('platform', {})
         self._add_string_parameter(
@@ -351,7 +351,7 @@ class JenkinsJobGenerator:
             platform.get('architecture', 'x64'),
             'Target architecture'
         )
-    
+
     def _add_string_parameter(
         self,
         parent: ET.Element,
@@ -364,33 +364,33 @@ class JenkinsJobGenerator:
         ET.SubElement(param, 'name').text = name
         ET.SubElement(param, 'defaultValue').text = default
         ET.SubElement(param, 'description').text = description
-    
+
     def _update_scm(self, root: ET.Element):
         """Update SCM configuration."""
         scm = root.find('.//scm')
         if scm is None:
             return
-        
+
         repo_config = self.config.get('repository', {})
-        
+
         # Update Git repository URL
         url_elem = scm.find('.//url')
         if url_elem is not None:
             url_elem.text = repo_config.get('url', '')
-        
+
         # Update branch
         branch_elem = scm.find('.//branches/hudson.plugins.git.BranchSpec/name')
         if branch_elem is not None:
             branch_elem.text = repo_config.get('branch', 'master')
-    
+
     def _update_triggers(self, root: ET.Element):
         """Update build triggers."""
         triggers = root.find('.//triggers')
         if triggers is None:
             return
-        
+
         trigger_config = self.config.get('triggers', {})
-        
+
         # Add SCM polling trigger if configured
         if trigger_config.get('scmPolling'):
             scm_trigger = ET.SubElement(
@@ -401,13 +401,13 @@ class JenkinsJobGenerator:
                 'scmPollingSchedule',
                 'H/15 * * * *'
             )
-    
+
     def _update_build_steps(self, root: ET.Element):
         """Update build steps with Jenkinsfile path."""
         definition = root.find('.//definition')
         if definition is None:
             return
-        
+
         # Update Jenkinsfile path
         script_path = definition.find('scriptPath')
         if script_path is not None:
@@ -442,12 +442,12 @@ def main():
         default='build',
         help='Type of job to generate'
     )
-    
+
     args = parser.parse_args()
-    
+
     generator = JenkinsJobGenerator(args.config_file, args.template_dir)
     job_xml = generator.generate_job_xml(args.job_type)
-    
+
     if args.output:
         args.output.write_text(job_xml)
         print(f"Generated job XML: {args.output}")
@@ -476,10 +476,10 @@ def configs = [
 
 configs.each { configName ->
     def config = readJSON file: "configurations/${configName}_config.json"
-    
+
     pipelineJob("build-${config.jdkVersion}-${config.platform.os}-${config.platform.architecture}") {
         description("Modularized build pipeline for ${config.jdkVersion} on ${config.platform.os}-${config.platform.architecture}")
-        
+
         parameters {
             stringParam('RELEASE_UUID', '', 'Release UUID for tracking')
             stringParam('JDK_VERSION', config.jdkVersion, 'JDK version to build')
@@ -487,7 +487,7 @@ configs.each { configName ->
             booleanParam('CLEAN_WORKSPACE_AFTER_STAGE', true, 'Clean workspace after each stage')
             booleanParam('ENABLE_REPRODUCIBLE_COMPARE', false, 'Run reproducible build comparison')
         }
-        
+
         definition {
             cpsScm {
                 scm {
@@ -502,13 +502,13 @@ configs.each { configName ->
                 scriptPath(config.jenkinsfilePath ?: 'Jenkinsfile')
             }
         }
-        
+
         triggers {
             if (config.triggers?.scmPolling) {
                 scm(config.triggers.scmPollingSchedule ?: 'H/15 * * * *')
             }
         }
-        
+
         properties {
             buildDiscarder {
                 strategy {
@@ -545,7 +545,7 @@ configs.each { configName ->
 - ✅ Documentation for adding new platforms
 - ✅ Template system established
 
-**Duration**: 1 week  
+**Duration**: 1 week
 **Risk Level**: Low (tooling only)
 
 ---
@@ -673,13 +673,13 @@ mkdir -p "${SIGNED_DIR}"
 # Sign all .exe and .dll files
 find "${UNSIGNED_DIR}" -type f \( -name "*.exe" -o -name "*.dll" \) | while read -r file; do
     log_info "Signing: $(basename "$file")"
-    
+
     # Call signing service
     curl -X POST "${SIGNING_SERVER}/sign" \
         -F "file=@${file}" \
         -F "certificate=${SIGNING_CERT}" \
         -o "${SIGNED_DIR}/$(basename "$file")"
-    
+
     if [ $? -eq 0 ]; then
         log_success "Signed: $(basename "$file")"
     else
@@ -709,10 +709,10 @@ log_info "Copying signed binaries back to build directory..."
 
 find "${SIGNED_DIR}" -type f | while read -r signed_file; do
     filename=$(basename "$signed_file")
-    
+
     # Find original location
     original=$(find "${BUILD_DIR}" -name "$filename" -type f)
-    
+
     if [ -n "$original" ]; then
         cp "$signed_file" "$original"
         log_info "Replaced: $filename"
@@ -767,7 +767,7 @@ python3 tools/generate-jenkins-jobs.py \
 - ✅ Internal signing integrated
 - ✅ Reproducibility validated
 
-**Duration**: 2 weeks  
+**Duration**: 2 weeks
 **Risk Level**: Medium (signing integration)
 
 ---
@@ -811,7 +811,7 @@ Similar to Windows but with Mac-specific considerations:
 - ✅ Mac aarch64 pipeline operational
 - ✅ Platform-specific features working
 
-**Duration**: 1 week  
+**Duration**: 1 week
 **Risk Level**: Medium (platform-specific)
 
 ---
@@ -901,7 +901,7 @@ Add installer stage to all platform configurations:
 - ✅ Installer creation integrated
 - ✅ All platforms producing installers
 
-**Duration**: 2 weeks  
+**Duration**: 2 weeks
 **Risk Level**: Medium (installer tooling)
 
 ---
@@ -941,14 +941,14 @@ log_info "Triggering AQA tests on: ${TEST_JENKINS_URL}"
 # Trigger each test suite
 for suite in ${TEST_SUITES}; do
     log_info "Triggering test suite: ${suite}"
-    
+
     curl -X POST "${TEST_JENKINS_URL}/job/test-${PLATFORM}-${suite}/buildWithParameters" \
         -d "RELEASE_UUID=${RELEASE_UUID}" \
         -d "BUILD_NUMBER=${BUILD_NUMBER}" \
         -d "PLATFORM=${PLATFORM}" \
         -d "TEST_SUITE=${suite}" \
         --user "${JENKINS_USER}:${JENKINS_TOKEN}"
-    
+
     log_success "Triggered: ${suite}"
 done
 
@@ -989,7 +989,7 @@ stage('Trigger AQA Tests') {
 - ✅ AQA test integration complete
 - ✅ Test results flowing to TRSS
 
-**Duration**: 1 week  
+**Duration**: 1 week
 **Risk Level**: Low (triggering only)
 
 ---
@@ -1073,7 +1073,7 @@ fi
 - ✅ Publish stage implemented
 - ✅ Dry-run mode working
 
-**Duration**: 1 week  
+**Duration**: 1 week
 **Risk Level**: Low (dry-run only)
 
 ---
@@ -1097,7 +1097,7 @@ Similar to AQA test integration but for JCK tests.
 ### Phase 8 Completion Criteria
 - ✅ JCK test integration complete
 
-**Duration**: 1 week  
+**Duration**: 1 week
 **Risk Level**: Low
 
 ---
@@ -1139,7 +1139,7 @@ Roll out multiple platforms in parallel where possible:
 - ✅ All platforms migrated
 - ✅ All platforms validated
 
-**Duration**: 3 weeks  
+**Duration**: 3 weeks
 **Risk Level**: Medium (multiple platforms)
 
 ---
@@ -1196,7 +1196,7 @@ Run new and legacy pipelines in parallel:
 - ✅ Performance acceptable
 - ✅ Team confident in new pipeline
 
-**Duration**: 4 weeks  
+**Duration**: 4 weeks
 **Risk Level**: High (full system validation)
 
 ---
@@ -1258,7 +1258,7 @@ If critical issues occur:
 - ✅ No critical issues
 - ✅ Team comfortable with new system
 
-**Duration**: 2 weeks  
+**Duration**: 2 weeks
 **Risk Level**: High (production cutover)
 
 ---

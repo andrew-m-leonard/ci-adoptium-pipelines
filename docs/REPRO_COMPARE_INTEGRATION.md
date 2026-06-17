@@ -338,6 +338,6 @@ During migration from old pipeline to new pipeline:
 
 ---
 
-*Document Version: 3.0*  
-*Last Updated: 2026-05-19*  
+*Document Version: 3.0*
+*Last Updated: 2026-05-19*
 *Purpose: Document CI-agnostic reproducible build comparison in CI Adoptium Pipelines*

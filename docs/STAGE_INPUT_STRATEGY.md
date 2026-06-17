@@ -67,7 +67,7 @@ stage('Sign') {
 
 ```groovy
 def isRestart() {
-    return currentBuild.previousBuild != null && 
+    return currentBuild.previousBuild != null &&
            currentBuild.previousBuild.number == currentBuild.number
 }
 ```
@@ -112,7 +112,7 @@ stage('Sign') {
             // Try to retrieve from current build first (normal run)
             // If not found, fallback to previous build (restart scenario)
             def retrieved = false
-            
+
             try {
                 copyArtifacts(
                     projectName: env.JOB_NAME,
@@ -125,7 +125,7 @@ stage('Sign') {
                 println "Retrieved artifacts from current build ${env.BUILD_NUMBER}"
             } catch (Exception e) {
                 println "No artifacts in current build, trying previous build..."
-                
+
                 if (currentBuild.previousBuild) {
                     copyArtifacts(
                         projectName: env.JOB_NAME,
@@ -139,10 +139,10 @@ stage('Sign') {
                     error("No artifacts found in current or previous build!")
                 }
             }
-            
+
             // Now we KNOW we have the correct artifacts
             sh './sign-artifacts.sh'
-            
+
             // Archive for next stage
             archiveArtifacts artifacts: 'signed/**/*'
         }
@@ -192,16 +192,16 @@ stage('Build') {
     steps {
         script {
             println "=== Building JDK ==="
-            
+
             // Clean workspace to ensure fresh build
             cleanWs()
-            
+
             // Checkout code
             checkout scm
-            
+
             // Build
             sh './build-jdk.sh'
-            
+
             // Create metadata
             def buildMetadata = [
                 version: '21.0.1',
@@ -210,14 +210,14 @@ stage('Build') {
                 gitCommit: env.GIT_COMMIT
             ]
             writeJSON file: 'build-metadata.json', json: buildMetadata
-            
+
             // Archive EVERYTHING needed by downstream stages
             archiveArtifacts artifacts: '''
                 workspace/target/**/*.tar.gz,
                 workspace/target/**/*.zip,
                 build-metadata.json
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Build Complete - Artifacts Archived ==="
         }
     }
@@ -238,15 +238,15 @@ stage('Sign') {
     steps {
         script {
             println "=== Signing Artifacts ==="
-            
+
             // Clean workspace to avoid confusion
             cleanWs()
-            
+
             // Retrieve from archive with fallback for restart
             println "Retrieving artifacts from archive..."
             def buildNumber = env.BUILD_NUMBER
             def retrieved = false
-            
+
             try {
                 // Try current build first (normal run)
                 copyArtifacts(
@@ -283,21 +283,21 @@ stage('Sign') {
                     error("No artifacts found in current or previous build!")
                 }
             }
-            
+
             // Verify we got what we need
             def buildMetadata = readJSON file: 'build-metadata.json'
             println "Signing version ${buildMetadata.version}"
-            
+
             // Find artifacts to sign
             def artifacts = findFiles(glob: 'workspace/target/**/*.tar.gz')
             if (artifacts.length == 0) {
                 error("No artifacts found to sign!")
             }
             println "Found ${artifacts.length} artifacts to sign"
-            
+
             // Sign artifacts
             sh './sign-artifacts.sh'
-            
+
             // Create signing metadata
             def signMetadata = [
                 signedAt: currentBuild.startTimeInMillis,
@@ -305,14 +305,14 @@ stage('Sign') {
                 certificate: 'production-cert'
             ]
             writeJSON file: 'sign-metadata.json', json: signMetadata
-            
+
             // Archive signed artifacts
             archiveArtifacts artifacts: '''
                 signed/**/*,
                 sign-metadata.json,
                 build-metadata.json
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Signing Complete - Artifacts Archived ==="
         }
     }
@@ -334,14 +334,14 @@ stage('Installer') {
     steps {
         script {
             println "=== Building Installers ==="
-            
+
             // Clean workspace
             cleanWs()
-            
+
             // Retrieve from archive with fallback for restart
             println "Retrieving signed artifacts from archive..."
             def buildNumber = env.BUILD_NUMBER
-            
+
             try {
                 // Try current build first
                 copyArtifacts(
@@ -378,22 +378,22 @@ stage('Installer') {
                     error("No artifacts found!")
                 }
             }
-            
+
             // Verify inputs
             def buildMetadata = readJSON file: 'build-metadata.json'
             def signMetadata = readJSON file: 'sign-metadata.json'
             println "Building installers for version ${buildMetadata.version}"
             println "Using artifacts signed at ${signMetadata.signedAt}"
-            
+
             // Build installers
             sh './build-installers.sh'
-            
+
             // Archive installers
             archiveArtifacts artifacts: '''
                 installers/**/*,
                 build-metadata.json
             ''', fingerprint: true, allowEmptyArchive: false
-            
+
             println "=== Installers Complete ==="
         }
     }
@@ -415,7 +415,7 @@ stage('Sign') {
         script {
             // Clean workspace FIRST
             cleanWs()
-            
+
             // Then retrieve from archive
             copyArtifacts(...)
         }
@@ -439,7 +439,7 @@ stage('Sign') {
         script {
             // ❌ WRONG - trying to detect restart
             def isRestart = /* some detection logic */
-            
+
             if (isRestart) {
                 // Retrieve from archive
                 copyArtifacts(...)
@@ -447,7 +447,7 @@ stage('Sign') {
                 // Use workspace
                 // Assumes Build just ran
             }
-            
+
             sh './sign-artifacts.sh'
         }
     }
@@ -557,13 +557,13 @@ stage('Sign') {
     steps {
         script {
             copyArtifacts(...)
-            
+
             // Verify we got what we need
             def artifacts = findFiles(glob: 'workspace/target/**/*.tar.gz')
             if (artifacts.length == 0) {
                 error("No artifacts found!")
             }
-            
+
             // ...
         }
     }
@@ -578,7 +578,7 @@ stage('Any Stage') {
         script {
             // Do work
             // ...
-            
+
             // Archive outputs
             archiveArtifacts artifacts: '''
                 outputs/**/*,
@@ -602,17 +602,17 @@ stage('Sign') {
                     build-metadata.json
                 '''
             )
-            
+
             // Read it
             def buildMetadata = readJSON file: 'build-metadata.json'
-            
+
             // Create new metadata
             def signMetadata = [
                 signedAt: currentBuild.startTimeInMillis,
                 baseVersion: buildMetadata.version
             ]
             writeJSON file: 'sign-metadata.json', json: signMetadata
-            
+
             // Archive both
             archiveArtifacts artifacts: '''
                 signed/**/*,

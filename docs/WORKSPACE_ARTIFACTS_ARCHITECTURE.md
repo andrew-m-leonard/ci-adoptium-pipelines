@@ -157,20 +157,20 @@ Every stage follows this pattern:
 def stage_build(self):
     # 1. Clean workspace
     self.clean_workspace()
-    
+
     # 2. No artifacts to retrieve (first stage)
-    
+
     # 3. Execute build
     artifacts_dir = self.workspace / 'artifacts'
     workspace_dir = self.workspace / 'workspace' / 'build'
-    
+
     env['WORKSPACE_DIR'] = str(workspace_dir)
     env['ARTIFACTS_DIR'] = str(artifacts_dir)
-    
+
     subprocess.run(['bash', 'scripts/stages/02-build.sh'], env=env)
-    
+
     # 4. Artifacts already in artifacts/ (script writes there)
-    
+
     # 5. Optional cleanup
     if self.should_clean_after_stage():
         self.clean_workspace()
@@ -197,7 +197,7 @@ stage('Build') {
         script {
             // 1. Clean workspace
             cleanWorkspace()
-            
+
             // 2. Retrieve configuration
             copyArtifacts(
                 projectName: env.JOB_NAME,
@@ -205,15 +205,15 @@ stage('Build') {
                 filter: 'pipeline-config.json',
                 target: '.'
             )
-            
+
             // 3. Execute build
             def config = readJSON file: 'pipeline-config.json'
             def buildScript = load 'scripts/stages/02-build.groovy'
             buildScript(config)
-            
+
             // 4. Archive artifacts
             archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
-            
+
             // 5. Optional cleanup
             if (shouldCleanAfterStage(config)) {
                 cleanWorkspace()

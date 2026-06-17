@@ -2,7 +2,7 @@
 
 ## Your Discovery
 
-✅ **`env.BUILD_UID` works** - Can be set dynamically and persists across stages and restarts  
+✅ **`env.BUILD_UID` works** - Can be set dynamically and persists across stages and restarts
 ❌ **`environment { BUILD_UID = '' }` doesn't work** - Acts as read-only, cannot be modified in stages
 
 ## The Key Difference
@@ -14,7 +14,7 @@ pipeline {
     environment {
         BUILD_UID = ''  // ❌ Read-only after initialization
     }
-    
+
     stages {
         stage('Test') {
             steps {
@@ -49,7 +49,7 @@ environment {
 ```groovy
 pipeline {
     // No environment block
-    
+
     stages {
         stage('Test') {
             steps {
@@ -85,7 +85,7 @@ script {
 1. **Parse Phase** - Jenkins parses the entire Jenkinsfile
    - `environment {}` block is evaluated
    - Values are set and locked
-   
+
 2. **Execution Phase** - Stages run
    - `environment {}` variables are read-only
    - `env.VAR` assignments work
@@ -98,14 +98,14 @@ pipeline {
         // This is evaluated ONCE at parse time
         BUILD_UID = ''
     }
-    
+
     stages {
         stage('Init') {
             steps {
                 script {
                     // This tries to modify a read-only variable
                     env.BUILD_UID = "abc123"  // ❌ Silently fails or ignored
-                    
+
                     println "BUILD_UID: ${env.BUILD_UID}"  // Still shows ''
                 }
             }
@@ -126,13 +126,13 @@ pipeline {
 ```groovy
 pipeline {
     agent any
-    
+
     parameters {
         string(name: 'BUILD_UID', defaultValue: '')
     }
-    
+
     // NO environment block for BUILD_UID
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -143,12 +143,12 @@ pipeline {
                     } else {
                         env.BUILD_UID = params.BUILD_UID
                     }
-                    
+
                     println "BUILD_UID: ${env.BUILD_UID}"
                 }
             }
         }
-        
+
         stage('Use It') {
             steps {
                 script {
@@ -168,7 +168,7 @@ pipeline {
         // ❌ This doesn't work - UUID is evaluated once at parse time
         BUILD_UID = "${UUID.randomUUID()}"
     }
-    
+
     stages {
         stage('Test') {
             steps {
@@ -193,7 +193,7 @@ pipeline {
         APP_NAME = 'my-app'
         DEPLOY_ENV = 'production'
     }
-    
+
     // Dynamic values set in stages
     stages {
         stage('Initialize') {
@@ -247,13 +247,13 @@ pipeline {
                 script {
                     // Generate unique ID
                     env.BUILD_UID = "${currentBuild.startTimeInMillis}-${UUID.randomUUID()}"
-                    
+
                     // Compute based on conditions
                     env.DEPLOY_TARGET = (env.BRANCH_NAME == 'main') ? 'production' : 'staging'
-                    
+
                     // Extract from other variables
                     env.GIT_COMMIT_SHORT = env.GIT_COMMIT.take(8)
-                    
+
                     // Read from file
                     env.VERSION = readFile('VERSION').trim()
                 }
@@ -270,11 +270,11 @@ Your test worked because you **didn't use `environment {}`** block:
 ```groovy
 pipeline {
     // ✅ No environment block
-    
+
     parameters {
         string(name: 'BUILD_UID', defaultValue: '')
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -298,7 +298,7 @@ This allowed `env.BUILD_UID` to be:
 ```groovy
 pipeline {
     agent any
-    
+
     parameters {
         string(
             name: 'BUILD_UID',
@@ -306,9 +306,9 @@ pipeline {
             description: 'Unique ID for this pipeline run (auto-generated if empty)'
         )
     }
-    
+
     // ✅ NO environment block for BUILD_UID
-    
+
     stages {
         stage('Initialize') {
             steps {
@@ -323,17 +323,17 @@ pipeline {
                         env.BUILD_UID = params.BUILD_UID
                         println "♻️ Reusing BUILD_UID: ${env.BUILD_UID}"
                     }
-                    
+
                     currentBuild.description = "BUILD_UID: ${env.BUILD_UID}"
                 }
             }
         }
-        
+
         stage('Build') {
             steps {
                 script {
                     println "BUILD_UID: ${env.BUILD_UID}"  // ✅ Available
-                    
+
                     // Store in metadata
                     def metadata = [BUILD_UID: env.BUILD_UID]
                     writeJSON file: 'workspace/metadata.json', json: metadata
@@ -341,16 +341,16 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Sign') {
             steps {
                 script {
                     println "BUILD_UID: ${env.BUILD_UID}"  // ✅ Still available
-                    
+
                     // Validate against metadata
                     copyArtifacts(...)
                     def metadata = readJSON file: 'workspace/metadata.json'
-                    
+
                     if (metadata.BUILD_UID != env.BUILD_UID) {
                         error("BUILD_UID mismatch!")
                     }

@@ -36,20 +36,20 @@ stage('Stage Name') {
         script {
             // 1. Pre-cleanup: ALWAYS clean workspace (critical for restartability)
             cleanWs()
-            
+
             // 2. Checkout repository (needed after cleanup)
             checkout scm
-            
+
             // 3. Copy artifacts from previous stages
             copyArtifacts(...)
-            
+
             // 4. Execute stage logic
             def stageScript = load 'scripts/stages/XX-stage-name.groovy'
             stageScript(config)
-            
+
             // 5. Archive outputs
             archiveArtifacts(...)
-            
+
             // 6. Post-cleanup: Clean if CLEAN_WORKSPACE_AFTER_STAGE=true
             if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
                 cleanWs()
@@ -152,7 +152,7 @@ All stages now include pre and post cleanup:
 
 1. **Parameter Change**: Update any job configurations or scripts that reference `CLEAN_WORKSPACE` to use `CLEAN_WORKSPACE_AFTER_STAGE`
 
-2. **Behavior Change**: 
+2. **Behavior Change**:
    - Pre-cleanup now ALWAYS happens (no configuration option)
    - Post-cleanup is controlled by `CLEAN_WORKSPACE_AFTER_STAGE` parameter
 

@@ -32,38 +32,38 @@ BUILD_NUMBER="${BUILD_NUMBER:-local}"
 # Main execution
 main() {
     log_section "Smoke Test Stage - Start"
-    
+
     # Validate environment
     validate_standard_environment
     require_dir "${TARGET_DIR}"
-    
+
     # Load configuration
     log_info "Loading configuration from ${CONFIG_FILE}"
-    
+
     # Extract configuration (pass file path directly)
     local java_version=$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")
     local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
     local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
-    
+
     log_info "Test Configuration:"
     log_info "  Java Version: ${java_version}"
     log_info "  Target OS: ${target_os}"
     log_info "  Architecture: ${architecture}"
-    
+
     # Prepare output directory
     prepare_output_dir "${TARGET_DIR}"
-    
+
     # Find JDK artifact
     local jdk_artifact=$(find_jdk_artifact)
     log_info "Testing JDK: ${jdk_artifact}"
-    
+
     # Extract JDK
     local jdk_dir=$(extract_jdk "${jdk_artifact}")
-    
+
     # Run smoke tests
     local test_result=0
     run_smoke_tests "${jdk_dir}" || test_result=$?
-    
+
     # Create test metadata
     if [[ ${test_result} -eq 0 ]]; then
         create_test_metadata "passed"
@@ -72,7 +72,7 @@ main() {
         create_test_metadata "failed"
         log_section "Smoke Test Stage - FAILED"
     fi
-    
+
     exit ${test_result}
 }
 
@@ -86,7 +86,7 @@ find_jdk_artifact() {
         ! -name "*-testimage.tar.gz" \
         ! -name "*-static-libs.tar.gz" \
         | head -n 1)
-    
+
     if [[ -z "${artifact}" ]]; then
         log_error "No JDK image artifact found in ${TARGET_DIR}"
         log_error "Looking for pattern: *-hotspot.tar.gz (excluding jre, debugimage, testimage, static-libs)"
@@ -94,7 +94,7 @@ find_jdk_artifact() {
         find "${TARGET_DIR}" -name "*.tar.gz" -exec basename {} \; || true
         exit 1
     fi
-    
+
     log_info "Found JDK artifact: $(basename ${artifact})"
     echo "${artifact}"
 }
@@ -103,24 +103,24 @@ find_jdk_artifact() {
 extract_jdk() {
     local artifact=$1
     local extract_dir="${WORKSPACE}/jdk-test"
-    
+
     log_info "Extracting JDK to ${extract_dir}"
-    
+
     rm -rf "${extract_dir}"
     mkdir -p "${extract_dir}"
-    
+
     tar -xzf "${artifact}" -C "${extract_dir}"
-    
+
     # Find the JDK directory (usually has a version in the name)
     local jdk_dir=$(find "${extract_dir}" -maxdepth 1 -type d ! -path "${extract_dir}" | head -n 1)
-    
+
     if [[ -z "${jdk_dir}" ]]; then
         log_error "Failed to find extracted JDK directory"
         exit 1
     fi
-    
+
     log_info "JDK extracted to: ${jdk_dir}"
-    
+
     # Return the path (echo to stdout for capture)
     echo "${jdk_dir}"
 }
@@ -130,9 +130,9 @@ run_smoke_tests() {
     local jdk_dir=$1
     local java_bin=""
     local jdk_home=""
-    
+
     log_section "Running Smoke Tests"
-    
+
     # Determine JDK home location (platform-specific)
     # macOS: jdk-dir/Contents/Home
     # Linux/Others: jdk-dir
@@ -152,24 +152,24 @@ run_smoke_tests() {
         ls -la "${jdk_dir}" || true
         return 1
     fi
-    
+
     log_info "Using JDK home: ${jdk_home}"
     log_info "Using Java binary: ${java_bin}"
-    
+
     local test_failed=0
-    
+
     # Test 1: Java version
     test_java_version "${java_bin}" || test_failed=1
-    
+
     # Test 2: Hello World (needs javac)
     test_hello_world "${java_bin}" "${jdk_home}" || test_failed=1
-    
+
     # Test 3: System properties
     test_system_properties "${java_bin}" || test_failed=1
-    
+
     # Test 4: Class loading
     test_class_loading "${java_bin}" "${jdk_home}" || test_failed=1
-    
+
     if [[ ${test_failed} -eq 0 ]]; then
         log_info "All smoke tests passed ✓"
         return 0
@@ -182,9 +182,9 @@ run_smoke_tests() {
 # Test: Java version
 test_java_version() {
     local java_bin=$1
-    
+
     log_info "Test 1: Java version"
-    
+
     if "${java_bin}" -version 2>&1 | tee "${TARGET_DIR}/java-version.txt"; then
         log_info "  ✓ Java version test passed"
         return 0
@@ -199,13 +199,13 @@ test_hello_world() {
     local java_bin=$1
     local jdk_home=$2
     local javac_bin="${jdk_home}/bin/javac"
-    
+
     log_info "Test 2: Hello World"
-    
+
     # Create a simple Hello World program
     local test_dir="${WORKSPACE}/test-hello"
     mkdir -p "${test_dir}"
-    
+
     cat > "${test_dir}/HelloWorld.java" <<'EOF'
 public class HelloWorld {
     public static void main(String[] args) {
@@ -213,7 +213,7 @@ public class HelloWorld {
     }
 }
 EOF
-    
+
     # Compile
     if "${javac_bin}" "${test_dir}/HelloWorld.java" 2>&1 | tee "${TARGET_DIR}/hello-compile.txt"; then
         log_info "  ✓ Compilation successful"
@@ -221,7 +221,7 @@ EOF
         log_error "  ✗ Compilation failed"
         return 1
     fi
-    
+
     # Run
     if "${java_bin}" -cp "${test_dir}" HelloWorld 2>&1 | tee "${TARGET_DIR}/hello-run.txt" | grep -q "Hello, World!"; then
         log_info "  ✓ Hello World test passed"
@@ -235,9 +235,9 @@ EOF
 # Test: System properties
 test_system_properties() {
     local java_bin=$1
-    
+
     log_info "Test 3: System properties"
-    
+
     # Run the command and capture output
     if "${java_bin}" -XshowSettings:properties -version > "${TARGET_DIR}/system-properties.txt" 2>&1; then
         # Check if output contains expected properties
@@ -261,9 +261,9 @@ test_system_properties() {
 test_class_loading() {
     local java_bin=$1
     local jdk_home=$2
-    
+
     log_info "Test 4: Class loading"
-    
+
     # Test loading a standard Java class
     if "${java_bin}" -cp "${jdk_home}/lib" -version 2>&1 | tee "${TARGET_DIR}/class-loading.txt"; then
         log_info "  ✓ Class loading test passed"
@@ -277,7 +277,7 @@ test_class_loading() {
 # Create test metadata
 create_test_metadata() {
     local status=$1
-    
+
     cat > "${WORKSPACE}/test-metadata.json" <<EOF
 {
   "stage": "${STAGE_NAME}",
@@ -287,10 +287,10 @@ create_test_metadata() {
   "smokeTestsPassed": $([ "${status}" = "passed" ] && echo "true" || echo "false")
 }
 EOF
-    
+
     # Also create stage metadata
     create_stage_metadata "${STAGE_NAME}" "${status}"
-    
+
     log_info "Test metadata created"
 }
 

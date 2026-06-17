@@ -31,6 +31,7 @@ This repository contains a comprehensive refactoring of the Adoptium OpenJDK bui
 - **[Configuration Guide](CONFIGURATION_GUIDE.md)** - JSON configuration system
 - **[Pipeline Runner Guide](PIPELINE_RUNNER_GUIDE.md)** - Using `run-pipeline.py`
 - **[Restartability Guide](RESTARTABILITY_GUIDE.md)** - Stage restart patterns
+- **[BUILD_UID Integration](docs/BUILD_UID_INTEGRATION.md)** - Unique build tracking and stage result management
 
 ## 🚀 Why Refactor?
 

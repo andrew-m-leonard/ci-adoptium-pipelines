@@ -178,14 +178,14 @@ stage('Build') {
         script {
             // Retrieve configuration
             copyArtifacts(filter: 'pipeline-config.json')
-            
+
             // Set up environment
             env.WORKSPACE = pwd()
             env.CONFIG_FILE = "${env.WORKSPACE}/pipeline-config.json"
-            
+
             // Execute CI-agnostic script
             sh './scripts/stages/02-build.sh'
-            
+
             // Archive outputs (CI-specific)
             archiveArtifacts artifacts: 'outputs/**/*,stage-metadata.json'
         }
@@ -201,10 +201,10 @@ build:
     # Set up environment
     - export WORKSPACE=$CI_PROJECT_DIR
     - export CONFIG_FILE=$WORKSPACE/pipeline-config.json
-    
+
     # Execute CI-agnostic script
     - ./scripts/stages/02-build.sh
-  
+
   artifacts:
     paths:
       - outputs/
@@ -219,7 +219,7 @@ build:
     CONFIG_FILE: ${{ github.workspace }}/pipeline-config.json
   run: |
     ./scripts/stages/02-build.sh
-    
+
 - name: Archive artifacts
   uses: actions/upload-artifact@v3
   with:
@@ -373,24 +373,24 @@ validate_environment() {
 # Main stage logic
 main() {
     validate_environment
-    
+
     # Load configuration
     local config=$(load_config "${CONFIG_FILE}")
-    
+
     # Get required values
     local java_version=$(get_config_value "${config}" ".buildConfig.JAVA_TO_BUILD")
-    
+
     log_info "Processing ${java_version}"
-    
+
     # Create output directory
     mkdir -p "${OUTPUT_DIR:-${WORKSPACE}/outputs}"
-    
+
     # Do the actual work
     perform_stage_work
-    
+
     # Create stage metadata
     create_stage_metadata "success"
-    
+
     log_info "=== ${STAGE_NAME} Complete ==="
 }
 
@@ -460,7 +460,7 @@ get_config_value() {
 create_stage_metadata() {
     local status=$1
     local metadata_file="${WORKSPACE}/stage-metadata.json"
-    
+
     cat > "${metadata_file}" <<EOF
 {
   "stage": "${STAGE_NAME}",
@@ -470,14 +470,14 @@ create_stage_metadata() {
   "workspace": "${WORKSPACE}"
 }
 EOF
-    
+
     log_info "Created stage metadata: ${metadata_file}"
 }
 
 copy_artifacts() {
     local source=$1
     local dest=$2
-    
+
     log_info "Copying artifacts from ${source} to ${dest}"
     mkdir -p "${dest}"
     cp -r "${source}"/* "${dest}/"

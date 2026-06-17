@@ -44,16 +44,16 @@ All stage scripts now use `TARGET_DIR` instead of `INPUT_DIR`/`OUTPUT_DIR`:
 
 1. **[`02-build-corrected.sh`](scripts/stages/02-build-corrected.sh)** - Build stage
    - Writes JDK artifacts to `${TARGET_DIR}/`
-   
+
 2. **[`06-sign.sh`](scripts/stages/06-sign.sh)** - Sign stage
    - Reads artifacts from `${TARGET_DIR}/`
    - Signs them in place
    - Writes signed artifacts back to `${TARGET_DIR}/`
-   
+
 3. **[`07-installer.sh`](scripts/stages/07-installer.sh)** - Installer stage
    - Reads signed JDK artifacts from `${TARGET_DIR}/`
    - Creates installers in `${TARGET_DIR}/installers/`
-   
+
 4. **[`13-smoke-tests.sh`](scripts/stages/13-smoke-tests.sh)** - Smoke test stage
    - Reads JDK artifacts from `${TARGET_DIR}/`
    - Writes test results to `${TARGET_DIR}/test-results/`
