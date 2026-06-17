@@ -1,0 +1,204 @@
+# Jenkins Configuration as Code (JCasC)
+#
+# This file configures a complete Jenkins instance from scratch.
+# Use this with the JCasC plugin to create a throwaway-able Jenkins instance.
+#
+# Usage:
+#   1. Install Jenkins with JCasC plugin
+#   2. Set CASC_JENKINS_CONFIG environment variable to point to this file
+#   3. Start Jenkins - it will auto-configure from this file
+#
+# Environment Variables Required:
+#   - JENKINS_ADMIN_PASSWORD: Admin user password
+#   - GITHUB_TOKEN: (Optional) GitHub API token for private repos
+
+jenkins:
+  systemMessage: |
+    OpenJDK Build Pipeline Jenkins Instance
+    Configured via Jenkins Configuration as Code (JCasC)
+    All jobs are managed via Job DSL scripts
+
+  numExecutors: 2
+  mode: NORMAL
+  scmCheckoutRetryCount: 3
+
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${JENKINS_ADMIN_PASSWORD:-admin}"
+          name: "Administrator"
+          description: "Jenkins Administrator"
+
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+
+  # Global tool configuration
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "JAVA_TOOL_OPTIONS"
+            value: "-Dfile.encoding=UTF-8"
+          - key: "BUILD_PIPELINE_VERSION"
+            value: "2.0.0"
+
+  # Disable CLI over remoting for security
+  remotingSecurity:
+    enabled: true
+
+  # Configure quiet period
+  quietPeriod: 5
+
+  # Disable usage statistics
+  disabledAdministrativeMonitors:
+    - "hudson.diagnosis.ReverseProxySetupMonitor"
+
+# Security configuration
+security:
+  # Disable script security for Job DSL (required for Job DSL to work)
+  scriptApproval:
+    approvedSignatures:
+      - "method groovy.lang.GroovyObject invokeMethod java.lang.String java.lang.Object"
+      - "new groovy.json.JsonSlurperClassic"
+      - "staticMethod org.codehaus.groovy.runtime.DefaultGroovyMethods getText java.io.File"
+
+  # CSRF protection
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: false
+
+# Credentials configuration
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # GitHub credentials (if needed for private repos)
+          - string:
+              scope: GLOBAL
+              id: "github-token"
+              secret: "${GITHUB_TOKEN}"
+              description: "GitHub API Token"
+
+# Plugin configuration
+unclassified:
+  location:
+    url: "http://localhost:8080/"
+    adminAddress: "jenkins@example.com"
+
+  # Git plugin configuration
+  gitSCM:
+    globalConfigName: "Jenkins"
+    globalConfigEmail: "jenkins@example.com"
+    createAccountBasedOnEmail: false
+
+  # Timestamper plugin
+  timestamper:
+    allPipelines: true
+
+  # Pipeline configuration
+  globalLibraries:
+    libraries:
+      - name: "build-uid-helper"
+        retriever:
+          modernSCM:
+            scm:
+              git:
+                remote: "https://github.com/adoptium/ci-adoptium-pipelines.git"
+                credentialsId: ""
+        defaultVersion: "main"
+        implicit: false
+        allowVersionOverride: true
+
+# Job configuration
+jobs:
+  # Create the seed job that will generate all other jobs
+  - script: |
+      freeStyleJob('seed-job') {
+        displayName('Seed Job - Job Generator')
+        description('Generates all Jenkins jobs from Job DSL scripts')
+
+        logRotator {
+          daysToKeep(30)
+          numToKeep(50)
+        }
+
+        scm {
+          git {
+            remote {
+              url('https://github.com/adoptium/ci-adoptium-pipelines.git')
+            }
+            branch('*/main')
+            extensions {
+              cleanBeforeCheckout()
+            }
+          }
+        }
+
+        triggers {
+          scm('H * * * *')
+        }
+
+        steps {
+          dsl {
+            external('ci/jenkins/job-dsl/*.groovy')
+            removeAction('DELETE')
+            removeViewAction('DELETE')
+          }
+        }
+      }
+
+# Tool installations
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+
+  jdk:
+    installations:
+      - name: "JDK 11"
+        properties:
+          - installSource:
+              installers:
+                - adoptOpenJdkInstaller:
+                    id: "jdk-11.0.12+7"
+      - name: "JDK 17"
+        properties:
+          - installSource:
+              installers:
+                - adoptOpenJdkInstaller:
+                    id: "jdk-17.0.1+12"
+      - name: "JDK 21"
+        properties:
+          - installSource:
+              installers:
+                - adoptOpenJdkInstaller:
+                    id: "jdk-21.0.1+12"
+
+  maven:
+    installations:
+      - name: "Maven 3.8"
+        properties:
+          - installSource:
+              installers:
+                - maven:
+                    id: "3.8.6"
+
+# Agent configuration
+agents:
+  # Configure cloud agents if using Kubernetes/Docker
+  # kubernetes:
+  #   - name: "kubernetes"
+  #     serverUrl: "https://kubernetes.default"
+  #     namespace: "jenkins"
+  #     jenkinsUrl: "http://jenkins:8080"
+
+# Appearance
+appearance:
+  themeManager:
+    disableUserThemes: false
+    theme: "default"
+
+# Made with Bob

@@ -140,8 +140,73 @@ See [LOCAL_TESTING_GUIDE.md](../../LOCAL_TESTING_GUIDE.md) for details.
 
 **Solution**: Verify ci-adoptium-pipelines repository is checked out correctly via SCM
 
+## Jenkins Automation (Configuration as Code)
+
+This directory also contains automation for creating "throwaway-able" Jenkins instances where all configuration and jobs are defined as code.
+
+### Quick Start
+
+```bash
+cd ci/jenkins
+./start-jenkins.sh --password mySecurePassword
+```
+
+Access Jenkins at: http://localhost:8080 (Username: `admin`)
+
+### Automation Components
+
+**Jenkins Configuration as Code (JCasC)**
+- File: `jcasc/jenkins.yaml`
+- Configures Jenkins itself (security, tools, plugins)
+- No manual setup required
+
+**Job DSL Scripts**
+- Directory: `job-dsl/`
+- Creates and manages all pipeline jobs from code
+- Automatic job updates via seed job
+
+**Docker Deployment**
+- File: `docker-compose.yml`
+- Containerized Jenkins with all dependencies
+- File: `plugins.txt` - Required Jenkins plugins
+
+**Quick Start Script**
+- File: `start-jenkins.sh`
+- One-command Jenkins deployment
+- Includes backup/restore functionality
+
+### Usage Examples
+
+```bash
+# Start Jenkins
+./start-jenkins.sh --password mySecurePassword
+
+# Stop Jenkins
+./start-jenkins.sh --stop
+
+# View logs
+./start-jenkins.sh --logs
+
+# Create backup
+./start-jenkins.sh --backup
+
+# Restore from backup
+./start-jenkins.sh --restore backups/jenkins-backup-YYYYMMDD-HHMMSS.tar.gz
+```
+
+### Benefits
+
+- **Throwaway-able**: Destroy and recreate Jenkins anytime
+- **Reproducible**: Same configuration every time
+- **Version Controlled**: All changes tracked in Git
+- **Automated**: No manual job creation
+
+For complete automation documentation, see [JENKINS_AUTOMATION.md](../../docs/JENKINS_AUTOMATION.md)
+
 ## Related Documentation
 
-- [JENKINS_RESTART_BEHAVIOR.md](../../JENKINS_RESTART_BEHAVIOR.md) - Restart behavior details
-- [CODE_CONFIG_SEPARATION.md](../../CODE_CONFIG_SEPARATION.md) - Code/config separation pattern
-- [CI_AGNOSTIC_ARCHITECTURE.md](../../CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
+- [JENKINS_AUTOMATION.md](../../docs/JENKINS_AUTOMATION.md) - Complete automation guide
+- [BUILD_UID_INTEGRATION.md](../../docs/BUILD_UID_INTEGRATION.md) - Pipeline restart safety
+- [JENKINS_RESTART_BEHAVIOR.md](../../docs/JENKINS_RESTART_BEHAVIOR.md) - Restart behavior details
+- [CODE_CONFIG_SEPARATION.md](../../docs/CODE_CONFIG_SEPARATION.md) - Code/config separation pattern
+- [CI_AGNOSTIC_ARCHITECTURE.md](../../docs/CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
