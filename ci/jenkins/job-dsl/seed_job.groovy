@@ -62,8 +62,13 @@ freeStyleJob('seed-job') {
 
     steps {
         dsl {
-            // Process all Job DSL scripts in the job-dsl directory
-            external('ci/jenkins/job-dsl/*.groovy')
+            // Process Job DSL scripts in specific order
+            // 1. Load configuration first
+            external('ci/jenkins/job-dsl/load_config.groovy')
+            // 2. Create launch orchestrator jobs
+            external('ci/jenkins/job-dsl/openjdk_launch_pipeline.groovy')
+            // 3. Recreate seed job (self-updating)
+            external('ci/jenkins/job-dsl/seed_job.groovy')
 
             // Remove jobs that are no longer defined in DSL
             removeAction('DELETE')
@@ -99,11 +104,28 @@ listView('All Pipeline Jobs') {
     }
 }
 
-// Create a view for JDK version-specific jobs
-listView('JDK Version Builds') {
-    description('Build jobs organized by JDK version')
+// Create a view for launch orchestrator jobs
+listView('JDK Launch Jobs') {
+    description('Launch orchestrator jobs for coordinating platform builds')
     jobs {
-        regex('openjdk-builds/jdk.*')
+        regex('.*/jdk\\d+-launch-build-pipelines')
+    }
+    columns {
+        status()
+        weather()
+        name()
+        lastSuccess()
+        lastFailure()
+        lastDuration()
+        buildButton()
+    }
+}
+
+// Create a view for platform-specific build jobs
+listView('Platform Build Jobs') {
+    description('Platform-specific build jobs (created dynamically by launch jobs)')
+    jobs {
+        regex('.*/jdk\\d+-[^-]+-build-pipeline')
     }
     columns {
         status()

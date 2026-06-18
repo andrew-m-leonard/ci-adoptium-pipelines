@@ -4,42 +4,44 @@ This directory contains utility tools for working with the CI Adoptium Pipelines
 
 ## Configuration Conversion Tools
 
-### convert-groovy-config-to-json.sh
+### convert-legacy-configs-to-new-architecture.py
 
-**Purpose**: Convert legacy Groovy pipeline configuration files to the new JSON format.
+**Purpose**: Convert legacy Groovy pipeline configurations to the new launch job architecture.
 
 **Usage**:
 ```bash
-./tools/convert-groovy-config-to-json.sh <groovy_config_file> [output_json_file]
-```
-
-**Examples**:
-
-1. Convert with automatic output filename:
-```bash
-./tools/convert-groovy-config-to-json.sh \
-    ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations/jdk21u_pipeline_config.groovy
-# Creates: jdk21u_pipeline_config.json
-```
-
-2. Convert with custom output filename:
-```bash
-./tools/convert-groovy-config-to-json.sh \
-    ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations/jdk21u_pipeline_config.groovy \
-    configurations/jdk21u_pipeline_config.json
+python3 tools/convert-legacy-configs-to-new-architecture.py \
+    --source ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations \
+    --output ~/workspace/ci-temurin-config
 ```
 
 **What It Does**:
-- Parses Groovy configuration syntax
-- Extracts `buildConfigurations` map
-- Converts platform-specific settings to JSON
-- Handles nested maps and lists
-- Preserves variant-specific configurations
+- Scans input directory for `*_pipeline_config.groovy` files
+- Converts each file to JSON format
+- **Removes "u" suffix** from output filenames (e.g., `jdk21u_pipeline_config.groovy` → `jdk21_pipeline_config.json`)
+- Generates `jenkins_job_config.json` with active JDK versions
+- Outputs individual version configs to `configurations/` directory
+- Structures output for the new launch job + platform job architecture
 
 **Output Structure**:
+
+1. **jenkins_job_config.json** (top-level config):
 ```json
 {
-  "version": "jdk21u",
+  "activeJdkVersions": ["jdk8", "jdk11", "jdk17", "jdk21", "jdk23", "jdk24", "jdk25"],
+  "defaultBuildArgs": "--create-jre-image --create-sbom",
+  "defaultConfigureArgs": "",
+  "defaultVariant": "temurin",
+  "defaultScmReference": "",
+  "configFilePrefix": "configurations/",
+  "configFileSuffix": "_pipeline_config.json"
+}
+```
+
+2. **configurations/jdk21_pipeline_config.json** (version-specific config):
+```json
+{
+  "version": "jdk21",
   "scmReference": "jdk21u",
   "buildConfigurations": {
     "x64Mac": {
@@ -53,6 +55,69 @@ This directory contains utility tools for working with the CI Adoptium Pipelines
 }
 ```
 
+**Command Options**:
+```bash
+# Dry run to preview what would be converted
+python3 tools/convert-legacy-configs-to-new-architecture.py \
+    --source ./configs --output ./output --dry-run
+
+# Verbose output with detailed conversion info
+python3 tools/convert-legacy-configs-to-new-architecture.py \
+    --source ./configs --output ./output --verbose
+
+# Force overwrite existing files
+python3 tools/convert-legacy-configs-to-new-architecture.py \
+    --source ./configs --output ./output --force
+```
+
+**Example Output**:
+```
+======================================================================
+Legacy Groovy to New Architecture Converter
+======================================================================
+
+Scanning: /Users/user/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations
+Pattern:  *_pipeline_config.groovy
+Found:    7 configuration file(s)
+
+Converting to: /Users/user/workspace/ci-temurin-config
+
+[1/7] Converting jdk8u_pipeline_config.groovy... ✅
+[2/7] Converting jdk11u_pipeline_config.groovy... ✅
+[3/7] Converting jdk17u_pipeline_config.groovy... ✅
+[4/7] Converting jdk21u_pipeline_config.groovy... ✅
+[5/7] Converting jdk23u_pipeline_config.groovy... ✅
+[6/7] Converting jdk24u_pipeline_config.groovy... ✅
+[7/7] Converting jdk25u_pipeline_config.groovy... ✅
+
+Generating jenkins_job_config.json... ✅
+
+======================================================================
+Conversion Summary
+======================================================================
+Total:   7
+Success: 7
+Failed:  0
+
+✅ All configurations converted successfully!
+
+Generated files:
+  - jenkins_job_config.json
+  - configurations/jdk8_pipeline_config.json
+  - configurations/jdk11_pipeline_config.json
+  - configurations/jdk17_pipeline_config.json
+  - configurations/jdk21_pipeline_config.json
+  - configurations/jdk23_pipeline_config.json
+  - configurations/jdk24_pipeline_config.json
+  - configurations/jdk25_pipeline_config.json
+
+Next steps:
+1. Review the generated JSON files
+2. Verify platform configurations are correct
+3. Test with the seed job
+4. Commit to your configuration repository
+```
+
 **Important Notes**:
 - ⚠️ This is a **semi-automated** conversion tool
 - Manual review of the output is **strongly recommended**
@@ -61,63 +126,16 @@ This directory contains utility tools for working with the CI Adoptium Pipelines
   - Variant-specific configurations (temurin vs hotspot)
   - Test configurations
   - Special characters in strings
-
-**Testing the Output**:
-```bash
-# Validate the generated JSON
-python3 ci/local/run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture x64 \
-    --skip-build
-```
+- The tool automatically removes the "u" suffix from version names in filenames
+- SCM references retain the "u" suffix (e.g., `jdk21u`) for compatibility
 
 ---
 
 ### convert-groovy-to-json.py
 
-**Purpose**: Python module for Groovy-to-JSON conversion (used by convert-groovy-config-to-json.sh).
+**Purpose**: Python module for Groovy-to-JSON conversion (used by convert-legacy-configs-to-new-architecture.py).
 
-**Usage**: This is a library module, not meant to be run directly. Use `convert-groovy-config-to-json.sh` instead.
-
----
-
-### convert-all-legacy-groovy-configs.py
-
-**Purpose**: Batch convert all Groovy configuration files in a directory to JSON format.
-
-**Usage**:
-```bash
-python3 tools/convert-all-legacy-groovy-configs.py \
-    --input-dir ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations \
-    --output-dir ./configurations
-```
-
-**What It Does**:
-- Scans input directory for `*_pipeline_config.groovy` files
-- Converts each file to JSON using the conversion logic
-- Outputs all JSON files to the specified directory
-- Provides summary of successful and failed conversions
-
-**Example Output**:
-```
-Converting Groovy configurations to JSON...
-
-Processing: jdk8u_pipeline_config.groovy
-  ✅ Successfully converted to jdk8u_pipeline_config.json
-
-Processing: jdk11u_pipeline_config.groovy
-  ✅ Successfully converted to jdk11u_pipeline_config.json
-
-Processing: jdk17u_pipeline_config.groovy
-  ✅ Successfully converted to jdk17u_pipeline_config.json
-
-Summary:
-  Total files: 10
-  Successful: 10
-  Failed: 0
-```
+**Usage**: This is a library module, not meant to be run directly. Use `convert-legacy-configs-to-new-architecture.py` instead.
 
 ---
 
@@ -159,39 +177,58 @@ Summary:
 
 ## Migration Workflow
 
-### Converting Legacy Configurations
+### Converting Legacy Configurations to New Architecture
 
 **Step 1**: Clone the legacy configuration repository
 ```bash
 git clone https://github.com/adoptium/ci-jenkins-pipelines.git ~/workspace/ci-jenkins-pipelines
 ```
 
-**Step 2**: Convert all configurations
+**Step 2**: Convert all configurations to new architecture
 ```bash
-python3 tools/convert-all-legacy-groovy-configs.py \
-    --input-dir ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations \
-    --output-dir ./configurations
+cd ~/workspace/ci-adoptium-pipelines
+
+python3 tools/convert-legacy-configs-to-new-architecture.py \
+    --source ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations \
+    --output ~/workspace/ci-temurin-config
 ```
 
-**Step 3**: Review and validate each JSON file
-```bash
-# Check the structure
-cat configurations/jdk21u_pipeline_config.json | jq .
+This will generate:
+- `jenkins_job_config.json` (top-level config with active versions)
+- `configurations/jdk8_pipeline_config.json`
+- `configurations/jdk11_pipeline_config.json`
+- `configurations/jdk17_pipeline_config.json`
+- `configurations/jdk21_pipeline_config.json`
+- `configurations/jdk23_pipeline_config.json`
+- `configurations/jdk24_pipeline_config.json`
+- `configurations/jdk25_pipeline_config.json`
 
-# Test with pipeline runner
-python3 ci/local/run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture x64 \
-    --skip-build
-```
-
-**Step 4**: Commit to configuration repository
+**Step 3**: Review and validate the generated files
 ```bash
 cd ~/workspace/ci-temurin-config
-git add configurations/*.json
-git commit -m "Convert legacy Groovy configs to JSON"
+
+# Check the top-level config
+cat jenkins_job_config.json | jq .
+
+# Check a version-specific config
+cat configurations/jdk21_pipeline_config.json | jq .
+
+# Verify all active versions are present
+jq '.activeJdkVersions' jenkins_job_config.json
+```
+
+**Step 4**: Test with the seed job
+```bash
+# The seed job will use these configs to create:
+# - Launch jobs: jdk${version}-launch-build-pipelines
+# - Platform jobs: jdk${version}-${platform}-build-pipeline (created dynamically)
+```
+
+**Step 5**: Commit to configuration repository
+```bash
+cd ~/workspace/ci-temurin-config
+git add jenkins_job_config.json configurations/*.json
+git commit -m "Convert legacy Groovy configs to new launch job architecture"
 git push
 ```
 
@@ -208,6 +245,15 @@ git push
 ## Troubleshooting
 
 ### Conversion Issues
+
+**Problem**: Import error when running conversion script
+```
+Error: Could not import GroovyParser from convert-groovy-to-json.py
+```
+
+**Solution**: Ensure both [`convert-legacy-configs-to-new-architecture.py`](../ci-adoptium-pipelines/tools/convert-legacy-configs-to-new-architecture.py:1) and [`convert-groovy-to-json.py`](../ci-adoptium-pipelines/tools/convert-groovy-to-json.py:1) are in the same directory.
+
+---
 
 **Problem**: Nested maps not converting correctly
 ```
@@ -252,6 +298,17 @@ Warning: No test configuration found for platform
 
 ---
 
+**Problem**: Version suffix mismatch
+```
+Error: Config file not found: configurations/jdk21u_pipeline_config.json
+```
+
+**Solution**: The new architecture removes the "u" suffix from config filenames. Ensure your [`jenkins_job_config.json`](../ci-temurin-config/jenkins_job_config.json:1) uses the correct naming:
+- ✅ Correct: `configurations/jdk21_pipeline_config.json`
+- ❌ Incorrect: `configurations/jdk21u_pipeline_config.json`
+
+---
+
 ## Contributing
 
 When adding new tools to this directory:
@@ -264,4 +321,4 @@ When adding new tools to this directory:
 
 ---
 
-**Last Updated**: 2026-05-19
+**Last Updated**: 2026-06-18

@@ -1,0 +1,211 @@
+/**
+ * Launch Pipeline for OpenJDK Builds
+ *
+ * This pipeline orchestrates builds across multiple platforms for a specific JDK version.
+ * It dynamically creates platform-specific build jobs and launches them in parallel.
+ *
+ * Job Name Pattern: jdk${version}-launch-build-pipelines
+ * Creates: jdk${version}-${platform}-build-pipeline jobs
+ */
+
+@Library('shared-library') _
+
+import groovy.json.JsonSlurper
+
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'CONFIG_REPO_URL', defaultValue: '', description: 'Configuration repository URL')
+        string(name: 'CONFIG_REPO_BRANCH', defaultValue: '', description: 'Configuration repository branch')
+        booleanParam(name: 'REGENERATE_JOBS', defaultValue: false, description: 'Force regeneration of platform jobs')
+        string(name: 'PLATFORMS', defaultValue: 'all', description: 'Comma-separated platforms or "all"')
+        string(name: 'BUILD_VARIANT', defaultValue: 'temurin', description: 'Build variant')
+        booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', defaultValue: true, description: 'Clean workspace after each stage')
+        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Run test stages')
+        booleanParam(name: 'SIGN_ARTIFACTS', defaultValue: false, description: 'Sign artifacts')
+        booleanParam(name: 'PUBLISH_ARTIFACTS', defaultValue: false, description: 'Publish artifacts')
+        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', defaultValue: false, description: 'Run reproducible comparison')
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '50', daysToKeepStr: '30'))
+        timestamps()
+        timeout(time: 8, unit: 'HOURS')
+    }
+    
+    stages {
+        stage('Initialize') {
+            steps {
+                script {
+                    // Extract JDK version from job name (e.g., jdk21-launch-build-pipelines -> 21)
+                    env.JDK_VERSION = env.JOB_NAME.replaceAll(/.*jdk(\d+)-launch-build-pipelines.*/, '$1')
+                    
+                    echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
+                    echo "Configuration Repository: ${params.CONFIG_REPO_URL}"
+                    echo "Configuration Branch: ${params.CONFIG_REPO_BRANCH}"
+                    echo "Regenerate Jobs: ${params.REGENERATE_JOBS}"
+                    echo "Platforms: ${params.PLATFORMS}"
+                }
+            }
+        }
+        
+        stage('Fetch Configuration') {
+            steps {
+                script {
+                    echo "Fetching configuration for JDK ${env.JDK_VERSION}..."
+                    
+                    // Extract GitHub owner/repo from URL
+                    def repoPath = params.CONFIG_REPO_URL.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
+                    def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
+                    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${params.CONFIG_REPO_BRANCH}/${configFile}"
+                    
+                    echo "Fetching: ${configUrl}"
+                    
+                    try {
+                        def configText = new URL(configUrl).text
+                        env.VERSION_CONFIG = configText
+                        def config = new JsonSlurper().parseText(configText)
+                        
+                        // Extract platform list from buildConfigurations keys
+                        def platforms = config.buildConfigurations.keySet() as List
+                        env.AVAILABLE_PLATFORMS = platforms.join(',')
+                        
+                        echo "✓ Configuration loaded successfully"
+                        echo "  Available platforms: ${env.AVAILABLE_PLATFORMS}"
+                    } catch (Exception e) {
+                        error("Failed to fetch configuration: ${e.message}\n\nURL: ${configUrl}\n\nEnsure the configuration file exists and is accessible.")
+                    }
+                }
+            }
+        }
+        
+        stage('Determine Platforms') {
+            steps {
+                script {
+                    def availablePlatforms = env.AVAILABLE_PLATFORMS.split(',') as List
+                    def selectedPlatforms
+                    
+                    if (params.PLATFORMS == 'all') {
+                        selectedPlatforms = availablePlatforms
+                        echo "Building all available platforms"
+                    } else {
+                        selectedPlatforms = params.PLATFORMS.split(',').collect { it.trim() }
+                        
+                        // Validate selected platforms
+                        def invalidPlatforms = selectedPlatforms.findAll { !availablePlatforms.contains(it) }
+                        if (invalidPlatforms) {
+                            error("Invalid platforms specified: ${invalidPlatforms.join(', ')}\nAvailable platforms: ${availablePlatforms.join(', ')}")
+                        }
+                        echo "Building selected platforms: ${selectedPlatforms.join(', ')}"
+                    }
+                    
+                    env.SELECTED_PLATFORMS = selectedPlatforms.join(',')
+                    echo "✓ Platforms determined: ${env.SELECTED_PLATFORMS}"
+                }
+            }
+        }
+        
+        stage('Create/Update Platform Jobs') {
+            when {
+                expression { params.REGENERATE_JOBS == true }
+            }
+            steps {
+                script {
+                    echo "Regenerating platform-specific build jobs..."
+                    
+                    def platforms = env.SELECTED_PLATFORMS.split(',')
+                    
+                    platforms.each { platform ->
+                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        echo "  Creating/updating job: ${jobName}"
+                        
+                        // Use Job DSL to create/update the job
+                        jobDsl(
+                            targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                            removedJobAction: 'IGNORE',
+                            removedViewAction: 'IGNORE',
+                            additionalParameters: [
+                                JDK_VERSION: env.JDK_VERSION,
+                                PLATFORM: platform,
+                                CONFIG_REPO_URL: params.CONFIG_REPO_URL,
+                                CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
+                            ]
+                        )
+                    }
+                    
+                    echo "✓ Platform jobs created/updated successfully"
+                }
+            }
+        }
+        
+        stage('Launch Platform Builds') {
+            steps {
+                script {
+                    echo "Launching builds for selected platforms..."
+                    
+                    def platforms = env.SELECTED_PLATFORMS.split(',')
+                    def buildJobs = [:]
+                    
+                    platforms.each { platform ->
+                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        
+                        buildJobs[platform] = {
+                            stage("Build ${platform}") {
+                                echo "Launching build for ${platform}..."
+                                
+                                try {
+                                    build(
+                                        job: jobName,
+                                        parameters: [
+                                            string(name: 'JDK_VERSION', value: env.JDK_VERSION),
+                                            string(name: 'PLATFORM', value: platform),
+                                            string(name: 'BUILD_VARIANT', value: params.BUILD_VARIANT),
+                                            string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
+                                            string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
+                                            booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE),
+                                            booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
+                                            booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
+                                            booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
+                                            booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
+                                        ],
+                                        wait: true,
+                                        propagate: false
+                                    )
+                                    echo "✓ ${platform} build completed"
+                                } catch (Exception e) {
+                                    echo "✗ ${platform} build failed: ${e.message}"
+                                    throw e
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Execute all platform builds in parallel
+                    parallel buildJobs
+                    
+                    echo "✓ All platform builds completed"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "=== Launch Pipeline Summary ==="
+                echo "JDK Version: ${env.JDK_VERSION}"
+                echo "Platforms: ${env.SELECTED_PLATFORMS}"
+                echo "Build Result: ${currentBuild.result ?: 'SUCCESS'}"
+            }
+        }
+        success {
+            echo "✓ Launch pipeline completed successfully"
+        }
+        failure {
+            echo "✗ Launch pipeline failed"
+        }
+    }
+}
+
+// Made with Bob
