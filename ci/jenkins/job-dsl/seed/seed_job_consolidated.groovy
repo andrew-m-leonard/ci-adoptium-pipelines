@@ -24,6 +24,14 @@ import groovy.json.JsonSlurper
 def configRepoUrl = binding.variables.get('CONFIG_REPO_URL')
 def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH')
 
+println "=" * 80
+println "SEED JOB CONFIGURATION"
+println "=" * 80
+println "CONFIG_REPO_URL: ${configRepoUrl ?: '(empty)'}"
+println "CONFIG_REPO_BRANCH: ${configRepoBranch ?: '(empty)'}"
+println "=" * 80
+println ""
+
 // Validate required parameters
 if (!configRepoUrl || configRepoUrl.trim().isEmpty()) {
     throw new IllegalArgumentException("""
@@ -139,11 +147,25 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         quietPeriod(5)
 
         parameters {
-            // Configuration repository parameters
-            stringParam('CONFIG_REPO_URL', configRepoUrl,
-                'URL of the configuration repository containing jenkins_job_config.json')
-            stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
-                'Branch of the configuration repository')
+            // Configuration repository parameters (propagated from seed job)
+            // These values are set when the seed job runs and should not normally be changed
+            stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
+                """URL of the configuration repository containing jenkins_job_config.json
+                
+                ⚠️  This value is automatically set by the seed job.
+                Current value: ${configRepoUrl ?: '(NOT SET - Re-run seed job with CONFIG_REPO_URL parameter!)'}
+                
+                If this is empty, the seed job was not run with proper parameters.
+                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
+            
+            stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
+                """Branch of the configuration repository
+                
+                ⚠️  This value is automatically set by the seed job.
+                Current value: ${configRepoBranch ?: '(NOT SET - Re-run seed job with CONFIG_REPO_BRANCH parameter!)'}
+                
+                If this is empty, the seed job was not run with proper parameters.
+                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
             
             // Job management
             booleanParam('REGENERATE_JOBS', false,
@@ -243,8 +265,21 @@ freeStyleJob('seed-job') {
     }
 
     parameters {
-        stringParam('CONFIG_REPO_URL', '', 'URL of the configuration repository containing jenkins_job_config.json (REQUIRED)')
-        stringParam('CONFIG_REPO_BRANCH', '', 'Branch of the configuration repository (REQUIRED)')
+        stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
+            """⚠️  REQUIRED: URL of the configuration repository containing jenkins_job_config.json
+            
+            Example: https://github.com/adoptium/ci-temurin-config.git
+            
+            This parameter MUST be provided when running the seed job.
+            The value will be propagated to all generated launch jobs.""".stripIndent().trim())
+        
+        stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
+            """⚠️  REQUIRED: Branch of the configuration repository
+            
+            Example: main
+            
+            This parameter MUST be provided when running the seed job.
+            The value will be propagated to all generated launch jobs.""".stripIndent().trim())
     }
 
     scm {
