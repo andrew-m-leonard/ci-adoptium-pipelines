@@ -299,29 +299,13 @@ println "✓ Seed job created successfully\n"
 // STEP 4: Create Views
 // ============================================================================
 
-// Create a view to organize all generated jobs
-listView('All Pipeline Jobs') {
-    description('All OpenJDK build pipeline jobs')
-    jobs {
-        regex('.*pipeline.*')
-    }
-    columns {
-        status()
-        weather()
-        name()
-        lastSuccess()
-        lastFailure()
-        lastDuration()
-        buildButton()
-    }
-}
-
 // Create a view for launch orchestrator jobs
-listView('JDK Launch Jobs') {
+listView('JDK Pipeline Launchers') {
     description('Launch orchestrator jobs for coordinating platform builds')
     jobs {
-        regex('.*jdk\\d+u?-launch-build-pipelines')
+        regex('.*launch-build-pipelines')
     }
+    recurse(true)  // Include jobs in folders
     columns {
         status()
         weather()
@@ -334,11 +318,12 @@ listView('JDK Launch Jobs') {
 }
 
 // Create a view for platform-specific build jobs
-listView('Platform Build Jobs') {
+listView('JDK Build Platform Pipelines') {
     description('Platform-specific build jobs (created dynamically by launch jobs)')
     jobs {
-        regex('.*jdk\\d+u?-[^-]+-build-pipeline')
+        regex('.*-build-pipeline')
     }
+    recurse(true)  // Include jobs in folders
     columns {
         status()
         weather()
