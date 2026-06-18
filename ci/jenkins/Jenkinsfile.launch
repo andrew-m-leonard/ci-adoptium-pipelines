@@ -53,15 +53,23 @@ pipeline {
                 script {
                     echo "Fetching configuration for JDK ${env.JDK_VERSION}..."
                     
-                    // Extract GitHub owner/repo from URL
-                    def repoPath = params.CONFIG_REPO_URL.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
                     def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
-                    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${params.CONFIG_REPO_BRANCH}/${configFile}"
                     
-                    echo "Fetching: ${configUrl}"
-                    
-                    try {
-                        def configText = new URL(configUrl).text
+                    // Checkout configuration repository
+                    dir('config-repo') {
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
+                            userRemoteConfigs: [[url: params.CONFIG_REPO_URL]],
+                            extensions: [[$class: 'CleanBeforeCheckout']]
+                        ])
+                        
+                        // Read configuration file
+                        if (!fileExists(configFile)) {
+                            error("Configuration file not found: ${configFile}\n\nEnsure the file exists in the configuration repository.")
+                        }
+                        
+                        def configText = readFile(configFile)
                         env.VERSION_CONFIG = configText
                         def config = new JsonSlurper().parseText(configText)
                         
@@ -71,8 +79,6 @@ pipeline {
                         
                         echo "✓ Configuration loaded successfully"
                         echo "  Available platforms: ${env.AVAILABLE_PLATFORMS}"
-                    } catch (Exception e) {
-                        error("Failed to fetch configuration: ${e.message}\n\nURL: ${configUrl}\n\nEnsure the configuration file exists and is accessible.")
                     }
                 }
             }
