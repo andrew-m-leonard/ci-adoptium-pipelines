@@ -187,11 +187,6 @@ pipelineJob(jobConfig.name) {
     displayName(jobConfig.displayName)
     description(jobConfig.description)
 
-    // Disable concurrent builds if specified
-    if (!jobConfig.concurrentBuilds) {
-        concurrentBuild(false)
-    }
-
     // Set quiet period
     quietPeriod(jobConfig.quietPeriod)
 
@@ -290,10 +285,6 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     pipelineJob(versionConfig.name) {
         displayName(versionConfig.displayName)
         description(versionConfig.description)
-
-        if (!versionConfig.concurrentBuilds) {
-            concurrentBuild(false)
-        }
 
         quietPeriod(versionConfig.quietPeriod)
 
