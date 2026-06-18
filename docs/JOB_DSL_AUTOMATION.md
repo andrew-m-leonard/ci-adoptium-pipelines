@@ -1,10 +1,12 @@
 # Job DSL Automation
 
-This document describes how to automate Jenkins job creation using Job DSL scripts that read configuration from the ci-temurin-config repository.
+This document describes how to automate Jenkins job creation using Job DSL scripts that read configuration from a vendor-specific configuration repository.
 
 ## Overview
 
 All Jenkins pipeline jobs are defined as code using Job DSL scripts. A seed job reads these scripts and creates/updates all pipeline jobs automatically. This ensures jobs are reproducible and version-controlled.
+
+**Key Feature**: The configuration repository URL and branch are **mandatory parameters** - there are no defaults. This ensures each vendor explicitly specifies their configuration source.
 
 ## Prerequisites
 
@@ -16,7 +18,7 @@ Your Jenkins instance must have:
 4. **Script Security** configured to allow Job DSL scripts
 5. Access to:
    - `https://github.com/adoptium/ci-adoptium-pipelines.git` (pipeline code)
-   - `https://github.com/adoptium/ci-temurin-config.git` (configuration)
+   - Your vendor-specific configuration repository (e.g., `https://github.com/adoptium/ci-temurin-config.git`)
 
 ## Architecture
 
@@ -26,6 +28,7 @@ Your Jenkins instance must have:
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ Seed Job (Freestyle)                                   │ │
+│  │ - Parameters: CONFIG_REPO_URL, CONFIG_REPO_BRANCH     │ │
 │  │ - Checks out ci-adoptium-pipelines                     │ │
 │  │ - Runs Job DSL scripts from job-dsl/ directory        │ │
 │  │ - Creates/updates all pipeline jobs                    │ │
@@ -34,7 +37,8 @@ Your Jenkins instance must have:
 │                           ↓                                  │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ Job DSL Script (openjdk-build-pipeline.groovy)        │ │
-│  │ - Fetches jenkins_job_config.json from ci-temurin-config│ │
+│  │ - Uses CONFIG_REPO_URL and CONFIG_REPO_BRANCH params  │ │
+│  │ - Fetches jenkins_job_config.json from config repo    │ │
 │  │ - Reads active JDK versions (8,11,17,21,25,26,27)     │ │
 │  │ - Creates one pipeline job per active version          │ │
 │  └────────────────────────────────────────────────────────┘ │
@@ -58,24 +62,43 @@ Your Jenkins instance must have:
 ### Step 1: Create Seed Job
 
 1. In Jenkins, create a new **Freestyle project** named `seed-job`
-2. Configure Source Code Management:
+
+2. **Add Parameters** (This is required):
+   - Click "This project is parameterized"
+   - Add **String Parameter**:
+     - **Name**: `CONFIG_REPO_URL`
+     - **Default Value**: Leave empty (no default)
+     - **Description**: `URL of the configuration repository containing jenkins_job_config.json (REQUIRED)`
+   - Add **String Parameter**:
+     - **Name**: `CONFIG_REPO_BRANCH`
+     - **Default Value**: Leave empty (no default)
+     - **Description**: `Branch of the configuration repository (REQUIRED)`
+
+3. Configure Source Code Management:
    - **SCM**: Git
    - **Repository URL**: `https://github.com/adoptium/ci-adoptium-pipelines.git`
    - **Branch**: `*/main`
-3. Add Build Step: **Process Job DSLs**
+
+4. Add Build Step: **Process Job DSLs**
    - **Look on Filesystem**: Unchecked
    - **DSL Scripts**: `ci/jenkins/job-dsl/*.groovy`
    - **Action for removed jobs**: Delete
    - **Action for removed views**: Delete
-4. (Optional) Add Build Trigger: **Poll SCM**
+
+5. (Optional) Add Build Trigger: **Poll SCM**
    - **Schedule**: `H * * * *` (hourly)
-5. Save the job
+
+6. Save the job
 
 ### Step 2: Run Seed Job
 
-1. Click "Build Now" on the seed job
-2. The job will:
-   - Fetch `jenkins_job_config.json` from ci-temurin-config
+1. Click "Build with Parameters" on the seed job
+2. **Provide required parameters**:
+   - **CONFIG_REPO_URL**: `https://github.com/adoptium/ci-temurin-config.git` (or your vendor's config repo)
+   - **CONFIG_REPO_BRANCH**: `main` (or your vendor's branch)
+3. Click "Build"
+4. The job will:
+   - Fetch `jenkins_job_config.json` from your configuration repository
    - Create jobs for all active JDK versions
    - Create the `openjdk-builds` folder
 
@@ -94,7 +117,9 @@ Check that the following jobs were created:
 
 ### Active JDK Versions
 
-Active versions are defined in [`ci-temurin-config/jenkins_job_config.json`](https://github.com/adoptium/ci-temurin-config/blob/main/jenkins_job_config.json):
+Active versions are defined in your configuration repository's `jenkins_job_config.json` file.
+
+Example from Adoptium's configuration ([`ci-temurin-config/jenkins_job_config.json`](https://github.com/adoptium/ci-temurin-config/blob/main/jenkins_job_config.json)):
 
 ```json
 {

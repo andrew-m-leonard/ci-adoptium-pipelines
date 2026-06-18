@@ -2,12 +2,16 @@
  * Job DSL Script for OpenJDK Build Pipeline
  *
  * This script creates the declarative pipeline job for building OpenJDK.
- * It reads configuration from the ci-temurin-config repository to determine
+ * It reads configuration from a vendor-specific configuration repository to determine
  * which JDK versions are active and should have jobs created.
+ *
+ * Required Parameters (passed from seed job):
+ *   - CONFIG_REPO_URL: URL of the configuration repository
+ *   - CONFIG_REPO_BRANCH: Branch of the configuration repository
  *
  * Usage:
  *   1. Install Job DSL plugin in Jenkins
- *   2. Create a seed job that runs this script
+ *   2. Create a seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters
  *   3. Run the seed job to create/update the pipeline job
  *
  * For throwaway Jenkins instances, this ensures all jobs are reproducible from code.
@@ -15,34 +19,67 @@
 
 import groovy.json.JsonSlurper
 
-// Fetch Jenkins job configuration from ci-temurin-config repository
-def configRepoUrl = 'https://github.com/adoptium/ci-temurin-config.git'
-def configRepoBranch = 'main'
+// Get configuration repository details from seed job parameters
+def configRepoUrl = binding.variables.get('CONFIG_REPO_URL')
+def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH')
 def configFile = 'jenkins_job_config.json'
+
+// Validate required parameters
+if (!configRepoUrl || configRepoUrl.trim().isEmpty()) {
+    throw new IllegalArgumentException("""
+ERROR: CONFIG_REPO_URL parameter is required but not provided!
+
+The seed job must be configured with the following parameters:
+- CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
+- CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
+
+Please configure the seed job with these parameters and try again.
+""".stripIndent())
+}
+
+if (!configRepoBranch || configRepoBranch.trim().isEmpty()) {
+    throw new IllegalArgumentException("""
+ERROR: CONFIG_REPO_BRANCH parameter is required but not provided!
+
+The seed job must be configured with the following parameters:
+- CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
+- CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
+
+Please configure the seed job with these parameters and try again.
+""".stripIndent())
+}
+
+// Extract GitHub owner/repo from URL for raw.githubusercontent.com access
+def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
 
 // Read configuration from repository
 def jenkinsConfig
 try {
-    def configUrl = "https://raw.githubusercontent.com/adoptium/ci-temurin-config/${configRepoBranch}/${configFile}"
+    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
     println "Loading Jenkins configuration from ${configUrl}"
+    println "  Repository: ${configRepoUrl}"
+    println "  Branch: ${configRepoBranch}"
     def configText = new URL(configUrl).text
     jenkinsConfig = new JsonSlurper().parseText(configText)
     println "✓ Successfully loaded Jenkins configuration"
     println "  Active JDK versions: ${jenkinsConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
 } catch (Exception e) {
     def errorMsg = """
-ERROR: Failed to load Jenkins job configuration from ci-temurin-config repository!
+ERROR: Failed to load Jenkins job configuration from configuration repository!
 
-Configuration URL: https://raw.githubusercontent.com/adoptium/ci-temurin-config/${configRepoBranch}/${configFile}
+Configuration Repository: ${configRepoUrl}
+Branch: ${configRepoBranch}
+Configuration URL: https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}
 Error: ${e.message}
 
-The jenkins_job_config.json file must exist in the ci-temurin-config repository.
+The jenkins_job_config.json file must exist in the configuration repository.
 This file defines which JDK versions are active and should have jobs created.
 
 Please ensure:
-1. The ci-temurin-config repository is accessible
+1. The configuration repository is accessible
 2. The jenkins_job_config.json file exists at the root
 3. The file contains valid JSON with activeJdkVersions array
+4. The CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters are correct
 
 Seed job cannot proceed without this configuration.
 """.stripIndent()

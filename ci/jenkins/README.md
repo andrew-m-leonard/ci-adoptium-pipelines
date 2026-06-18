@@ -18,10 +18,10 @@ Declarative Jenkins pipeline with the following features:
 
 Job DSL scripts that automate Jenkins job creation:
 
-- **`seed-job.groovy`**: Creates the seed job (self-updating)
+- **`seed-job.groovy`**: Creates the seed job (self-updating) with mandatory parameters
 - **`openjdk-build-pipeline.groovy`**: Creates all pipeline jobs dynamically
 
-These scripts read configuration from the ci-temurin-config repository to determine which JDK versions are active.
+These scripts read configuration from a vendor-specific configuration repository (specified via parameters) to determine which JDK versions are active.
 
 ### lib/
 
@@ -43,19 +43,28 @@ All Jenkins jobs are created automatically using Job DSL scripts. See [Job DSL A
 
 2. **Create Seed Job**:
    - New Freestyle project named `seed-job`
+   - Add parameters:
+     - `CONFIG_REPO_URL` (String, no default)
+     - `CONFIG_REPO_BRANCH` (String, no default)
    - SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`
    - Build Step: Process Job DSLs → `ci/jenkins/job-dsl/*.groovy`
 
 3. **Run Seed Job**:
-   - Click "Build Now"
-   - Jobs will be created for all active JDK versions (8, 11, 17, 21, 25, 26, 27)
+   - Click "Build with Parameters"
+   - Provide:
+     - `CONFIG_REPO_URL`: Your configuration repository URL
+     - `CONFIG_REPO_BRANCH`: Your configuration branch
+   - Jobs will be created for all active JDK versions
 
 ### Configuration
 
-Active JDK versions and job parameters are defined in:
-**`ci-temurin-config/jenkins_job_config.json`**
+Active JDK versions and job parameters are defined in your vendor-specific configuration repository's `jenkins_job_config.json` file.
 
-To add/remove versions, edit this file and run the seed job.
+**Example**: Adoptium uses `https://github.com/adoptium/ci-temurin-config.git` with `jenkins_job_config.json` at the root.
+
+To add/remove versions:
+1. Edit `jenkins_job_config.json` in your configuration repository
+2. Run the seed job with your repository parameters
 
 ## Jenkins Job Configuration
 

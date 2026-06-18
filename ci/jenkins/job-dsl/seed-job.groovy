@@ -24,11 +24,20 @@ freeStyleJob('seed-job') {
         Run this job to create or update all pipeline jobs.
 
         This job is self-updating - it will recreate itself from the DSL script.
+
+        Required Parameters:
+        - CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
+        - CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
     '''.stripIndent().trim())
 
     logRotator {
         daysToKeep(30)
         numToKeep(50)
+    }
+
+    parameters {
+        stringParam('CONFIG_REPO_URL', '', 'URL of the configuration repository containing jenkins_job_config.json (REQUIRED)')
+        stringParam('CONFIG_REPO_BRANCH', '', 'Branch of the configuration repository (REQUIRED)')
     }
 
     scm {
