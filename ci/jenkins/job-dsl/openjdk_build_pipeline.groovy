@@ -62,6 +62,9 @@ Ensure jenkins_job_config.json exists and is accessible.
     throw new RuntimeException(errorMsg)
 }
 
+// Extract default parameters with safe navigation
+def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
+
 // Create platform-specific build job
 def jobName = "openjdk-builds/jdk${jdkVersion}-${platform}-build-pipeline"
 
@@ -95,8 +98,6 @@ pipelineJob(jobName) {
             'Branch of the configuration repository')
         
         // Build configuration - with safe navigation and fallback defaults
-        def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
-        
         stringParam('BUILD_VARIANT',
             defaultParams?.BUILD_VARIANT ?: jenkinsConfig?.defaultVariant ?: 'temurin',
             'Build variant (temurin, dragonwell, etc.)')
