@@ -6,29 +6,40 @@ This directory contains Jenkins Job DSL scripts for automated job creation.
 
 ```
 ci/jenkins/job-dsl/
-├── seed/                          # Seed job scripts (processed by seed job)
-│   ├── load_config.groovy        # Loads jenkins_job_config.json from config repo
-│   ├── openjdk_launch_pipeline.groovy  # Creates launch orchestrator jobs
-│   └── seed_job.groovy           # Creates/updates the seed job itself
+├── seed/                                    # Seed job scripts
+│   ├── seed_job_consolidated.groovy       # Main seed job script (USE THIS)
+│   ├── load_config.groovy                 # Legacy - kept for reference
+│   ├── openjdk_launch_pipeline.groovy     # Legacy - kept for reference
+│   └── seed_job.groovy                    # Legacy - kept for reference
 │
-└── openjdk_build_pipeline.groovy # Dynamic job creation (called by launch jobs)
+└── openjdk_build_pipeline.groovy          # Dynamic job creation (called by launch jobs)
 ```
 
 ## Script Categories
 
 ### Seed Scripts (`seed/` directory)
 
-These scripts are processed by the Jenkins seed job during its execution. They create the initial set of jobs and views.
+The seed job uses a **consolidated script** that contains all logic in a single file to avoid binding issues between separate script executions.
 
-**Files:**
-- **`load_config.groovy`**: Loads configuration from the config repository and makes it available to other scripts
-- **`openjdk_launch_pipeline.groovy`**: Creates launch orchestrator jobs for each active JDK version
-- **`seed_job.groovy`**: Self-updating script that recreates the seed job itself
+**Active Script:**
+- **`seed_job_consolidated.groovy`**: Main seed job script that:
+  1. Loads configuration from jenkins_job_config.json
+  2. Creates launch orchestrator jobs for each active JDK version
+  3. Creates/updates the seed job itself (self-updating)
+  4. Creates views for organizing jobs
+
+**Legacy Scripts (kept for reference):**
+- `load_config.groovy` - Original config loader (functionality now in consolidated script)
+- `openjdk_launch_pipeline.groovy` - Original launch job creator (functionality now in consolidated script)
+- `seed_job.groovy` - Original seed job (functionality now in consolidated script)
 
 **Seed Job Configuration:**
-- DSL Scripts: `ci/jenkins/job-dsl/seed/*.groovy`
-- Processes all `.groovy` files in the `seed/` directory
+- DSL Scripts: `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+- Processes a single consolidated script
 - Requires `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters
+
+**Why Consolidated?**
+Job DSL's `external()` method creates separate script execution contexts, so binding variables set in one script aren't available to the next. The consolidated approach solves this by keeping all logic in a single script execution context.
 
 ### Dynamic Job Creation Scripts (root directory)
 
@@ -44,11 +55,14 @@ These scripts are NOT processed by the seed job. They are called dynamically by 
 
 ### For Seed Job Processing
 
-If you need to add a new script that should be processed by the seed job:
+If you need to add new functionality to the seed job:
 
-1. Create the script in the `seed/` directory
-2. It will automatically be picked up by the seed job's wildcard pattern
-3. Ensure it doesn't require parameters that aren't available during seed job execution
+1. Edit `seed_job_consolidated.groovy` directly
+2. Add your logic in the appropriate section (marked with comments)
+3. The seed job is self-updating, so it will recreate itself on the next run
+4. Ensure your code doesn't require parameters beyond `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH`
+
+**Do NOT create separate scripts in the seed/ directory** - they won't share the binding context and will fail to access shared variables.
 
 ### For Dynamic Job Creation
 
