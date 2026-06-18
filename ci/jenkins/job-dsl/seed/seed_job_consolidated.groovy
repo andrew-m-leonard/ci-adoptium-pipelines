@@ -150,7 +150,22 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             // Configuration repository parameters (propagated from seed job)
             // These values are set when the seed job runs and should not normally be changed
             stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
-                """URL of the configuration repository containing jenkins_job_config.json""".stripIndent().trim())
+                """URL of the configuration repository containing jenkins_job_config.json
+                
+                ⚠️  This value is automatically set by the seed job.
+                Current value: ${configRepoUrl ?: '(NOT SET - Re-run seed job with CONFIG_REPO_URL parameter!)'}
+                
+                If this is empty, the seed job was not run with proper parameters.
+                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
+            
+            stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
+                """Branch of the configuration repository
+                
+                ⚠️  This value is automatically set by the seed job.
+                Current value: ${configRepoBranch ?: '(NOT SET - Re-run seed job with CONFIG_REPO_BRANCH parameter!)'}
+                
+                If this is empty, the seed job was not run with proper parameters.
+                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
             
             // Job management
             booleanParam('REGENERATE_JOBS', false,
