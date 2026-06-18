@@ -104,6 +104,7 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
         "defaultConfigureArgs": "",
         "defaultVariant": "temurin",
         "defaultScmReference": "",
+        "pipelineTimeoutHours": 8,
         "configFilePrefix": "configurations/",
         "configFileSuffix": "_pipeline_config.json"
     }

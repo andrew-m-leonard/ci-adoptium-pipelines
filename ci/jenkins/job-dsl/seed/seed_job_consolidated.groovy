@@ -106,6 +106,7 @@ println "✓ Configuration loaded successfully\n"
 // Default values for job configuration
 def defaultBuildVariant = jenkinsConfig.defaultVariant ?: 'temurin'
 def defaultBuildArgs = jenkinsConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
+def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
 def pipelineRepoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
 def pipelineRepoBranch = 'main'
 def pipelineRepoCredentialsId = '' // Leave empty for public repos
@@ -166,6 +167,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 
                 If this is empty, the seed job was not run with proper parameters.
                 Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
+            
+            // Pipeline configuration
+            stringParam('PIPELINE_TIMEOUT_HOURS', defaultPipelineTimeoutHours.toString(),
+                "Pipeline timeout in hours (default from config: ${defaultPipelineTimeoutHours})")
             
             // Job management
             booleanParam('REGENERATE_JOBS', false,

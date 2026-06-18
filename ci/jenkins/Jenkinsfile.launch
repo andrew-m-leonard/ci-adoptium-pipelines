@@ -13,23 +13,13 @@ import groovy.json.JsonSlurper
 pipeline {
     agent any
     
-    parameters {
-        string(name: 'CONFIG_REPO_URL', defaultValue: '', description: 'Configuration repository URL')
-        string(name: 'CONFIG_REPO_BRANCH', defaultValue: '', description: 'Configuration repository branch')
-        booleanParam(name: 'REGENERATE_JOBS', defaultValue: false, description: 'Force regeneration of platform jobs')
-        string(name: 'PLATFORMS', defaultValue: 'all', description: 'Comma-separated platforms or "all"')
-        string(name: 'BUILD_VARIANT', defaultValue: 'temurin', description: 'Build variant')
-        booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', defaultValue: true, description: 'Clean workspace after each stage')
-        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Run test stages')
-        booleanParam(name: 'SIGN_ARTIFACTS', defaultValue: false, description: 'Sign artifacts')
-        booleanParam(name: 'PUBLISH_ARTIFACTS', defaultValue: false, description: 'Publish artifacts')
-        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', defaultValue: false, description: 'Run reproducible comparison')
-    }
+    // NOTE: Parameters and build discarder are defined by the seed job via Job DSL, not here.
+    // Defining them in the Jenkinsfile would override the seed job's settings.
+    // See: ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy
     
     options {
-        buildDiscarder(logRotator(numToKeepStr: '50', daysToKeepStr: '30'))
         timestamps()
-        timeout(time: 8, unit: 'HOURS')
+        timeout(time: params.PIPELINE_TIMEOUT_HOURS?.toInteger() ?: 8, unit: 'HOURS')
     }
     
     stages {
