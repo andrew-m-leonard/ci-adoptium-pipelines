@@ -119,10 +119,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     
     println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
     
-    def jobName = "openjdk-builds/jdk${version}-launch-build-pipelines"
+    def jobName = "openjdk-builds/${version}-launch-build-pipelines"
     
     pipelineJob(jobName) {
-        displayName("JDK ${version} Launch Build Pipelines${isLts ? ' (LTS)' : ''}")
+        displayName("${version} Launch Build Pipelines${isLts ? ' (LTS)' : ''}")
         description("""
             Launch orchestrator for JDK ${version} builds.
             ${isLts ? 'This is a Long Term Support (LTS) version.' : ''}
@@ -133,7 +133,7 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             3. Launches builds for selected platforms in parallel
             4. Aggregates and reports results
             
-            Platform-specific jobs created: jdk${version}-\${platform}-build-pipeline
+            Platform-specific jobs created: ${version}-\${platform}-build-pipeline
         """.stripIndent().trim())
 
         quietPeriod(5)
@@ -320,7 +320,7 @@ listView('All Pipeline Jobs') {
 listView('JDK Launch Jobs') {
     description('Launch orchestrator jobs for coordinating platform builds')
     jobs {
-        regex('.*/jdk\\d+-launch-build-pipelines')
+        regex('openjdk-builds/jdk\\d+u?-launch-build-pipelines')
     }
     columns {
         status()
@@ -337,7 +337,7 @@ listView('JDK Launch Jobs') {
 listView('Platform Build Jobs') {
     description('Platform-specific build jobs (created dynamically by launch jobs)')
     jobs {
-        regex('.*/jdk\\d+-[^-]+-build-pipeline')
+        regex('openjdk-builds/jdk\\d+u?-[^-]+-build-pipeline')
     }
     columns {
         status()
