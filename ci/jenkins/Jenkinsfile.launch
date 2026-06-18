@@ -130,10 +130,14 @@ pipeline {
                         echo "  → Creating/updating: ${jobName}"
                         
                         // Use Job DSL to create/update the job
+                        // IMPORTANT: Use ignoreMissingFiles and ignoreExisting to prevent modifying this launch job
                         jobDsl(
                             targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
                             removedJobAction: 'IGNORE',
                             removedViewAction: 'IGNORE',
+                            ignoreExisting: false,  // Allow updates to existing platform jobs
+                            ignoreMissingFiles: false,
+                            lookupStrategy: 'SEED_JOB',  // Use seed job's workspace for script lookup
                             additionalParameters: [
                                 JDK_VERSION: env.JDK_VERSION,
                                 PLATFORM: platform,
