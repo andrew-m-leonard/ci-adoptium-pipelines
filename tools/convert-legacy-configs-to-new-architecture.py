@@ -194,6 +194,7 @@ Examples:
             # Process each converted file
             version_configs = []
             converted_files = list(temp_path.glob("*_pipeline_config.json"))
+            failed_files = []
             
             for i, temp_file in enumerate(sorted(converted_files), 1):
                 # Extract version (remove 'u' suffix)
@@ -202,31 +203,42 @@ Examples:
                     print(f"[{i}/{len(converted_files)}] Skipping {temp_file.name} (could not extract version)")
                     continue
                 
-                # Read the converted file
-                with open(temp_file, 'r') as f:
-                    config = json.load(f)
+                try:
+                    # Read the converted file
+                    with open(temp_file, 'r') as f:
+                        config = json.load(f)
+                    
+                    # Update version field (remove 'u' suffix)
+                    config["version"] = version
+                    
+                    # Keep scmReference with 'u' suffix for compatibility
+                    if not config.get("scmReference"):
+                        config["scmReference"] = version + "u"
+                    
+                    version_configs.append(config)
+                    
+                    # Write to new location with corrected filename
+                    output_file = config_dir / f"{version}_pipeline_config.json"
+                    
+                    print(f"[{i}/{len(converted_files)}] {temp_file.name} -> {output_file.name} ✅")
+                    
+                    with open(output_file, 'w') as f:
+                        json.dump(config, f, indent=2)
+                    
+                    if args.verbose:
+                        print(f"  Version: {config['version']}")
+                        print(f"  SCM Reference: {config['scmReference']}")
+                        print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
                 
-                # Update version field (remove 'u' suffix)
-                config["version"] = version
-                
-                # Keep scmReference with 'u' suffix for compatibility
-                if not config.get("scmReference"):
-                    config["scmReference"] = version + "u"
-                
-                version_configs.append(config)
-                
-                # Write to new location with corrected filename
-                output_file = config_dir / f"{version}_pipeline_config.json"
-                
-                print(f"[{i}/{len(converted_files)}] {temp_file.name} -> {output_file.name}")
-                
-                with open(output_file, 'w') as f:
-                    json.dump(config, f, indent=2)
-                
-                if args.verbose:
-                    print(f"  Version: {config['version']}")
-                    print(f"  SCM Reference: {config['scmReference']}")
-                    print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
+                except json.JSONDecodeError as e:
+                    print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ (Invalid JSON: {e})")
+                    failed_files.append((temp_file.name, str(e)))
+                    if args.verbose:
+                        print(f"  Error at line {e.lineno}, column {e.colno}")
+                        print(f"  You may need to manually review: {temp_file}")
+                except Exception as e:
+                    print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ ({e})")
+                    failed_files.append((temp_file.name, str(e)))
             
             # Step 3: Generate jenkins_job_config.json
             if version_configs:
@@ -249,10 +261,24 @@ Examples:
             print("=" * 70)
             print("Conversion Summary")
             print("=" * 70)
-            print(f"Converted: {len(version_configs)} configurations")
+            print(f"Total files: {len(converted_files)}")
+            print(f"Successful: {len(version_configs)}")
+            print(f"Failed: {len(failed_files)}")
             print()
             
-            print("✅ All configurations converted successfully!")
+            if failed_files:
+                print("⚠️  Some files failed to convert:")
+                for filename, error in failed_files:
+                    print(f"  ❌ {filename}: {error}")
+                print()
+                print("Note: Failed files were skipped. You may need to convert them manually.")
+                print()
+            
+            if version_configs:
+                print("✅ Successfully converted configurations!")
+            else:
+                print("❌ No configurations were successfully converted")
+                return 1
             print()
             print("Generated files:")
             print(f"  - jenkins_job_config.json")
