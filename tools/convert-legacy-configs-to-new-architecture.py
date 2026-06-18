@@ -3,8 +3,9 @@
 Convert legacy Groovy pipeline configurations to new JSON architecture.
 
 This tool converts legacy Groovy configs to the new launch job architecture:
+- Uses the existing convert-all-legacy-groovy-configs.py for conversion
+- Removes "u" suffix from output filenames
 - Generates jenkins_job_config.json (top-level config with active versions)
-- Generates individual jdk${version}_pipeline_config.json files (without "u" suffix)
 - Structures output for launch job + platform job architecture
 
 Usage:
@@ -26,258 +27,39 @@ import argparse
 import sys
 import json
 import re
+import subprocess
+import shutil
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Union
-
-class GroovyParser:
-    """Parser for Groovy configuration files."""
-
-    def __init__(self, content: str):
-        self.content = content
-        self.pos = 0
-
-    def skip_whitespace(self):
-        """Skip whitespace and comments."""
-        while self.pos < len(self.content):
-            if self.content[self.pos].isspace():
-                self.pos += 1
-                continue
-            if self.content[self.pos:self.pos+2] == '//':
-                while self.pos < len(self.content) and self.content[self.pos] != '\n':
-                    self.pos += 1
-                continue
-            if self.content[self.pos:self.pos+2] == '/*':
-                self.pos += 2
-                while self.pos < len(self.content) - 1:
-                    if self.content[self.pos:self.pos+2] == '*/':
-                        self.pos += 2
-                        break
-                    self.pos += 1
-                continue
-            break
-
-    def peek(self, length=1) -> str:
-        """Peek at next characters without consuming."""
-        return self.content[self.pos:self.pos+length]
-
-    def consume(self, length=1) -> str:
-        """Consume and return next characters."""
-        result = self.content[self.pos:self.pos+length]
-        self.pos += length
-        return result
-
-    def parse_string(self) -> str:
-        """Parse a quoted string."""
-        quote = self.consume()
-        result = []
-        while self.pos < len(self.content):
-            char = self.peek()
-            if char == '\\':
-                self.consume()
-                if self.pos < len(self.content):
-                    result.append(self.consume())
-            elif char == quote:
-                self.consume()
-                break
-            else:
-                result.append(self.consume())
-        return ''.join(result)
-
-    def parse_identifier(self) -> str:
-        """Parse an identifier (unquoted key or value)."""
-        result = []
-        while self.pos < len(self.content):
-            char = self.peek()
-            if char.isalnum() or char in '_.-':
-                result.append(self.consume())
-            else:
-                break
-        return ''.join(result)
-
-    def parse_value(self) -> Any:
-        """Parse a value (string, number, boolean, list, or map)."""
-        self.skip_whitespace()
-        char = self.peek()
-        if char in '"\'':
-            return self.parse_string()
-        if char == '[':
-            return self.parse_collection()
-        identifier = self.parse_identifier()
-        if identifier == 'true':
-            return True
-        if identifier == 'false':
-            return False
-        if identifier == 'null':
-            return None
-        try:
-            if '.' in identifier:
-                return float(identifier)
-            return int(identifier)
-        except ValueError:
-            pass
-        return identifier
-
-    def parse_collection(self) -> Union[List, Dict]:
-        """Parse a list or map enclosed in []."""
-        self.consume()
-        self.skip_whitespace()
-        if self.peek() == ']':
-            self.consume()
-            return []
-        saved_pos = self.pos
-        is_map = False
-        depth = 0
-        scan_pos = self.pos
-        while scan_pos < len(self.content) and scan_pos < self.pos + 200:
-            if self.content[scan_pos] in '[{':
-                depth += 1
-            elif self.content[scan_pos] in ']}':
-                if depth == 0:
-                    break
-                depth -= 1
-            elif self.content[scan_pos] == ':' and depth == 0:
-                is_map = True
-                break
-            elif self.content[scan_pos] == ',' and depth == 0:
-                break
-            scan_pos += 1
-        self.pos = saved_pos
-        if is_map:
-            return self.parse_map_content()
-        else:
-            return self.parse_list_content()
-
-    def parse_list_content(self) -> List:
-        """Parse list content (already inside [])."""
-        items = []
-        while self.pos < len(self.content):
-            self.skip_whitespace()
-            if self.peek() == ']':
-                self.consume()
-                break
-            items.append(self.parse_value())
-            self.skip_whitespace()
-            if self.peek() == ',':
-                self.consume()
-            elif self.peek() == ']':
-                self.consume()
-                break
-        return items
-
-    def parse_map_content(self) -> Dict:
-        """Parse map content (already inside [])."""
-        result = {}
-        while self.pos < len(self.content):
-            self.skip_whitespace()
-            if self.peek() == ']':
-                self.consume()
-                break
-            if self.peek() in '"\'':
-                key = self.parse_string()
-            else:
-                key = self.parse_identifier()
-            self.skip_whitespace()
-            if self.peek() != ':':
-                break
-            self.consume()
-            self.skip_whitespace()
-            value = self.parse_value()
-            result[key] = value
-            self.skip_whitespace()
-            if self.peek() == ',':
-                self.consume()
-            elif self.peek() == ']':
-                self.consume()
-                break
-        return result
+from typing import List, Dict, Any
 
 
-def extract_version_from_filename(filename: str) -> Union[str, None]:
+def find_converter_script() -> Path:
+    """Find the convert-all-legacy-groovy-configs.py script."""
+    script_dir = Path(__file__).parent
+    converter = script_dir / "convert-all-legacy-groovy-configs.py"
+    
+    if converter.exists():
+        return converter
+    
+    raise FileNotFoundError(
+        "Could not find convert-all-legacy-groovy-configs.py script. "
+        "Please ensure it's in the same directory as this script."
+    )
+
+
+def extract_version_from_filename(filename: str) -> str | None:
     """Extract JDK version from filename, removing 'u' suffix."""
-    # Match jdk8u, jdk11u, jdk17u, etc.
     match = re.search(r'(jdk\d+)u?_pipeline_config', filename)
     if match:
         return match.group(1)  # Returns jdk8, jdk11, jdk17, etc. (without 'u')
     return None
 
 
-def parse_groovy_config(groovy_file: Path) -> Dict[str, Any]:
-    """Parse a Groovy configuration file and return structured data."""
-    try:
-        with open(groovy_file, 'r') as f:
-            content = f.read()
-
-        # Extract version
-        version = extract_version_from_filename(groovy_file.name)
-        if not version:
-            raise ValueError(f"Could not extract version from filename: {groovy_file.name}")
-
-        # Find buildConfigurations map
-        pattern = r'buildConfigurations\s*=\s*\[(.*?)\n\s*\]'
-        match = re.search(pattern, content, re.DOTALL)
-
-        if not match:
-            raise ValueError("Could not find buildConfigurations in file")
-
-        config_content = match.group(1)
-
-        # Parse platform configurations
-        platforms = {}
-        platform_pattern = r'(\w+)\s*:\s*\['
-
-        matches = list(re.finditer(platform_pattern, config_content))
-
-        for match in matches:
-            platform_name = match.group(1)
-            start_pos = match.end() - 1
-
-            # Find matching closing bracket
-            depth = 0
-            end_pos = start_pos
-            for i in range(start_pos, len(config_content)):
-                if config_content[i] == '[':
-                    depth += 1
-                elif config_content[i] == ']':
-                    depth -= 1
-                    if depth == 0:
-                        end_pos = i + 1
-                        break
-
-            platform_content = config_content[start_pos:end_pos]
-
-            # Parse using GroovyParser
-            parser = GroovyParser(platform_content)
-            try:
-                platform_config = parser.parse_collection()
-                if isinstance(platform_config, dict):
-                    platforms[platform_name] = platform_config
-                else:
-                    print(f"Warning: {platform_name} parsed as list, expected dict", file=sys.stderr)
-                    platforms[platform_name] = {}
-            except Exception as e:
-                print(f"Warning: Error parsing {platform_name}: {e}", file=sys.stderr)
-                platforms[platform_name] = {}
-
-        # Create config structure
-        config = {
-            "version": version,
-            "scmReference": version + "u",  # Keep 'u' for SCM reference
-            "buildConfigurations": platforms,
-            "targetConfigurations": list(platforms.keys())
-        }
-
-        return config
-
-    except Exception as e:
-        raise ValueError(f"Error parsing {groovy_file}: {e}")
-
-
 def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Generate the top-level jenkins_job_config.json."""
-    # Extract versions and sort them
     versions = sorted([config["version"] for config in version_configs])
-
-    # Create jenkins_job_config structure
+    
     jenkins_config = {
         "activeJdkVersions": versions,
         "defaultBuildArgs": "--create-jre-image --create-sbom",
@@ -287,27 +69,8 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
         "configFilePrefix": "configurations/",
         "configFileSuffix": "_pipeline_config.json"
     }
-
+    
     return jenkins_config
-
-
-def find_groovy_configs(source_dir: Path, pattern: str = "*_pipeline_config.groovy") -> List[Path]:
-    """Find all Groovy configuration files matching the pattern."""
-    if not source_dir.exists():
-        raise FileNotFoundError(f"Source directory not found: {source_dir}")
-
-    if not source_dir.is_dir():
-        raise NotADirectoryError(f"Source path is not a directory: {source_dir}")
-
-    configs = sorted(source_dir.glob(pattern))
-
-    if not configs:
-        raise FileNotFoundError(
-            f"No Groovy configuration files found in {source_dir} "
-            f"matching pattern '{pattern}'"
-        )
-
-    return configs
 
 
 def main():
@@ -343,13 +106,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--pattern", "-p",
-        type=str,
-        default="*_pipeline_config.groovy",
-        help="Glob pattern for Groovy config files (default: *_pipeline_config.groovy)"
-    )
-
-    parser.add_argument(
         "--dry-run", "-n",
         action="store_true",
         help="Show what would be converted without actually converting"
@@ -376,135 +132,141 @@ Examples:
     print()
 
     try:
-        # Find all Groovy configs
-        print(f"Scanning: {args.source}")
-        print(f"Pattern:  {args.pattern}")
-        configs = find_groovy_configs(args.source, args.pattern)
-        print(f"Found:    {len(configs)} configuration file(s)")
-        print()
+        # Find the converter script
+        converter = find_converter_script()
+        if args.verbose:
+            print(f"Using converter: {converter}")
+            print()
 
-        # Create output directories
-        if not args.dry_run:
+        # Create temporary directory for initial conversion
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            if args.dry_run:
+                print("DRY RUN - No files will be converted")
+                print()
+                print(f"Would use converter: {converter}")
+                print(f"Source: {args.source}")
+                print(f"Output: {args.output}")
+                print()
+                print("Process:")
+                print("1. Convert Groovy files to JSON (temp directory)")
+                print("2. Remove 'u' suffix from filenames")
+                print("3. Move to configurations/ subdirectory")
+                print("4. Generate jenkins_job_config.json")
+                return 0
+
+            # Step 1: Run the existing converter to temp directory
+            print("Step 1: Converting Groovy files to JSON...")
+            print()
+            
+            cmd = [
+                "python3",
+                str(converter),
+                "--source", str(args.source),
+                "--output", str(temp_path)
+            ]
+            
+            if args.force:
+                cmd.append("--force")
+            
+            if args.verbose:
+                cmd.append("--verbose")
+            
+            result = subprocess.run(cmd, capture_output=not args.verbose, text=True)
+            
+            if result.returncode != 0:
+                print(f"Error: Conversion failed", file=sys.stderr)
+                if result.stderr:
+                    print(result.stderr, file=sys.stderr)
+                return 1
+            
+            # Step 2: Process converted files
+            print()
+            print("Step 2: Processing converted files...")
+            print()
+            
+            # Create output directories
             args.output.mkdir(parents=True, exist_ok=True)
-            (args.output / "configurations").mkdir(parents=True, exist_ok=True)
-
-        # List files to be converted
-        if args.dry_run:
-            print("DRY RUN - No files will be converted")
-            print()
-            print("Files that would be converted:")
-            for config in configs:
-                version = extract_version_from_filename(config.name)
-                if version:
-                    output_file = f"{version}_pipeline_config.json"
-                    print(f"  {config.name} -> configurations/{output_file}")
-            print()
-            print(f"  jenkins_job_config.json (generated)")
-            print()
-            print(f"Output directory: {args.output}")
-            return 0
-
-        # Convert each file
-        print(f"Converting to: {args.output}")
-        print()
-
-        success_count = 0
-        failed_count = 0
-        failed_files = []
-        version_configs = []
-
-        for i, config in enumerate(configs, 1):
-            version = extract_version_from_filename(config.name)
-            if not version:
-                print(f"[{i}/{len(configs)}] Skipping {config.name} (could not extract version)")
-                continue
-
-            output_file = args.output / "configurations" / f"{version}_pipeline_config.json"
-
-            # Check if output file exists
-            if output_file.exists() and not args.force:
-                print(f"[{i}/{len(configs)}] Skipping {config.name} (output exists, use --force to overwrite)")
-                continue
-
-            print(f"[{i}/{len(configs)}] Converting {config.name}...", end=" ", flush=True)
-
-            try:
-                # Parse the Groovy config
-                parsed_config = parse_groovy_config(config)
-                version_configs.append(parsed_config)
-
-                # Write to file
+            config_dir = args.output / "configurations"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Process each converted file
+            version_configs = []
+            converted_files = list(temp_path.glob("*_pipeline_config.json"))
+            
+            for i, temp_file in enumerate(sorted(converted_files), 1):
+                # Extract version (remove 'u' suffix)
+                version = extract_version_from_filename(temp_file.name)
+                if not version:
+                    print(f"[{i}/{len(converted_files)}] Skipping {temp_file.name} (could not extract version)")
+                    continue
+                
+                # Read the converted file
+                with open(temp_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Update version field (remove 'u' suffix)
+                config["version"] = version
+                
+                # Keep scmReference with 'u' suffix for compatibility
+                if not config.get("scmReference"):
+                    config["scmReference"] = version + "u"
+                
+                version_configs.append(config)
+                
+                # Write to new location with corrected filename
+                output_file = config_dir / f"{version}_pipeline_config.json"
+                
+                print(f"[{i}/{len(converted_files)}] {temp_file.name} -> {output_file.name}")
+                
                 with open(output_file, 'w') as f:
-                    json.dump(parsed_config, f, indent=2)
-
-                print("✅")
-                success_count += 1
-
+                    json.dump(config, f, indent=2)
+                
                 if args.verbose:
-                    print(f"  Output: {output_file}")
-                    print(f"  Version: {parsed_config['version']}")
-                    print(f"  Platforms: {len(parsed_config['buildConfigurations'])}")
-
-            except Exception as e:
-                print("❌")
-                failed_count += 1
-                failed_files.append((config.name, str(e)))
-                print(f"  Error: {e}")
-
-        # Generate jenkins_job_config.json
-        if version_configs:
-            print()
-            print("Generating jenkins_job_config.json...", end=" ", flush=True)
-            try:
+                    print(f"  Version: {config['version']}")
+                    print(f"  SCM Reference: {config['scmReference']}")
+                    print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
+            
+            # Step 3: Generate jenkins_job_config.json
+            if version_configs:
+                print()
+                print("Step 3: Generating jenkins_job_config.json...")
+                
                 jenkins_config = generate_jenkins_job_config(version_configs)
                 jenkins_config_file = args.output / "jenkins_job_config.json"
-
+                
                 with open(jenkins_config_file, 'w') as f:
                     json.dump(jenkins_config, f, indent=2)
-
-                print("✅")
+                
+                print(f"  Created: {jenkins_config_file.name}")
+                
                 if args.verbose:
-                    print(f"  Output: {jenkins_config_file}")
                     print(f"  Active versions: {jenkins_config['activeJdkVersions']}")
-
-            except Exception as e:
-                print("❌")
-                print(f"  Error: {e}")
-                failed_count += 1
-
-        # Print summary
-        print()
-        print("=" * 70)
-        print("Conversion Summary")
-        print("=" * 70)
-        print(f"Total:   {len(configs)}")
-        print(f"Success: {success_count}")
-        print(f"Failed:  {failed_count}")
-        print()
-
-        if failed_files:
-            print("Failed conversions:")
-            for filename, error in failed_files:
-                print(f"  ❌ {filename}")
-                print(f"     {error}")
+            
+            # Print summary
             print()
-            return 1
-
-        print(f"✅ All configurations converted successfully!")
-        print()
-        print("Generated files:")
-        print(f"  - jenkins_job_config.json")
-        for config in version_configs:
-            print(f"  - configurations/{config['version']}_pipeline_config.json")
-        print()
-        print("Next steps:")
-        print("1. Review the generated JSON files")
-        print("2. Verify platform configurations are correct")
-        print("3. Test with the seed job")
-        print("4. Commit to your configuration repository")
-        print()
-
-        return 0
+            print("=" * 70)
+            print("Conversion Summary")
+            print("=" * 70)
+            print(f"Converted: {len(version_configs)} configurations")
+            print()
+            
+            print("✅ All configurations converted successfully!")
+            print()
+            print("Generated files:")
+            print(f"  - jenkins_job_config.json")
+            for config in version_configs:
+                print(f"  - configurations/{config['version']}_pipeline_config.json")
+            print()
+            print("Next steps:")
+            print("1. Review the generated JSON files")
+            print("2. Verify platform configurations are correct")
+            print("3. Test with the seed job")
+            print("4. Commit to your configuration repository")
+            print()
+            
+            return 0
 
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
