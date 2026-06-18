@@ -108,57 +108,42 @@ pipeline {
         }
         
         stage('Create/Update Platform Jobs') {
+            when {
+                expression {
+                    // Create jobs on first run or when explicitly requested
+                    // Note: If platform jobs are deleted later, set REGENERATE_JOBS=true to recreate them
+                    return params.REGENERATE_JOBS || currentBuild.number == 1
+                }
+            }
             steps {
                 script {
-                    def platforms = env.SELECTED_PLATFORMS.split(',')
-                    def jobsToCreate = []
+                    if (params.REGENERATE_JOBS) {
+                        echo "Force regenerating platform jobs (REGENERATE_JOBS=true)..."
+                    } else {
+                        echo "First run - creating platform jobs..."
+                    }
                     
-                    // Check which jobs need to be created
+                    def platforms = env.SELECTED_PLATFORMS.split(',')
+                    
                     platforms.each { platform ->
                         def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        echo "  → Creating/updating: ${jobName}"
                         
-                        if (params.REGENERATE_JOBS) {
-                            jobsToCreate.add([platform: platform, jobName: jobName, reason: 'forced regeneration'])
-                        } else {
-                            // Check if job exists
-                            try {
-                                def job = Jenkins.instance.getItemByFullName(jobName)
-                                if (job == null) {
-                                    jobsToCreate.add([platform: platform, jobName: jobName, reason: 'job does not exist'])
-                                } else {
-                                    echo "✓ Job exists: ${jobName}"
-                                }
-                            } catch (Exception e) {
-                                jobsToCreate.add([platform: platform, jobName: jobName, reason: "error checking job: ${e.message}"])
-                            }
-                        }
+                        // Use Job DSL to create/update the job
+                        jobDsl(
+                            targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                            removedJobAction: 'IGNORE',
+                            removedViewAction: 'IGNORE',
+                            additionalParameters: [
+                                JDK_VERSION: env.JDK_VERSION,
+                                PLATFORM: platform,
+                                CONFIG_REPO_URL: params.CONFIG_REPO_URL,
+                                CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
+                            ]
+                        )
                     }
                     
-                    // Create/update jobs as needed
-                    if (jobsToCreate.isEmpty()) {
-                        echo "✓ All platform jobs already exist, no creation needed"
-                    } else {
-                        echo "Creating/updating ${jobsToCreate.size()} platform job(s)..."
-                        
-                        jobsToCreate.each { jobInfo ->
-                            echo "  → ${jobInfo.jobName} (${jobInfo.reason})"
-                            
-                            // Use Job DSL to create/update the job
-                            jobDsl(
-                                targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
-                                removedJobAction: 'IGNORE',
-                                removedViewAction: 'IGNORE',
-                                additionalParameters: [
-                                    JDK_VERSION: env.JDK_VERSION,
-                                    PLATFORM: jobInfo.platform,
-                                    CONFIG_REPO_URL: params.CONFIG_REPO_URL,
-                                    CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
-                                ]
-                            )
-                        }
-                        
-                        echo "✓ Platform jobs created/updated successfully"
-                    }
+                    echo "✓ Platform jobs created/updated successfully"
                 }
             }
         }
