@@ -8,8 +8,6 @@
  * Creates: jdk${version}-${platform}-build-pipeline jobs
  */
 
-@Library('shared-library') _
-
 import groovy.json.JsonSlurper
 
 pipeline {
