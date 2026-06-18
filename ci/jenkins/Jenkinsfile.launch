@@ -52,17 +52,14 @@ pipeline {
             steps {
                 script {
                     echo "Fetching configuration for JDK ${env.JDK_VERSION}..."
+                    echo "  Repository: ${params.CONFIG_REPO_URL}"
+                    echo "  Branch: ${params.CONFIG_REPO_BRANCH}"
                     
                     def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
                     
                     // Checkout configuration repository
                     dir('config-repo') {
-                        checkout([
-                            $class: 'GitSCM',
-                            branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
-                            userRemoteConfigs: [[url: params.CONFIG_REPO_URL]],
-                            extensions: [[$class: 'CleanBeforeCheckout']]
-                        ])
+                        git url: params.CONFIG_REPO_URL, branch: params.CONFIG_REPO_BRANCH
                         
                         // Read configuration file
                         if (!fileExists(configFile)) {
