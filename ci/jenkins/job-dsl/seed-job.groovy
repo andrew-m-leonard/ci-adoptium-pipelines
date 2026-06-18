@@ -12,7 +12,7 @@
  */
 
 // Repository configuration
-def repoUrl = 'https://github.com/adoptium/ci-adoptium-pipelines.git'
+def repoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
 def repoBranch = '*/main'
 def repoCredentialsId = '' // Leave empty for public repos
 
