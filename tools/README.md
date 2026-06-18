@@ -28,7 +28,20 @@ python3 tools/convert-legacy-configs-to-new-architecture.py \
 1. **jenkins_job_config.json** (top-level config):
 ```json
 {
-  "activeJdkVersions": ["jdk8", "jdk11", "jdk17", "jdk21", "jdk23", "jdk24", "jdk25"],
+  "activeJdkVersions": [
+    {
+      "version": "jdk8",
+      "enabled": true
+    },
+    {
+      "version": "jdk11",
+      "enabled": true
+    },
+    {
+      "version": "jdk17",
+      "enabled": true
+    }
+  ],
   "defaultBuildArgs": "--create-jre-image --create-sbom",
   "defaultConfigureArgs": "",
   "defaultVariant": "temurin",
@@ -38,11 +51,16 @@ python3 tools/convert-legacy-configs-to-new-architecture.py \
 }
 ```
 
+**Note**: Each version in `activeJdkVersions` is an object with:
+- `version`: The JDK version (e.g., "jdk21")
+- `enabled`: Boolean flag to enable/disable job creation for this version
+
 2. **configurations/jdk21_pipeline_config.json** (version-specific config):
 ```json
 {
   "version": "jdk21",
-  "scmReference": "jdk21u",
+  "openjdkVersion": "jdk21u",
+  "enabled": true,
   "buildConfigurations": {
     "x64Mac": {
       "os": "mac",
@@ -54,6 +72,13 @@ python3 tools/convert-legacy-configs-to-new-architecture.py \
   "targetConfigurations": ["x64Mac", "x64Linux", ...]
 }
 ```
+
+**Field Descriptions**:
+- `version`: Job/folder name (e.g., "jdk21" - without 'u' suffix)
+- `openjdkVersion`: OpenJDK version/stream (e.g., "jdk21u" - with 'u' suffix)
+- `enabled`: Whether jobs should be created for this version
+- `buildConfigurations`: Platform-specific build settings
+- `targetConfigurations`: List of platforms to build
 
 **Command Options**:
 ```bash

@@ -56,12 +56,50 @@ def extract_version_from_filename(filename: str) -> str | None:
     return None
 
 
+def check_if_job_disabled(source_dir: Path, version: str) -> bool:
+    """
+    Check if the job is disabled by looking for 'disableJob = true' in jdkNN(u).groovy file.
+    
+    Args:
+        source_dir: Directory containing the Groovy files
+        version: JDK version (e.g., 'jdk21')
+    
+    Returns:
+        True if job is disabled, False otherwise
+    """
+    # Try both with and without 'u' suffix
+    for suffix in ['u', '']:
+        groovy_file = source_dir / f"{version}{suffix}.groovy"
+        if groovy_file.exists():
+            try:
+                with open(groovy_file, 'r') as f:
+                    content = f.read()
+                    # Look for disableJob = true (with optional whitespace)
+                    if re.search(r'disableJob\s*=\s*true', content):
+                        return True
+            except Exception as e:
+                print(f"  Warning: Could not read {groovy_file.name}: {e}")
+    
+    # If we can't find the file or disableJob, assume it's enabled
+    return False
+
+
 def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Generate the top-level jenkins_job_config.json."""
-    versions = sorted([config["version"] for config in version_configs])
+    # Sort by version, preserving the enabled status from each config
+    version_configs_sorted = sorted(version_configs, key=lambda x: x["version"])
+    
+    # Create activeJdkVersions as array of objects with version and enabled properties
+    active_versions = [
+        {
+            "version": config["version"],
+            "enabled": config.get("enabled", True)  # Default to True if not specified
+        }
+        for config in version_configs_sorted
+    ]
     
     jenkins_config = {
-        "activeJdkVersions": versions,
+        "activeJdkVersions": active_versions,
         "defaultBuildArgs": "--create-jre-image --create-sbom",
         "defaultConfigureArgs": "",
         "defaultVariant": "temurin",
@@ -211,23 +249,35 @@ Examples:
                     # Update version field (remove 'u' suffix)
                     config["version"] = version
                     
-                    # Keep scmReference with 'u' suffix for compatibility
-                    if not config.get("scmReference"):
-                        config["scmReference"] = version + "u"
+                    # Set openjdkVersion with 'u' suffix (e.g., jdk21u)
+                    # This represents the OpenJDK version/stream, not an SCM reference
+                    if not config.get("openjdkVersion"):
+                        config["openjdkVersion"] = version + "u"
+                    
+                    # Remove old scmReference field if it exists (renamed to openjdkVersion)
+                    config.pop("scmReference", None)
+                    
+                    # Check if the job is disabled in the jdkNN(u).groovy file
+                    is_disabled = check_if_job_disabled(args.source, version)
+                    
+                    # Add enabled flag (inverted from disabled)
+                    config["enabled"] = not is_disabled
                     
                     version_configs.append(config)
                     
                     # Write to new location with corrected filename
                     output_file = config_dir / f"{version}_pipeline_config.json"
                     
-                    print(f"[{i}/{len(converted_files)}] {temp_file.name} -> {output_file.name} ✅")
+                    status = "✅" if config["enabled"] else "⚠️  (disabled)"
+                    print(f"[{i}/{len(converted_files)}] {temp_file.name} -> {output_file.name} {status}")
                     
                     with open(output_file, 'w') as f:
                         json.dump(config, f, indent=2)
                     
                     if args.verbose:
                         print(f"  Version: {config['version']}")
-                        print(f"  SCM Reference: {config['scmReference']}")
+                        print(f"  OpenJDK Version: {config['openjdkVersion']}")
+                        print(f"  Enabled: {config['enabled']}")
                         print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
                 
                 except json.JSONDecodeError as e:
