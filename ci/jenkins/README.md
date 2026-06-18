@@ -18,8 +18,8 @@ Declarative Jenkins pipeline with the following features:
 
 Job DSL scripts that automate Jenkins job creation:
 
-- **`seed-job.groovy`**: Creates the seed job (self-updating) with mandatory parameters
-- **`openjdk-build-pipeline.groovy`**: Creates all pipeline jobs dynamically
+- **`seed_job.groovy`**: Creates the seed job (self-updating) with mandatory parameters
+- **`openjdk_build_pipeline.groovy`**: Creates all pipeline jobs dynamically
 
 These scripts read configuration from a vendor-specific configuration repository (specified via parameters) to determine which JDK versions are active.
 

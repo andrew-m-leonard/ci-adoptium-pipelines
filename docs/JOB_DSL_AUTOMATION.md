@@ -36,7 +36,7 @@ Your Jenkins instance must have:
 │                           │                                  │
 │                           ↓                                  │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │ Job DSL Script (openjdk-build-pipeline.groovy)        │ │
+│  │ Job DSL Script (openjdk_build_pipeline.groovy)        │ │
 │  │ - Uses CONFIG_REPO_URL and CONFIG_REPO_BRANCH params  │ │
 │  │ - Fetches jenkins_job_config.json from config repo    │ │
 │  │ - Reads active JDK versions (8,11,17,21,25,26,27)     │ │
