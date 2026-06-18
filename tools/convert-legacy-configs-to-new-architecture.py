@@ -121,6 +121,12 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
                 "SIGN_ARTIFACTS": False,
                 "PUBLISH_ARTIFACTS": False,
                 "RUN_REPRODUCIBLE_COMPARE": False
+            },
+            "logRotation": {
+                "daysToKeep": 30,
+                "numToKeep": 50,
+                "artifactDaysToKeep": 7,
+                "artifactNumToKeep": 10
             }
         }
     }
