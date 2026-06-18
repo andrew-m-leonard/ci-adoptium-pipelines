@@ -102,6 +102,12 @@ def pipelineRepoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines
 def pipelineRepoBranch = 'main'
 def pipelineRepoCredentialsId = '' // Leave empty for public repos
 
+// Create the openjdk-builds folder first
+folder('openjdk-builds') {
+    displayName('OpenJDK Build Jobs')
+    description('Folder containing all OpenJDK build pipeline jobs')
+}
+
 println "Creating launch orchestrator jobs for active JDK versions:"
 jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     def version = versionInfo.version
