@@ -29,13 +29,167 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
-# Import the Groovy parser from convert-groovy-to-json.py
-try:
-    from convert_groovy_to_json import GroovyParser
-except ImportError:
-    print("Error: Could not import GroovyParser from convert-groovy-to-json.py", file=sys.stderr)
-    print("Please ensure convert-groovy-to-json.py is in the same directory.", file=sys.stderr)
-    sys.exit(1)
+class GroovyParser:
+    """Parser for Groovy configuration files."""
+
+    def __init__(self, content: str):
+        self.content = content
+        self.pos = 0
+
+    def skip_whitespace(self):
+        """Skip whitespace and comments."""
+        while self.pos < len(self.content):
+            if self.content[self.pos].isspace():
+                self.pos += 1
+                continue
+            if self.content[self.pos:self.pos+2] == '//':
+                while self.pos < len(self.content) and self.content[self.pos] != '\n':
+                    self.pos += 1
+                continue
+            if self.content[self.pos:self.pos+2] == '/*':
+                self.pos += 2
+                while self.pos < len(self.content) - 1:
+                    if self.content[self.pos:self.pos+2] == '*/':
+                        self.pos += 2
+                        break
+                    self.pos += 1
+                continue
+            break
+
+    def peek(self, length=1) -> str:
+        """Peek at next characters without consuming."""
+        return self.content[self.pos:self.pos+length]
+
+    def consume(self, length=1) -> str:
+        """Consume and return next characters."""
+        result = self.content[self.pos:self.pos+length]
+        self.pos += length
+        return result
+
+    def parse_string(self) -> str:
+        """Parse a quoted string."""
+        quote = self.consume()
+        result = []
+        while self.pos < len(self.content):
+            char = self.peek()
+            if char == '\\':
+                self.consume()
+                if self.pos < len(self.content):
+                    result.append(self.consume())
+            elif char == quote:
+                self.consume()
+                break
+            else:
+                result.append(self.consume())
+        return ''.join(result)
+
+    def parse_identifier(self) -> str:
+        """Parse an identifier (unquoted key or value)."""
+        result = []
+        while self.pos < len(self.content):
+            char = self.peek()
+            if char.isalnum() or char in '_.-':
+                result.append(self.consume())
+            else:
+                break
+        return ''.join(result)
+
+    def parse_value(self) -> Any:
+        """Parse a value (string, number, boolean, list, or map)."""
+        self.skip_whitespace()
+        char = self.peek()
+        if char in '"\'':
+            return self.parse_string()
+        if char == '[':
+            return self.parse_collection()
+        identifier = self.parse_identifier()
+        if identifier == 'true':
+            return True
+        if identifier == 'false':
+            return False
+        if identifier == 'null':
+            return None
+        try:
+            if '.' in identifier:
+                return float(identifier)
+            return int(identifier)
+        except ValueError:
+            pass
+        return identifier
+
+    def parse_collection(self) -> Union[List, Dict]:
+        """Parse a list or map enclosed in []."""
+        self.consume()
+        self.skip_whitespace()
+        if self.peek() == ']':
+            self.consume()
+            return []
+        saved_pos = self.pos
+        is_map = False
+        depth = 0
+        scan_pos = self.pos
+        while scan_pos < len(self.content) and scan_pos < self.pos + 200:
+            if self.content[scan_pos] in '[{':
+                depth += 1
+            elif self.content[scan_pos] in ']}':
+                if depth == 0:
+                    break
+                depth -= 1
+            elif self.content[scan_pos] == ':' and depth == 0:
+                is_map = True
+                break
+            elif self.content[scan_pos] == ',' and depth == 0:
+                break
+            scan_pos += 1
+        self.pos = saved_pos
+        if is_map:
+            return self.parse_map_content()
+        else:
+            return self.parse_list_content()
+
+    def parse_list_content(self) -> List:
+        """Parse list content (already inside [])."""
+        items = []
+        while self.pos < len(self.content):
+            self.skip_whitespace()
+            if self.peek() == ']':
+                self.consume()
+                break
+            items.append(self.parse_value())
+            self.skip_whitespace()
+            if self.peek() == ',':
+                self.consume()
+            elif self.peek() == ']':
+                self.consume()
+                break
+        return items
+
+    def parse_map_content(self) -> Dict:
+        """Parse map content (already inside [])."""
+        result = {}
+        while self.pos < len(self.content):
+            self.skip_whitespace()
+            if self.peek() == ']':
+                self.consume()
+                break
+            if self.peek() in '"\'':
+                key = self.parse_string()
+            else:
+                key = self.parse_identifier()
+            self.skip_whitespace()
+            if self.peek() != ':':
+                break
+            self.consume()
+            self.skip_whitespace()
+            value = self.parse_value()
+            result[key] = value
+            self.skip_whitespace()
+            if self.peek() == ',':
+                self.consume()
+            elif self.peek() == ']':
+                self.consume()
+                break
+        return result
 
 
 def extract_version_from_filename(filename: str) -> Union[str, None]:

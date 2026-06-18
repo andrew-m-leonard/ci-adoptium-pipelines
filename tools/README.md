@@ -6,7 +6,7 @@ This directory contains utility tools for working with the CI Adoptium Pipelines
 
 ### convert-legacy-configs-to-new-architecture.py
 
-**Purpose**: Convert legacy Groovy pipeline configurations to the new launch job architecture.
+**Purpose**: Standalone tool to convert legacy Groovy pipeline configurations to the new launch job architecture. No external dependencies required.
 
 **Usage**:
 ```bash
@@ -133,9 +133,9 @@ Next steps:
 
 ### convert-groovy-to-json.py
 
-**Purpose**: Python module for Groovy-to-JSON conversion (used by convert-legacy-configs-to-new-architecture.py).
+**Purpose**: Python module for Groovy-to-JSON conversion. This is a legacy library module kept for reference.
 
-**Usage**: This is a library module, not meant to be run directly. Use `convert-legacy-configs-to-new-architecture.py` instead.
+**Note**: The new [`convert-legacy-configs-to-new-architecture.py`](../ci-adoptium-pipelines/tools/convert-legacy-configs-to-new-architecture.py:1) is standalone and does not require this module.
 
 ---
 
@@ -245,15 +245,6 @@ git push
 ## Troubleshooting
 
 ### Conversion Issues
-
-**Problem**: Import error when running conversion script
-```
-Error: Could not import GroovyParser from convert-groovy-to-json.py
-```
-
-**Solution**: Ensure both [`convert-legacy-configs-to-new-architecture.py`](../ci-adoptium-pipelines/tools/convert-legacy-configs-to-new-architecture.py:1) and [`convert-groovy-to-json.py`](../ci-adoptium-pipelines/tools/convert-groovy-to-json.py:1) are in the same directory.
-
----
 
 **Problem**: Nested maps not converting correctly
 ```
