@@ -46,6 +46,7 @@ try {
     def configText = new URL(configUrl).text
     jenkinsConfig = new JsonSlurper().parseText(configText)
     println "✓ Successfully loaded Jenkins configuration"
+    println "jenkinsConfig: ${jenkinsConfig}"
 } catch (Exception e) {
     def errorMsg = """
 ERROR: Failed to load Jenkins job configuration!
@@ -88,30 +89,36 @@ pipelineJob(jobName) {
         stringParam('PLATFORM', platform, 'Target platform (fixed)')
         
         // Configuration repository
-        stringParam('CONFIG_REPO_URL', configRepoUrl, 
+        stringParam('CONFIG_REPO_URL', configRepoUrl,
             'URL of the configuration repository')
-        stringParam('CONFIG_REPO_BRANCH', configRepoBranch, 
+        stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
             'Branch of the configuration repository')
         
-        // Build configuration
-        stringParam('BUILD_VARIANT', jenkinsConfig.jobConfiguration.defaultParameters.BUILD_VARIANT,
+        // Build configuration - with safe navigation and fallback defaults
+        def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
+        
+        stringParam('BUILD_VARIANT',
+            defaultParams?.BUILD_VARIANT ?: jenkinsConfig?.defaultVariant ?: 'temurin',
             'Build variant (temurin, dragonwell, etc.)')
         
-        booleanParam('CLEAN_WORKSPACE_AFTER_STAGE', 
-            jenkinsConfig.jobConfiguration.defaultParameters.CLEAN_WORKSPACE_AFTER_STAGE,
+        booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
+            defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
         
-        booleanParam('RUN_TESTS', jenkinsConfig.jobConfiguration.defaultParameters.RUN_TESTS,
+        booleanParam('RUN_TESTS',
+            defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
             'Run test stages (smoke tests, AQA, TCK)')
         
-        booleanParam('SIGN_ARTIFACTS', jenkinsConfig.jobConfiguration.defaultParameters.SIGN_ARTIFACTS,
+        booleanParam('SIGN_ARTIFACTS',
+            defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
             'Sign artifacts and installers')
         
-        booleanParam('PUBLISH_ARTIFACTS', jenkinsConfig.jobConfiguration.defaultParameters.PUBLISH_ARTIFACTS,
+        booleanParam('PUBLISH_ARTIFACTS',
+            defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
             'Publish artifacts to release repository')
         
-        booleanParam('RUN_REPRODUCIBLE_COMPARE', 
-            jenkinsConfig.jobConfiguration.defaultParameters.RUN_REPRODUCIBLE_COMPARE,
+        booleanParam('RUN_REPRODUCIBLE_COMPARE',
+            defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
             'Run reproducible build comparison')
     }
 
