@@ -106,7 +106,17 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
         "defaultScmReference": "",
         "pipelineTimeoutHours": 8,
         "configFilePrefix": "configurations/",
-        "configFileSuffix": "_pipeline_config.json"
+        "configFileSuffix": "_pipeline_config.json",
+        "jobConfiguration": {
+            "defaultParameters": {
+                "BUILD_VARIANT": "temurin",
+                "CLEAN_WORKSPACE_AFTER_STAGE": True,
+                "RUN_TESTS": True,
+                "SIGN_ARTIFACTS": False,
+                "PUBLISH_ARTIFACTS": False,
+                "RUN_REPRODUCIBLE_COMPARE": False
+            }
+        }
     }
     
     return jenkins_config
