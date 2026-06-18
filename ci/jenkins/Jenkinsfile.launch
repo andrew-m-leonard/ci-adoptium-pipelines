@@ -108,34 +108,57 @@ pipeline {
         }
         
         stage('Create/Update Platform Jobs') {
-            when {
-                expression { params.REGENERATE_JOBS == true }
-            }
             steps {
                 script {
-                    echo "Regenerating platform-specific build jobs..."
-                    
                     def platforms = env.SELECTED_PLATFORMS.split(',')
+                    def jobsToCreate = []
                     
+                    // Check which jobs need to be created
                     platforms.each { platform ->
                         def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
-                        echo "  Creating/updating job: ${jobName}"
                         
-                        // Use Job DSL to create/update the job
-                        jobDsl(
-                            targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
-                            removedJobAction: 'IGNORE',
-                            removedViewAction: 'IGNORE',
-                            additionalParameters: [
-                                JDK_VERSION: env.JDK_VERSION,
-                                PLATFORM: platform,
-                                CONFIG_REPO_URL: params.CONFIG_REPO_URL,
-                                CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
-                            ]
-                        )
+                        if (params.REGENERATE_JOBS) {
+                            jobsToCreate.add([platform: platform, jobName: jobName, reason: 'forced regeneration'])
+                        } else {
+                            // Check if job exists
+                            try {
+                                def job = Jenkins.instance.getItemByFullName(jobName)
+                                if (job == null) {
+                                    jobsToCreate.add([platform: platform, jobName: jobName, reason: 'job does not exist'])
+                                } else {
+                                    echo "✓ Job exists: ${jobName}"
+                                }
+                            } catch (Exception e) {
+                                jobsToCreate.add([platform: platform, jobName: jobName, reason: "error checking job: ${e.message}"])
+                            }
+                        }
                     }
                     
-                    echo "✓ Platform jobs created/updated successfully"
+                    // Create/update jobs as needed
+                    if (jobsToCreate.isEmpty()) {
+                        echo "✓ All platform jobs already exist, no creation needed"
+                    } else {
+                        echo "Creating/updating ${jobsToCreate.size()} platform job(s)..."
+                        
+                        jobsToCreate.each { jobInfo ->
+                            echo "  → ${jobInfo.jobName} (${jobInfo.reason})"
+                            
+                            // Use Job DSL to create/update the job
+                            jobDsl(
+                                targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                                removedJobAction: 'IGNORE',
+                                removedViewAction: 'IGNORE',
+                                additionalParameters: [
+                                    JDK_VERSION: env.JDK_VERSION,
+                                    PLATFORM: jobInfo.platform,
+                                    CONFIG_REPO_URL: params.CONFIG_REPO_URL,
+                                    CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
+                                ]
+                            )
+                        }
+                        
+                        echo "✓ Platform jobs created/updated successfully"
+                    }
                 }
             }
         }
