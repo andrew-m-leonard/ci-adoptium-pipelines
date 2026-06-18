@@ -320,7 +320,7 @@ listView('All Pipeline Jobs') {
 listView('JDK Launch Jobs') {
     description('Launch orchestrator jobs for coordinating platform builds')
     jobs {
-        regex('openjdk-builds/jdk\\d+u?-launch-build-pipelines')
+        regex('.*jdk\\d+u?-launch-build-pipelines')
     }
     columns {
         status()
@@ -337,7 +337,7 @@ listView('JDK Launch Jobs') {
 listView('Platform Build Jobs') {
     description('Platform-specific build jobs (created dynamically by launch jobs)')
     jobs {
-        regex('openjdk-builds/jdk\\d+u?-[^-]+-build-pipeline')
+        regex('.*jdk\\d+u?-[^-]+-build-pipeline')
     }
     columns {
         status()
