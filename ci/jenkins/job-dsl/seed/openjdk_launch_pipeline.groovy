@@ -23,10 +23,10 @@ if (!configRepoBranch || configRepoBranch.trim().isEmpty()) {
     throw new IllegalArgumentException("CONFIG_REPO_BRANCH parameter is required")
 }
 
-// Get Jenkins configuration (already loaded by openjdk_build_pipeline.groovy)
+// Get Jenkins configuration (already loaded by load_config.groovy)
 def jenkinsConfig = binding.variables.get('jenkinsConfig')
 if (!jenkinsConfig) {
-    throw new IllegalStateException("jenkinsConfig not found in binding - ensure openjdk_build_pipeline.groovy runs first")
+    throw new IllegalStateException("jenkinsConfig not found in binding - ensure load_config.groovy runs first")
 }
 
 // Create launch jobs for all active JDK versions

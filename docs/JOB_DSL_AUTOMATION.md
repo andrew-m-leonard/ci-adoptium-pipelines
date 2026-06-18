@@ -81,7 +81,7 @@ Your Jenkins instance must have:
 
 4. Add Build Step: **Process Job DSLs**
    - **Look on Filesystem**: Unchecked
-   - **DSL Scripts**: `ci/jenkins/job-dsl/*.groovy`
+   - **DSL Scripts**: `ci/jenkins/job-dsl/seed/*.groovy`
    - **Action for removed jobs**: Delete
    - **Action for removed views**: Delete
 

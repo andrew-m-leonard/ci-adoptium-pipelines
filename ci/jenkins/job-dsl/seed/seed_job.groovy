@@ -62,13 +62,17 @@ freeStyleJob('seed-job') {
 
     steps {
         dsl {
-            // Process Job DSL scripts in specific order
+            // Process Job DSL scripts in specific order from seed subdirectory
             // 1. Load configuration first
-            external('ci/jenkins/job-dsl/load_config.groovy')
+            external('ci/jenkins/job-dsl/seed/load_config.groovy')
             // 2. Create launch orchestrator jobs
-            external('ci/jenkins/job-dsl/openjdk_launch_pipeline.groovy')
+            external('ci/jenkins/job-dsl/seed/openjdk_launch_pipeline.groovy')
             // 3. Recreate seed job (self-updating)
-            external('ci/jenkins/job-dsl/seed_job.groovy')
+            external('ci/jenkins/job-dsl/seed/seed_job.groovy')
+            
+            // NOTE: Scripts in ci/jenkins/job-dsl/ (not in seed/) are for dynamic job creation
+            // openjdk_build_pipeline.groovy is called by launch jobs via jobDsl step
+            // when REGENERATE_JOBS=true or when platform jobs don't exist yet.
 
             // Remove jobs that are no longer defined in DSL
             removeAction('DELETE')
@@ -76,7 +80,7 @@ freeStyleJob('seed-job') {
             // Remove views that are no longer defined in DSL
             removeViewAction('DELETE')
 
-            // Additional seed job configuration
+            // Additional classpath for helper classes (if needed)
             additionalClasspath('ci/jenkins/job-dsl')
         }
     }

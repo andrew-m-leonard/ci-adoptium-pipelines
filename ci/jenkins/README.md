@@ -47,7 +47,7 @@ All Jenkins jobs are created automatically using Job DSL scripts. See [Job DSL A
      - `CONFIG_REPO_URL` (String, no default)
      - `CONFIG_REPO_BRANCH` (String, no default)
    - SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`
-   - Build Step: Process Job DSLs → `ci/jenkins/job-dsl/*.groovy`
+   - Build Step: Process Job DSLs → `ci/jenkins/job-dsl/seed/*.groovy`
 
 3. **Run Seed Job**:
    - Click "Build with Parameters"
