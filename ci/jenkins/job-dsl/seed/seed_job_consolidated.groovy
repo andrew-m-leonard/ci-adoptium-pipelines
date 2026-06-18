@@ -95,21 +95,30 @@ println "✓ Configuration loaded successfully\n"
 // STEP 2: Create Launch Orchestrator Jobs
 // ============================================================================
 
+// Default values for job configuration
+def defaultBuildVariant = jenkinsConfig.defaultVariant ?: 'temurin'
+def defaultBuildArgs = jenkinsConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
+def pipelineRepoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
+def pipelineRepoBranch = 'main'
+def pipelineRepoCredentialsId = '' // Leave empty for public repos
+
 println "Creating launch orchestrator jobs for active JDK versions:"
 jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     def version = versionInfo.version
-    def fullVersion = versionInfo.fullVersion
-    def isLts = versionInfo.lts
-    def configFile = versionInfo.configFile
+    def configFile = "${jenkinsConfig.configFilePrefix ?: 'configurations/'}${version}${jenkinsConfig.configFileSuffix ?: '_pipeline_config.json'}"
     
-    println "  → JDK ${version} (${fullVersion})${isLts ? ' [LTS]' : ''}"
+    // Determine if LTS based on version number
+    def versionNum = version.replaceAll(/[^\d]/, '').toInteger()
+    def isLts = (versionNum == 8 || versionNum == 11 || versionNum == 17 || versionNum == 21)
+    
+    println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
     
     def jobName = "openjdk-builds/jdk${version}-launch-build-pipelines"
     
     pipelineJob(jobName) {
         displayName("JDK ${version} Launch Build Pipelines${isLts ? ' (LTS)' : ''}")
         description("""
-            Launch orchestrator for JDK ${version} (${fullVersion}) builds.
+            Launch orchestrator for JDK ${version} builds.
             ${isLts ? 'This is a Long Term Support (LTS) version.' : ''}
             
             This job:
@@ -139,24 +148,25 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Comma-separated list of platforms to build, or "all" for all available platforms')
             
             // Build configuration parameters (passed to platform jobs)
-            stringParam('BUILD_VARIANT', jenkinsConfig.jobConfiguration.defaultParameters.BUILD_VARIANT,
+            stringParam('BUILD_VARIANT', defaultBuildVariant,
                 'Build variant (temurin, dragonwell, etc.)')
             
-            booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
-                jenkinsConfig.jobConfiguration.defaultParameters.CLEAN_WORKSPACE_AFTER_STAGE,
+            stringParam('BUILD_ARGS', defaultBuildArgs,
+                'Additional build arguments')
+            
+            booleanParam('CLEAN_WORKSPACE_AFTER_STAGE', true,
                 'Clean workspace after each stage completes')
             
-            booleanParam('RUN_TESTS', jenkinsConfig.jobConfiguration.defaultParameters.RUN_TESTS,
+            booleanParam('RUN_TESTS', false,
                 'Run test stages (smoke tests, AQA, TCK)')
             
-            booleanParam('SIGN_ARTIFACTS', jenkinsConfig.jobConfiguration.defaultParameters.SIGN_ARTIFACTS,
+            booleanParam('SIGN_ARTIFACTS', false,
                 'Sign artifacts and installers')
             
-            booleanParam('PUBLISH_ARTIFACTS', jenkinsConfig.jobConfiguration.defaultParameters.PUBLISH_ARTIFACTS,
+            booleanParam('PUBLISH_ARTIFACTS', false,
                 'Publish artifacts to release repository')
             
-            booleanParam('RUN_REPRODUCIBLE_COMPARE',
-                jenkinsConfig.jobConfiguration.defaultParameters.RUN_REPRODUCIBLE_COMPARE,
+            booleanParam('RUN_REPRODUCIBLE_COMPARE', false,
                 'Run reproducible build comparison')
         }
 
@@ -165,12 +175,12 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 scm {
                     git {
                         remote {
-                            url(jenkinsConfig.repository.url)
-                            if (jenkinsConfig.repository.credentialsId) {
-                                credentials(jenkinsConfig.repository.credentialsId)
+                            url(pipelineRepoUrl)
+                            if (pipelineRepoCredentialsId) {
+                                credentials(pipelineRepoCredentialsId)
                             }
                         }
-                        branch("*/${jenkinsConfig.repository.branch}")
+                        branch("*/${pipelineRepoBranch}")
                         extensions {
                             cleanBeforeCheckout()
                         }
@@ -185,10 +195,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             buildDiscarder {
                 strategy {
                     logRotator {
-                        daysToKeepStr(jenkinsConfig.jobConfiguration.logRotation.daysToKeep.toString())
-                        numToKeepStr(jenkinsConfig.jobConfiguration.logRotation.numToKeep.toString())
-                        artifactDaysToKeepStr(jenkinsConfig.jobConfiguration.logRotation.artifactDaysToKeep.toString())
-                        artifactNumToKeepStr(jenkinsConfig.jobConfiguration.logRotation.artifactNumToKeep.toString())
+                        daysToKeepStr('30')
+                        numToKeepStr('50')
+                        artifactDaysToKeepStr('7')
+                        artifactNumToKeepStr('10')
                     }
                 }
             }
