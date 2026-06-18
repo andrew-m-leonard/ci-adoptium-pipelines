@@ -107,6 +107,12 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
         "pipelineTimeoutHours": 8,
         "configFilePrefix": "configurations/",
         "configFileSuffix": "_pipeline_config.json",
+        "repository": {
+            "url": "https://github.com/adoptium/ci-adoptium-pipelines.git",
+            "branch": "main",
+            "credentialsId": "",
+            "jenkinsfilePath": "ci/jenkins/Jenkinsfile"
+        },
         "jobConfiguration": {
             "defaultParameters": {
                 "BUILD_VARIANT": "temurin",
