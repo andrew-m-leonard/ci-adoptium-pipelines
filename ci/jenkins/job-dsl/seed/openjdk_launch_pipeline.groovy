@@ -39,7 +39,7 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     
     println "  → JDK ${version} (${fullVersion})${isLts ? ' [LTS]' : ''}"
     
-    def jobName = "openjdk-builds/jdk${version}-launch-build-pipelines"
+    def jobName = "openjdk-launch-pipelines/jdk${version}-launch-build-pipelines"
     
     pipelineJob(jobName) {
         displayName("JDK ${version} Launch Build Pipelines${isLts ? ' (LTS)' : ''}")

@@ -116,7 +116,7 @@ pipeline {
                     def platforms = env.SELECTED_PLATFORMS.split(',')
                     
                     platforms.each { platform ->
-                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
                         echo "  → Creating/updating: ${jobName}"
                         
                         // Use Job DSL to create/update the job
@@ -151,7 +151,7 @@ pipeline {
                     def buildJobs = [:]
                     
                     platforms.each { platform ->
-                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        def jobName = "openjdk-builds/jdk${env.JDK_VERSION}/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
                         
                         buildJobs[platform] = {
                             stage("Build ${platform}") {

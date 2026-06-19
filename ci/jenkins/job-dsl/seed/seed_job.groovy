@@ -91,6 +91,17 @@ freeStyleJob('seed-job') {
     }
 }
 
+// Create folders for organizing jobs
+folder('openjdk-launch-pipelines') {
+    displayName('OpenJDK Launch Pipelines')
+    description('Launch orchestrator jobs that coordinate builds across multiple platforms')
+}
+
+folder('openjdk-builds') {
+    displayName('OpenJDK Build Jobs')
+    description('Platform-specific build pipeline jobs (created dynamically by launch jobs)')
+}
+
 // Create a view to organize all generated jobs
 listView('All Pipeline Jobs') {
     description('All OpenJDK build pipeline jobs')
@@ -112,7 +123,7 @@ listView('All Pipeline Jobs') {
 listView('JDK Launch Jobs') {
     description('Launch orchestrator jobs for coordinating platform builds')
     jobs {
-        regex('.*/jdk\\d+-launch-build-pipelines')
+        regex('openjdk-launch-pipelines/jdk\\d+-launch-build-pipelines')
     }
     columns {
         status()
@@ -129,7 +140,7 @@ listView('JDK Launch Jobs') {
 listView('Platform Build Jobs') {
     description('Platform-specific build jobs (created dynamically by launch jobs)')
     jobs {
-        regex('.*/jdk\\d+-[^-]+-build-pipeline')
+        regex('openjdk-builds/jdk\\d+/jdk\\d+-[^-]+-build-pipeline')
     }
     columns {
         status()
