@@ -465,7 +465,7 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Sign Artifacts') {
-                        def config = initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*)
+                        def config = initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
                         // Execute sign script
                         def signScript = load 'scripts/stages/06-sign.groovy'
