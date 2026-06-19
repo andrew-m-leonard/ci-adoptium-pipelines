@@ -24,10 +24,11 @@
  */
 
 import groovy.json.*
+import groovy.transform.Field
 
 // BUILD_UID helper functions from external library
 // This provides unique build tracking and stage result management
-def buildUidHelper
+@Field def buildUidHelper
 
 // Helper function to ensure buildUidHelper is loaded
 // This is needed because when restarting from a stage, the Initialize stage is skipped
