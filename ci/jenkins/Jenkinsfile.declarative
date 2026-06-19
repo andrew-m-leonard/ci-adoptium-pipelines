@@ -59,6 +59,7 @@ def executeStageWithTracking(String stageName, Closure body) {
 // Helper function for common stage initialization pattern
 // Handles workspace cleanup, checkout, BUILD_UID setup, prerequisites, and artifact retrieval
 // Saves additional bytecode by consolidating repeated initialization code
+// Special handling for 'Initialize' stage which creates the config file
 def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json') {
     // Echo stage banner
     echo "=== ${stageName} ==="
@@ -75,11 +76,13 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     // Initialize BUILD_UID and build context
     buildUidHelper.initializeBuildContext(stageName)
     
-    // Validate prerequisites
-    buildUidHelper.validatePrerequisites(stageName, prerequisites)
+    // Validate prerequisites (skip for Initialize stage)
+    if (stageName != 'Initialize') {
+        buildUidHelper.validatePrerequisites(stageName, prerequisites)
+    }
     
-    // Retrieve artifacts if filter specified
-    if (artifactFilter) {
+    // Retrieve artifacts if filter specified (skip for Initialize stage)
+    if (artifactFilter && stageName != 'Initialize') {
         copyArtifacts(
             projectName: env.JOB_NAME,
             selector: specific(env.BUILD_NUMBER),
@@ -88,8 +91,12 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
         )
     }
     
-    // Return config for convenience
-    return readJSON(file: 'pipeline-config.json')
+    // Return config for convenience (empty for Initialize stage)
+    if (stageName == 'Initialize') {
+        return [:]  // Return empty map for Initialize stage
+    } else {
+        return readJSON(file: 'pipeline-config.json')
+    }
 }
 
 // Helper function for common stage finalization pattern
@@ -316,7 +323,7 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Initialize') {
-                        def config = initializeStage('Initialize', [])
+                        initializeStage('Initialize', [])
 
                         // Checkout pipeline configurations from external repository
                         // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
