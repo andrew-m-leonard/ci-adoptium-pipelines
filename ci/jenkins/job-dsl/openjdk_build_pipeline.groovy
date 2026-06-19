@@ -66,18 +66,19 @@ Ensure jenkins_job_config.json exists and is accessible.
 def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
 
 // Ensure the openjdk-builds folder and JDK version subfolder exist
-folder('openjdk-builds') {
-    displayName('OpenJDK Build Jobs')
-    description('Folder containing all OpenJDK build pipeline jobs organized by JDK version')
+// Use absolute paths (starting with /) to ensure folders are created at root level
+folder('/openjdk-builds') {
+    displayName('OpenJDK Platform Builds')
+    description('Platform-specific build pipeline jobs organized by JDK version (created dynamically by launch jobs)')
 }
 
-folder("openjdk-builds/jdk${jdkVersion}") {
+folder("/openjdk-builds/jdk${jdkVersion}") {
     displayName("JDK ${jdkVersion}")
     description("Build pipeline jobs for JDK ${jdkVersion}")
 }
 
 // Create platform-specific build job
-def jobName = "openjdk-builds/jdk${jdkVersion}/jdk${jdkVersion}-${platform}-build-pipeline"
+def jobName = "/openjdk-builds/jdk${jdkVersion}/jdk${jdkVersion}-${platform}-build-pipeline"
 
 println "Creating platform-specific build job: ${jobName}"
 
