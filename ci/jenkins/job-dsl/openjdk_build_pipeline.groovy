@@ -65,6 +65,12 @@ Ensure jenkins_job_config.json exists and is accessible.
 // Extract default parameters with safe navigation
 def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
 
+// Ensure the openjdk-builds folder exists
+folder('openjdk-builds') {
+    displayName('OpenJDK Build Jobs')
+    description('Folder containing all OpenJDK build pipeline jobs')
+}
+
 // Create platform-specific build job
 def jobName = "openjdk-builds/jdk${jdkVersion}-${platform}-build-pipeline"
 
