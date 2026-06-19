@@ -246,17 +246,31 @@ cd "${COMPARE_WORKSPACE}"
 COMPARE_OUTPUT="${COMPARE_WORKSPACE}/comparison-report.txt"
 
 if bash "${REPRO_COMPARE_SCRIPT}" "${VARIANT}" "${UPSTREAM_JDK_DIR}" "${VARIANT}" "${BUILT_JDK_DIR}" "${REPRO_OS}" | tee "${COMPARE_OUTPUT}"; then
-    log_info "Reproducible build comparison PASSED"
+    COMPARE_EXIT_CODE=0
+    log_info "SUCCESS: Build is 100% reproducible (exit code 0)"
     log_info "The locally built JDK matches the production binary"
+    
+    # Show reproducibility percentage if available
+    if [ -f "${COMPARE_WORKSPACE}/ReproduciblePercent" ]; then
+        PERCENT=$(cat "${COMPARE_WORKSPACE}/ReproduciblePercent" | tr -d '[:space:]')
+        log_info "Reproducibility: ${PERCENT}%"
+    fi
 else
     COMPARE_EXIT_CODE=$?
-    log_error "Reproducible build comparison FAILED (exit code: ${COMPARE_EXIT_CODE})"
+    log_error "WARNING: Reproducible build comparison FAILED"
+    log_error "  Exit code: ${COMPARE_EXIT_CODE}"
     log_error "Differences detected between locally built and production binaries"
 
-    # Show comparison report
+    # Show comparison report if available
     if [ -f "${COMPARE_OUTPUT}" ]; then
         log_info "Comparison report:"
         cat "${COMPARE_OUTPUT}"
+    fi
+
+    # Show reprotest.diff if available
+    if [ -f "${COMPARE_WORKSPACE}/reprotest.diff" ]; then
+        log_info "Differences found (reprotest.diff):"
+        cat "${COMPARE_WORKSPACE}/reprotest.diff"
     fi
 
     exit ${COMPARE_EXIT_CODE}

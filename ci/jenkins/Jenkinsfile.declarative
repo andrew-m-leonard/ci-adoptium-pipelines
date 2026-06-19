@@ -39,6 +39,166 @@ def ensureBuildUidHelperLoaded() {
     return buildUidHelper
 }
 
+// Helper function to execute stage with automatic result tracking
+// This eliminates the need for repetitive post blocks in every stage
+// Saves ~12KB of bytecode by replacing 60 post blocks with 1 function
+def executeStageWithTracking(String stageName, Closure body) {
+    try {
+        body()
+        buildUidHelper.recordStageResult(stageName, 'SUCCESS')
+    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
+        buildUidHelper.recordStageResult(stageName, 'ABORTED')
+        throw e
+    } catch (Exception e) {
+        def result = currentBuild.result ?: 'FAILURE'
+        buildUidHelper.recordStageResult(stageName, result)
+        throw e
+    }
+}
+
+// Helper function for common stage initialization pattern
+// Handles workspace cleanup, checkout, BUILD_UID setup, prerequisites, and artifact retrieval
+// Saves additional bytecode by consolidating repeated initialization code
+def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json') {
+    // Echo stage banner
+    echo "=== ${stageName} ==="
+    
+    // Pre-cleanup: Always clean workspace for restartability
+    cleanWs()
+    
+    // Checkout ci-adoptium-pipelines repository
+    checkout scm
+    
+    // Ensure helper is loaded (handles restart from stage)
+    ensureBuildUidHelperLoaded()
+    
+    // Initialize BUILD_UID and build context
+    buildUidHelper.initializeBuildContext(stageName)
+    
+    // Validate prerequisites
+    buildUidHelper.validatePrerequisites(stageName, prerequisites)
+    
+    // Retrieve artifacts if filter specified
+    if (artifactFilter) {
+        copyArtifacts(
+            projectName: env.JOB_NAME,
+            selector: specific(env.BUILD_NUMBER),
+            filter: artifactFilter,
+            target: '.'
+        )
+    }
+    
+    // Return config for convenience
+    return readJSON(file: 'pipeline-config.json')
+}
+
+// Helper function for common stage finalization pattern
+// Handles post-cleanup and completion messages
+// Saves additional bytecode by consolidating repeated finalization code
+def finalizeStage(String stageName) {
+    // Post-cleanup: Clean workspace if requested
+    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+        cleanWs()
+    }
+    
+    // Echo completion message
+    echo "=== ${stageName} Complete ==="
+    echo "BUILD_UID: ${env.BUILD_UID}"
+}
+
+// Helper function to summarize pipeline configuration
+// Displays key configuration values in a consistent format
+def summarizePipelineConfig(config) {
+    echo "Build Configuration:"
+    echo "  JDK Version: ${config.buildConfig.JAVA_TO_BUILD}"
+    echo "  Variant: ${config.buildConfig.VARIANT}"
+    echo "  OS: ${config.buildConfig.TARGET_OS}"
+    echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
+    echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
+    echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
+    echo "  Tests: ${config.buildConfig.TEST_LIST}"
+}
+
+// Helper function to generate pipeline configuration from parameters
+// Builds Python command arguments and executes load-json-config.py
+// Sets environment variables for use in when{} blocks
+// Returns the generated config object
+def generatePipelineConfig() {
+    // Determine config directory path (handles nested structure from sparse checkout)
+    def configDir = fileExists('configurations/configurations') ? './configurations/configurations' : './configurations'
+    
+    // Build Python command arguments
+    def pythonArgs = [
+        "--jdk-version ${params.JDK_VERSION}",
+        "--variant ${params.VARIANT}",
+        "--target-os ${params.TARGET_OS}",
+        "--architecture ${params.ARCHITECTURE}",
+        "--config-dir ${configDir}",
+        "--output-dir ."
+    ]
+
+    // Add optional parameters
+    if (params.RELEASE) {
+        pythonArgs.add("--release")
+    }
+    if (params.WEEKLY) {
+        pythonArgs.add("--weekly")
+    }
+    if (params.SCM_REF) {
+        pythonArgs.add("--scm-ref ${params.SCM_REF}")
+    }
+    if (params.BUILD_REF) {
+        pythonArgs.add("--build-ref ${params.BUILD_REF}")
+    }
+    pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
+    pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
+    if (params.HELPER_REF) {
+        pythonArgs.add("--helper-ref ${params.HELPER_REF}")
+    }
+    if (!params.ENABLE_TESTS) {
+        pythonArgs.add("--no-tests")
+    }
+    if (!params.ENABLE_INSTALLERS) {
+        pythonArgs.add("--no-installers")
+    }
+    if (!params.ENABLE_SIGNER) {
+        pythonArgs.add("--no-signer")
+    }
+    if (params.EA_BETA_BUILD) {
+        pythonArgs.add("--ea-beta-build")
+    }
+
+    // Execute Python script to generate configuration
+    sh """
+        python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}
+    """
+
+    // Read and return the generated configuration
+    def config = readJSON file: 'pipeline-config.json'
+    
+    // Set TCK enablement from parameter
+    config.parameters.enableTCK = params.ENABLE_TCK
+    
+    // Update pipeline-config.json with TCK setting
+    writeJSON file: 'pipeline-config.json', json: config, pretty: 4
+    
+    // Set environment variables for use in when{} blocks
+    // This eliminates repeated readJSON calls and saves bytecode
+    env.CONFIG_VARIANT = config.buildConfig.VARIANT
+    env.CONFIG_TARGET_OS = config.buildConfig.TARGET_OS
+    env.CONFIG_ARCHITECTURE = config.buildConfig.ARCHITECTURE
+    env.CONFIG_JAVA_TO_BUILD = config.buildConfig.JAVA_TO_BUILD
+    env.CONFIG_NODE_LABEL = config.buildConfig.NODE_LABEL ?: 'worker'
+    env.CONFIG_BUILD_ARGS = config.buildConfig.BUILD_ARGS ?: ''
+    env.CONFIG_ENABLE_TESTS = config.parameters.enableTests.toString()
+    env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
+    env.CONFIG_ENABLE_SIGNER = config.parameters.enableSigner.toString()
+    env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
+    env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
+    
+    return config
+}
+
 // ============================================================================
 
 pipeline {
@@ -155,160 +315,38 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== Initializing Build ==="
+                    executeStageWithTracking('Initialize') {
+                        def config = initializeStage('Initialize', [])
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Checkout pipeline configurations from external repository
+                        // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
+                        // Note: Sparse checkout may create nested 'configurations/configurations' structure
+                        dir('configurations') {
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
+                                userRemoteConfigs: [[
+                                    url: params.CONFIG_REPO_URL
+                                ]],
+                                extensions: [
+                                    [$class: 'SparseCheckoutPaths',
+                                     sparseCheckoutPaths: [[path: 'configurations/*']]]
+                                ]
+                            ])
+                        }
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        // Generate pipeline configuration from parameters
+                        def config = generatePipelineConfig()
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
+                        // Archive configuration
+                        archiveArtifacts artifacts: 'pipeline-config.json',
+                                       fingerprint: true,
+                                       allowEmptyArchive: false
 
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Initialize')
+                        // Display configuration summary
+                        summarizePipelineConfig(config)
 
-                    // No prerequisites for first stage
-                    buildUidHelper.validatePrerequisites('Initialize', [])
-
-                    // Verify repository structure
-                    sh '''
-                        echo "Verifying ci-adoptium-pipelines repository structure..."
-
-                        if [ ! -d "scripts" ]; then
-                            echo "ERROR: scripts/ directory not found"
-                            exit 1
-                        fi
-
-                        if [ ! -d "tools" ]; then
-                            echo "ERROR: tools/ directory not found"
-                            exit 1
-                        fi
-
-                        echo "✅ ci-adoptium-pipelines repository structure verified"
-                        ls -la scripts/ tools/
-                    '''
-
-                    // Checkout pipeline configurations from external repository
-                    // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
-                    dir('configurations') {
-                        checkout([
-                            $class: 'GitSCM',
-                            branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
-                            userRemoteConfigs: [[
-                                url: params.CONFIG_REPO_URL
-                            ]],
-                            extensions: [
-                                [$class: 'SparseCheckoutPaths',
-                                 sparseCheckoutPaths: [[path: 'configurations/*']]]
-                            ]
-                        ])
-
-                        // Move config files to root of configurations directory
-                        sh '''
-                            if [ -d configurations ]; then
-                                mv configurations/* .
-                                rm -rf configurations
-                            fi
-                        '''
-                    }
-
-                    // Build Python command arguments
-                    def pythonArgs = [
-                        "--jdk-version ${params.JDK_VERSION}",
-                        "--variant ${params.VARIANT}",
-                        "--target-os ${params.TARGET_OS}",
-                        "--architecture ${params.ARCHITECTURE}",
-                        "--config-dir ./configurations",
-                        "--output-dir ."
-                    ]
-
-                    if (params.RELEASE) {
-                        pythonArgs.add("--release")
-                    }
-                    if (params.WEEKLY) {
-                        pythonArgs.add("--weekly")
-                    }
-                    if (params.SCM_REF) {
-                        pythonArgs.add("--scm-ref ${params.SCM_REF}")
-                    }
-                    if (params.BUILD_REF) {
-                        pythonArgs.add("--build-ref ${params.BUILD_REF}")
-                    }
-                    pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
-                    pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
-                    if (params.HELPER_REF) {
-                        pythonArgs.add("--helper-ref ${params.HELPER_REF}")
-                    }
-                    if (!params.ENABLE_TESTS) {
-                        pythonArgs.add("--no-tests")
-                    }
-                    if (!params.ENABLE_INSTALLERS) {
-                        pythonArgs.add("--no-installers")
-                    }
-                    if (!params.ENABLE_SIGNER) {
-                        pythonArgs.add("--no-signer")
-                    }
-                    if (params.EA_BETA_BUILD) {
-                        pythonArgs.add("--ea-beta-build")
-                    }
-
-                    // Load JSON configuration and generate pipeline config
-                    sh """
-                        python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}
-                    """
-
-                    // Read generated configuration
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Set TCK enablement from parameter
-                    config.parameters.enableTCK = params.ENABLE_TCK
-
-                    // Update pipeline-config.json with TCK setting
-                    writeJSON file: 'pipeline-config.json', json: config, pretty: 4
-
-                    // Archive configuration
-                    archiveArtifacts artifacts: 'pipeline-config.json',
-                                   fingerprint: true,
-                                   allowEmptyArchive: false
-
-                    echo "Build Configuration:"
-                    echo "  JDK Version: ${config.buildConfig.JAVA_TO_BUILD}"
-                    echo "  Variant: ${config.buildConfig.VARIANT}"
-                    echo "  OS: ${config.buildConfig.TARGET_OS}"
-                    echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
-                    echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
-                    echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
-                    echo "  Tests: ${config.buildConfig.TEST_LIST}"
-                    echo "=== Initialization Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Initialize', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Initialize', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Initialize', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Initialize', 'ABORTED')
+                        finalizeStage('Initialize')
                     }
                 }
             }
@@ -320,93 +358,42 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== Building JDK ==="
+                    executeStageWithTracking('Build') {
+                        def config = initializeStage('Build', ['Initialize'])
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Set environment variables for the build script
+                        env.WORKSPACE = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.BUILD_NUMBER = env.BUILD_NUMBER
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        // Execute build stage script (bash)
+                        def buildExitCode = sh(
+                            script: '''
+                                #!/bin/bash
+                                set -e
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
+                                echo "Running JDK build..."
+                                echo "  WORKSPACE: ${WORKSPACE}"
+                                echo "  CONFIG_FILE: ${CONFIG_FILE}"
+                                echo "  TARGET_DIR: ${TARGET_DIR}"
 
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Build')
+                                # Execute the build stage script
+                                bash scripts/stages/02-build.sh
+                            ''',
+                            returnStatus: true
+                        )
 
-                    // Validate that Initialize stage completed successfully
-                    buildUidHelper.validatePrerequisites('Build', ['Initialize'])
+                        if (buildExitCode != 0) {
+                            error("Build failed with exit code: ${buildExitCode}")
+                        }
 
-                    // Retrieve configuration
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json',
-                        target: '.'
-                    )
+                        // Archive build artifacts
+                        archiveArtifacts artifacts: 'workspace/target/**/*',
+                                       fingerprint: true,
+                                       allowEmptyArchive: false
 
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Set environment variables for the build script
-                    env.WORKSPACE = "${WORKSPACE}"
-                    env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                    env.TARGET_DIR = "${WORKSPACE}/workspace/target"
-                    env.BUILD_NUMBER = env.BUILD_NUMBER
-
-                    // Execute build stage script (bash)
-                    def buildExitCode = sh(
-                        script: '''
-                            #!/bin/bash
-                            set -e
-
-                            echo "Running JDK build..."
-                            echo "  WORKSPACE: ${WORKSPACE}"
-                            echo "  CONFIG_FILE: ${CONFIG_FILE}"
-                            echo "  TARGET_DIR: ${TARGET_DIR}"
-
-                            # Execute the build stage script
-                            bash scripts/stages/02-build.sh
-                        ''',
-                        returnStatus: true
-                    )
-
-                    if (buildExitCode != 0) {
-                        error("Build failed with exit code: ${buildExitCode}")
-                    }
-
-                    // Archive build artifacts
-                    archiveArtifacts artifacts: 'workspace/target/**/*',
-                                   fingerprint: true,
-                                   allowEmptyArchive: false
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Build Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Build', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Build', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Build', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Build', 'ABORTED')
+                        finalizeStage('Build')
                     }
                 }
             }
@@ -418,57 +405,24 @@ pipeline {
             }
             when {
                 allOf {
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableSigner
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        def bc = config.buildConfig
-                        return (bc.TARGET_OS == 'mac' || bc.TARGET_OS == 'windows') &&
-                               bc.JAVA_TO_BUILD != 'jdk8u'
+                        return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
+                               env.CONFIG_JAVA_TO_BUILD != 'jdk8u'
                     }
                 }
             }
             steps {
                 script {
-                    echo "=== Internal Signing (JMOD) ==="
+                    executeStageWithTracking('Internal Sign') {
+                        def config = initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute internal sign script
+                        def signScript = load 'scripts/stages/03-internal-sign.groovy'
+                        signScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Internal Sign')
-
-                    // Validate that Build stage completed successfully
-                    buildUidHelper.validatePrerequisites('Internal Sign', ['Build'])
-
-                    // Retrieve configuration and build outputs
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/jmods/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute internal sign script
-                    def signScript = load 'scripts/stages/03-internal-sign.groovy'
-                    signScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
+                        finalizeStage('Internal Sign')
                     }
-
-                    echo "=== Internal Signing Complete ==="
                 }
             }
         }
@@ -479,79 +433,23 @@ pipeline {
             }
             when {
                 allOf {
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableSigner
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        def bc = config.buildConfig
-                        return (bc.TARGET_OS == 'mac' || bc.TARGET_OS == 'windows') &&
-                               bc.JAVA_TO_BUILD != 'jdk8u'
+                        return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
+                               env.CONFIG_JAVA_TO_BUILD != 'jdk8u'
                     }
                 }
             }
             steps {
                 script {
-                    echo "=== Assembling Final Build ==="
+                    executeStageWithTracking('Assemble') {
+                        def config = initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute assemble script
+                        def assembleScript = load 'scripts/stages/04-assemble.groovy'
+                        assembleScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Assemble')
-
-                    // Validate that Build or Internal Sign stage completed successfully
-                    buildUidHelper.validatePrerequisites('Assemble', ['Build'])
-
-                    // Retrieve signed JMODs and configuration
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,signed-jmods/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute assemble script
-                    def assembleScript = load 'scripts/stages/04-assemble.groovy'
-                    assembleScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Assembly Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Assemble', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Assemble', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Assemble', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Assemble', 'ABORTED')
+                        finalizeStage('Assemble')
                     }
                 }
             }
@@ -562,73 +460,18 @@ pipeline {
                 label 'worker'
             }
             when {
-                expression {
-                    def config = readJSON file: 'pipeline-config.json'
-                    return config.parameters.enableSigner
-                }
+                expression { env.CONFIG_ENABLE_SIGNER == 'true' }
             }
             steps {
                 script {
-                    echo "=== Signing Artifacts ==="
+                    executeStageWithTracking('Sign Artifacts') {
+                        def config = initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*)
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute sign script
+                        def signScript = load 'scripts/stages/06-sign.groovy'
+                        signScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Sign Artifacts')
-
-                    // Validate that Assemble stage completed successfully
-                    buildUidHelper.validatePrerequisites('Sign Artifacts', ['Assemble'])
-
-
-                    // Retrieve build artifacts
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute sign script
-                    def signScript = load 'scripts/stages/06-sign.groovy'
-                    signScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Artifact Signing Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Artifacts', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Artifacts', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Artifacts', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Artifacts', 'ABORTED')
+                        finalizeStage('Sign Artifacts')
                     }
                 }
             }
@@ -639,72 +482,18 @@ pipeline {
                 label 'worker'
             }
             when {
-                expression {
-                    def config = readJSON file: 'pipeline-config.json'
-                    return config.parameters.enableInstallers
-                }
+                expression { env.CONFIG_ENABLE_INSTALLERS == 'true' }
             }
             steps {
                 script {
-                    echo "=== Building Installers ==="
+                    executeStageWithTracking('Build Installers') {
+                        def config = initializeStage('Build Installers', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,workspace/target/metadata/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute installer build script
+                        def installerScript = load 'scripts/stages/07-installer.groovy'
+                        installerScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Build Installers')
-
-                    // Validate that Sign Artifacts stage completed successfully
-                    buildUidHelper.validatePrerequisites('Build Installers', ['Sign Artifacts'])
-
-                    // Retrieve signed artifacts
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,signed/**/*,workspace/target/metadata/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute installer build script
-                    def installerScript = load 'scripts/stages/07-installer.groovy'
-                    installerScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Installer Build Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Build Installers', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Build Installers', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Build Installers', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Build Installers', 'ABORTED')
+                        finalizeStage('Build Installers')
                     }
                 }
             }
@@ -716,77 +505,20 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableInstallers
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableSigner
-                    }
+                    expression { env.CONFIG_ENABLE_INSTALLERS == 'true' }
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                 }
             }
             steps {
                 script {
-                    echo "=== Signing Installers ==="
+                    executeStageWithTracking('Sign Installers') {
+                        def config = initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute installer sign script
+                        def signInstallerScript = load 'scripts/stages/08-sign-installer.groovy'
+                        signInstallerScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Sign Installers')
-
-                    // Validate that Build Installers stage completed successfully
-                    buildUidHelper.validatePrerequisites('Sign Installers', ['Build Installers'])
-
-                    // Retrieve installers
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,installers/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute installer sign script
-                    def signInstallerScript = load 'scripts/stages/08-sign-installer.groovy'
-                    signInstallerScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Installer Signing Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Installers', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Installers', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Installers', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Sign Installers', 'ABORTED')
+                        finalizeStage('Sign Installers')
                     }
                 }
             }
@@ -798,14 +530,8 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.buildConfig.VARIANT == 'temurin'
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableSigner
-                    }
+                    expression { env.CONFIG_VARIANT == 'temurin' }
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME.contains('pr-tester') }
                     }
@@ -813,73 +539,21 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== GPG Signing ==="
+                    executeStageWithTracking('GPG Sign') {
+                        def config = initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute GPG sign script
+                        def gpgSignScript = load 'scripts/stages/09-gpg-sign.groovy'
+                        gpgSignScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        // SBOM signing if applicable
+                        if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
+                            echo "=== SBOM JSF Signing ==="
+                            def sbomSignScript = load 'scripts/stages/10-sbom-sign.groovy'
+                            sbomSignScript(config)
+                        }
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('GPG Sign')
-
-                    // Validate that Sign Artifacts or Sign Installers stage completed successfully
-                    buildUidHelper.validatePrerequisites('GPG Sign', ['Sign Artifacts'])
-
-
-                    // Retrieve all artifacts to sign
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,signed/**/*,signed-installers/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute GPG sign script
-                    def gpgSignScript = load 'scripts/stages/09-gpg-sign.groovy'
-                    gpgSignScript(config)
-
-                    // SBOM signing if applicable
-                    if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
-                        echo "=== SBOM JSF Signing ==="
-                        def sbomSignScript = load 'scripts/stages/10-sbom-sign.groovy'
-                        sbomSignScript(config)
-                    }
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== GPG Signing Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('GPG Sign', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('GPG Sign', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('GPG Sign', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('GPG Sign', 'ABORTED')
+                        finalizeStage('GPG Sign')
                     }
                 }
             }
@@ -891,14 +565,8 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.buildConfig.VARIANT == 'temurin'
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableSigner
-                    }
+                    expression { env.CONFIG_VARIANT == 'temurin' }
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME.contains('pr-tester') }
                     }
@@ -906,65 +574,14 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== Verifying Signatures ==="
+                    executeStageWithTracking('Verify Signing') {
+                        def config = initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute verify script
+                        def verifyScript = load 'scripts/stages/11-verify-signing.groovy'
+                        verifyScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Verify Signing')
-
-                    // Validate that GPG Sign stage completed successfully
-                    buildUidHelper.validatePrerequisites('Verify Signing', ['GPG Sign'])
-
-                    // Retrieve signed artifacts
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,signed/**/*,*.sig,*.asc',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute verify script
-                    def verifyScript = load 'scripts/stages/11-verify-signing.groovy'
-                    verifyScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Signature Verification Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Verify Signing', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Verify Signing', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Verify Signing', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Verify Signing', 'ABORTED')
+                        finalizeStage('Verify Signing')
                     }
                 }
             }
@@ -975,76 +592,22 @@ pipeline {
                 label 'worker'
             }
             when {
-                expression {
-                    def config = readJSON file: 'pipeline-config.json'
-                    return config.buildConfig.BUILD_ARGS?.contains('--create-sbom')
-                }
+                expression { env.CONFIG_BUILD_ARGS.contains('--create-sbom') }
             }
             steps {
                 script {
-                    echo "=== Validating SBOM ==="
+                    executeStageWithTracking('Validate SBOM') {
+                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,workspace/target/**/*sbom*.json')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute SBOM validation script
+                        def validateScript = load 'scripts/stages/12-validate-sbom.groovy'
+                        def result = validateScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        if (result != 'SUCCESS') {
+                            error("SBOM validation failed")
+                        }
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Validate SBOM')
-
-                    // Validate that Build stage completed successfully
-                    buildUidHelper.validatePrerequisites('Validate SBOM', ['Build'])
-
-                    // Retrieve SBOM files
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*sbom*.json',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute SBOM validation script
-                    def validateScript = load 'scripts/stages/12-validate-sbom.groovy'
-                    def result = validateScript(config)
-
-                    if (result != 'SUCCESS') {
-                        error("SBOM validation failed")
-                    }
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== SBOM Validation Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Validate SBOM', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Validate SBOM', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Validate SBOM', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Validate SBOM', 'ABORTED')
+                        finalizeStage('Validate SBOM')
                     }
                 }
             }
@@ -1056,10 +619,7 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableTests
-                    }
+                    expression { env.CONFIG_ENABLE_TESTS == 'true' }
                     expression {
                         currentBuild.result == null || currentBuild.result == 'SUCCESS'
                     }
@@ -1067,97 +627,49 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== Running Smoke Tests ==="
+                    executeStageWithTracking('Smoke Tests') {
+                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Set environment variables for the smoke test script
+                        env.WORKSPACE = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.BUILD_NUMBER = env.BUILD_NUMBER
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        // Execute smoke test script (bash)
+                        def smokeTestExitCode = sh(
+                            script: '''
+                                #!/bin/bash
+                                set -e
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
+                                echo "Running smoke tests..."
+                                echo "  WORKSPACE: ${WORKSPACE}"
+                                echo "  CONFIG_FILE: ${CONFIG_FILE}"
+                                echo "  TARGET_DIR: ${TARGET_DIR}"
 
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Smoke Tests')
+                                # Execute the smoke test stage script
+                                bash scripts/stages/13-smoke-tests.sh
+                            ''',
+                            returnStatus: true
+                        )
 
-                    // Validate that Build stage completed successfully
-                    buildUidHelper.validatePrerequisites('Smoke Tests', ['Build'])
+                        // Save test result and set environment variable
+                        def testMetadata = [
+                            smokeTestsPassed: smokeTestExitCode == 0,
+                            testedAt: currentBuild.startTimeInMillis
+                        ]
+                        writeJSON file: 'test-metadata.json', json: testMetadata
+                        archiveArtifacts artifacts: 'test-metadata.json', fingerprint: true
 
-                    // Retrieve JDK binary and config
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip',
-                        target: '.'
-                    )
+                        // Set environment variable for downstream stages
+                        env.SMOKE_TESTS_PASSED = (smokeTestExitCode == 0).toString()
 
-                    def config = readJSON file: 'pipeline-config.json'
+                        if (smokeTestExitCode != 0) {
+                            currentBuild.result = 'UNSTABLE'
+                            echo "WARNING: Smoke tests failed - marking build as UNSTABLE"
+                        }
 
-                    // Set environment variables for the smoke test script
-                    env.WORKSPACE = "${WORKSPACE}"
-                    env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                    env.TARGET_DIR = "${WORKSPACE}/workspace/target"
-                    env.BUILD_NUMBER = env.BUILD_NUMBER
-
-                    // Execute smoke test script (bash)
-                    def smokeTestExitCode = sh(
-                        script: '''
-                            #!/bin/bash
-                            set -e
-
-                            echo "Running smoke tests..."
-                            echo "  WORKSPACE: ${WORKSPACE}"
-                            echo "  CONFIG_FILE: ${CONFIG_FILE}"
-                            echo "  TARGET_DIR: ${TARGET_DIR}"
-
-                            # Execute the smoke test stage script
-                            bash scripts/stages/13-smoke-tests.sh
-                        ''',
-                        returnStatus: true
-                    )
-
-                    // Save test result
-                    def testMetadata = [
-                        smokeTestsPassed: smokeTestExitCode == 0,
-                        testedAt: currentBuild.startTimeInMillis
-                    ]
-                    writeJSON file: 'test-metadata.json', json: testMetadata
-                    archiveArtifacts artifacts: 'test-metadata.json', fingerprint: true
-
-                    if (smokeTestExitCode != 0) {
-                        currentBuild.result = 'UNSTABLE'
-                        echo "WARNING: Smoke tests failed - marking build as UNSTABLE"
-                    }
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Smoke Tests Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Smoke Tests', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Smoke Tests', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Smoke Tests', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Smoke Tests', 'ABORTED')
+                        finalizeStage('Smoke Tests')
                     }
                 }
             }
@@ -1178,133 +690,34 @@ pipeline {
             }
             steps {
                 script {
-                    echo "=== Running Reproducible Build Comparison ==="
+                    executeStageWithTracking('Reproducible Compare Build') {
+                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Set environment variables for the comparison script
+                        env.WORKSPACE = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.BUILD_NUMBER = env.BUILD_NUMBER
+                        env.SCM_REF = params.SCM_REF
+                        env.RELEASE = params.RELEASE ? 'true' : 'false'
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
+                        // Execute reproducible compare script (handles all output internally)
+                        def comparisonExitCode = sh(
+                            script: 'bash scripts/stages/20-reproducible-compare.sh',
+                            returnStatus: true
+                        )
 
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
+                        // Archive comparison results
+                        archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt,reproducible-compare/reprotest.diff,reproducible-compare/reproducible_evidence.log,reproducible-compare/ReproduciblePercent',
+                                       fingerprint: true,
+                                       allowEmptyArchive: true
 
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('Reproducible Compare Build')
-
-                    // Validate that Build stage completed successfully
-                    buildUidHelper.validatePrerequisites('Reproducible Compare Build', ['Build'])
-
-                    // Retrieve locally built JDK binary and config
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Set environment variables for the comparison script
-                    env.WORKSPACE = "${WORKSPACE}"
-                    env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                    env.TARGET_DIR = "${WORKSPACE}/workspace/target"
-                    env.BUILD_NUMBER = env.BUILD_NUMBER
-                    env.SCM_REF = params.SCM_REF
-                    env.RELEASE = params.RELEASE ? 'true' : 'false'
-
-                    // Execute reproducible compare script
-                    def comparisonExitCode = sh(
-                        script: '''
-                            #!/bin/bash
-                            set -e
-
-                            echo "Running reproducible build comparison..."
-                            echo "  SCM_REF: ${SCM_REF}"
-                            echo "  RELEASE: ${RELEASE}"
-                            echo "  TARGET_DIR: ${TARGET_DIR}"
-
-                            # Execute the comparison stage script
-                            bash scripts/stages/20-reproducible-compare.sh
-                        ''',
-                        returnStatus: true
-                    )
-
-                    // Archive comparison results
-                    // The script creates: reproducible-compare/comparison-report.txt
-                    // repro_compare.sh may also create: reprotest.diff, reproducible_evidence.log, ReproduciblePercent
-                    archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt',
-                                   fingerprint: true,
-                                   allowEmptyArchive: true
-                    archiveArtifacts artifacts: 'reproducible-compare/reprotest.diff',
-                                   fingerprint: true,
-                                   allowEmptyArchive: true
-                    archiveArtifacts artifacts: 'reproducible-compare/reproducible_evidence.log',
-                                   fingerprint: true,
-                                   allowEmptyArchive: true
-                    archiveArtifacts artifacts: 'reproducible-compare/ReproduciblePercent',
-                                   fingerprint: true,
-                                   allowEmptyArchive: true
-
-                    echo "Comparison exit code: ${comparisonExitCode}"
-
-                    // Check results
-                    if (comparisonExitCode != 0) {
-                        currentBuild.result = 'UNSTABLE'
-                        echo "WARNING: Reproducible build comparison FAILED"
-                        echo "  Exit code: ${comparisonExitCode}"
-
-                        // Show comparison report if available
-                        if (fileExists('reproducible-compare/comparison-report.txt')) {
-                            def reportContent = readFile('reproducible-compare/comparison-report.txt')
-                            echo "Comparison report:"
-                            echo reportContent
+                        // Set build result if comparison failed
+                        if (comparisonExitCode != 0) {
+                            currentBuild.result = 'UNSTABLE'
                         }
 
-                        // Show reprotest.diff if available
-                        if (fileExists('reproducible-compare/reprotest.diff')) {
-                            def diffContent = readFile('reproducible-compare/reprotest.diff')
-                            echo "Differences found (reprotest.diff):"
-                            echo diffContent
-                        }
-                    } else {
-                        echo "SUCCESS: Build is 100% reproducible (exit code 0)"
-
-                        // Show reproducibility percentage if available
-                        if (fileExists('reproducible-compare/ReproduciblePercent')) {
-                            def reproduciblePercent = readFile('reproducible-compare/ReproduciblePercent').trim()
-                            echo "Reproducibility: ${reproduciblePercent}%"
-                        }
-                    }
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== Reproducible Build Comparison Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('Reproducible Compare Build', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('Reproducible Compare Build', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('Reproducible Compare Build', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('Reproducible Compare Build', 'ABORTED')
+                        finalizeStage('Reproducible Compare Build') 
                     }
                 }
             }
@@ -1316,89 +729,20 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableTests
-                    }
-                    expression {
-                        // Check if smoke tests passed
-                        try {
-                            copyArtifacts(
-                                projectName: env.JOB_NAME,
-                                selector: specific(env.BUILD_NUMBER),
-                                filter: 'test-metadata.json',
-                                target: '.'
-                            )
-                            def testMeta = readJSON file: 'test-metadata.json'
-                            return testMeta.smokeTestsPassed
-                        } catch (Exception e) {
-                            return false
-                        }
-                    }
+                    expression { env.CONFIG_ENABLE_TESTS == 'true' }
+                    expression { env.SMOKE_TESTS_PASSED == 'true' }
                 }
             }
             steps {
                 script {
-                    echo "=== Running AQA Tests ==="
+                    executeStageWithTracking('AQA Tests') {
+                        def config = initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute AQA test script
+                        def aqaTestScript = load 'scripts/stages/14-aqa-tests.groovy'
+                        aqaTestScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('AQA Tests')
-
-                    // Validate that Smoke Tests stage completed successfully
-                    buildUidHelper.validatePrerequisites('AQA Tests', ['Smoke Tests'])
-
-
-                    // Retrieve JDK binary
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute AQA test script
-                    def aqaTestScript = load 'scripts/stages/14-aqa-tests.groovy'
-                    aqaTestScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== AQA Tests Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('AQA Tests', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('AQA Tests', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('AQA Tests', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('AQA Tests', 'ABORTED')
+                        finalizeStage('AQA Tests')
                     }
                 }
             }
@@ -1410,102 +754,28 @@ pipeline {
             }
             when {
                 allOf {
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.buildConfig.VARIANT == 'temurin'
-                    }
-                    expression {
-                        def config = readJSON file: 'pipeline-config.json'
-                        return config.parameters.enableTCK
-                    }
-                    expression {
-                        // Check if smoke tests passed
-                        try {
-                            def testMeta = readJSON file: 'test-metadata.json'
-                            return testMeta.smokeTestsPassed
-                        } catch (Exception e) {
-                            return false
-                        }
-                    }
+                    expression { env.CONFIG_VARIANT == 'temurin' }
+                    expression { env.CONFIG_ENABLE_TCK == 'true' }
+                    expression { env.SMOKE_TESTS_PASSED == 'true' }
                     not {
                         allOf {
-                            expression {
-                                def config = readJSON file: 'pipeline-config.json'
-                                return config.buildConfig.JAVA_TO_BUILD == 'jdk8u'
-                            }
-                            expression {
-                                def config = readJSON file: 'pipeline-config.json'
-                                return config.buildConfig.ARCHITECTURE == 's390x'
-                            }
-                            expression {
-                                def config = readJSON file: 'pipeline-config.json'
-                                return config.buildConfig.TARGET_OS == 'linux'
-                            }
+                            expression { env.CONFIG_JAVA_TO_BUILD == 'jdk8u' }
+                            expression { env.CONFIG_ARCHITECTURE == 's390x' }
+                            expression { env.CONFIG_TARGET_OS == 'linux' }
                         }
                     }
                 }
             }
             steps {
                 script {
-                    echo "=== Running TCK Tests ==="
+                    executeStageWithTracking('TCK Tests') {
+                        def config = initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                    // Pre-cleanup: Always clean workspace for restartability
-                    cleanWs()
+                        // Execute TCK test script
+                        def tckTestScript = load 'scripts/stages/15-tck-tests.groovy'
+                        tckTestScript(config)
 
-                    // Checkout ci-adoptium-pipelines repository
-                    checkout scm
-
-                    // Ensure helper is loaded (handles restart from stage)
-                    ensureBuildUidHelperLoaded()
-
-                    // Initialize BUILD_UID and build context
-                    buildUidHelper.initializeBuildContext('TCK Tests')
-
-                    // Validate that Smoke Tests stage completed successfully
-                    buildUidHelper.validatePrerequisites('TCK Tests', ['Smoke Tests'])
-
-                    // Retrieve JDK binary
-                    copyArtifacts(
-                        projectName: env.JOB_NAME,
-                        selector: specific(env.BUILD_NUMBER),
-                        filter: 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*',
-                        target: '.'
-                    )
-
-                    def config = readJSON file: 'pipeline-config.json'
-
-                    // Execute TCK test script
-                    def tckTestScript = load 'scripts/stages/15-tck-tests.groovy'
-                    tckTestScript(config)
-
-                    // Post-cleanup: Clean workspace if requested
-                    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                        cleanWs()
-                    }
-
-                    echo "=== TCK Tests Complete ==="
-                    echo "BUILD_UID: ${env.BUILD_UID}"
-                }
-            }
-            post {
-                success {
-                    script {
-                        buildUidHelper.recordStageResult('TCK Tests', 'SUCCESS')
-                    }
-                }
-                unstable {
-                    script {
-                        buildUidHelper.recordStageResult('TCK Tests', 'UNSTABLE')
-                    }
-                }
-                failure {
-                    script {
-                        buildUidHelper.recordStageResult('TCK Tests', 'FAILURE')
-                    }
-                }
-                aborted {
-                    script {
-                        buildUidHelper.recordStageResult('TCK Tests', 'ABORTED')
+                        finalizeStage('TCK Tests')
                     }
                 }
             }
