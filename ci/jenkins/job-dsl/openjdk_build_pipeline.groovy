@@ -127,6 +127,51 @@ pipelineJob(jobName) {
         booleanParam('RUN_REPRODUCIBLE_COMPARE',
             defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
             'Run reproducible build comparison')
+        
+        // Additional build parameters
+        booleanParam('RELEASE',
+            false,
+            'Is this a release build?')
+        
+        booleanParam('WEEKLY',
+            false,
+            'Is this a weekly build?')
+        
+        booleanParam('ENABLE_TESTS',
+            defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
+            'Run AQA tests after build')
+        
+        booleanParam('ENABLE_INSTALLERS',
+            true,
+            'Build installers')
+        
+        booleanParam('ENABLE_SIGNER',
+            defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
+            'Sign artifacts')
+        
+        booleanParam('ENABLE_TCK',
+            false,
+            'Run TCK tests (Temurin only, release/weekly builds)')
+        
+        booleanParam('EA_BETA_BUILD',
+            false,
+            'Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
+        
+        booleanParam('REPRODUCIBLE_COMPARE_BUILD',
+            defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
+            'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)')
+        
+        stringParam('SCM_REF',
+            '',
+            'Override OpenJDK source branch/tag (required for REPRODUCIBLE_COMPARE_BUILD)')
+        
+        stringParam('BUILD_REF',
+            '',
+            'Override temurin-build branch/tag')
+        
+        stringParam('HELPER_REF',
+            '',
+            'Override jenkins-helper branch/tag')
     }
 
     definition {
@@ -162,6 +207,15 @@ pipelineJob(jobName) {
             }
         }
         disableResume()
+        pipelineTriggers([])
+        disableConcurrentBuilds()
+    }
+    
+    // Configure additional options via configure block
+    configure { project ->
+        // Add timeout configuration
+        def timeout = jenkinsConfig.pipelineTimeoutHours ?: 24
+        project / 'properties' / 'org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty' / 'triggers'
     }
 }
 

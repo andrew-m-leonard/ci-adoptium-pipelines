@@ -212,108 +212,13 @@ def generatePipelineConfig() {
 pipeline {
     agent none
 
-    parameters {
-        choice(
-            name: 'JDK_VERSION',
-            choices: ['jdk21u', 'jdk17u', 'jdk11u', 'jdk8u', 'jdk22u', 'jdk23u', 'jdk'],
-            description: 'JDK version to build'
-        )
-        choice(
-            name: 'VARIANT',
-            choices: ['temurin', 'openj9', 'hotspot'],
-            description: 'Build variant'
-        )
-        choice(
-            name: 'TARGET_OS',
-            choices: ['mac', 'linux', 'windows', 'aix'],
-            description: 'Target operating system'
-        )
-        choice(
-            name: 'ARCHITECTURE',
-            choices: ['aarch64', 'x64', 'x32', 'ppc64', 's390x'],
-            description: 'Target architecture'
-        )
-        booleanParam(
-            name: 'RELEASE',
-            defaultValue: false,
-            description: 'Is this a release build?'
-        )
-        booleanParam(
-            name: 'WEEKLY',
-            defaultValue: false,
-            description: 'Is this a weekly build?'
-        )
-        booleanParam(
-            name: 'ENABLE_TESTS',
-            defaultValue: true,
-            description: 'Run AQA tests after build'
-        )
-        booleanParam(
-            name: 'ENABLE_INSTALLERS',
-            defaultValue: true,
-            description: 'Build installers'
-        )
-        booleanParam(
-            name: 'ENABLE_SIGNER',
-            defaultValue: true,
-            description: 'Sign artifacts'
-        )
-        booleanParam(
-            name: 'ENABLE_TCK',
-            defaultValue: false,
-            description: 'Run TCK tests (Temurin only, release/weekly builds)'
-        )
-        booleanParam(
-            name: 'CLEAN_WORKSPACE_AFTER_STAGE',
-            defaultValue: true,
-            description: 'Clean workspace after each stage (recommended for disk space management)'
-        )
-        booleanParam(
-            name: 'EA_BETA_BUILD',
-            defaultValue: false,
-            description: 'Enable EA/Beta build (adds --with-version-opt=ea to configure args)'
-        )
-        booleanParam(
-            name: 'REPRODUCIBLE_COMPARE_BUILD',
-            defaultValue: false,
-            description: 'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)'
-        )
-        string(
-            name: 'SCM_REF',
-            defaultValue: '',
-            description: 'Override OpenJDK source branch/tag (required for REPRODUCIBLE_COMPARE_BUILD)'
-        )
-        string(
-            name: 'CONFIG_REPO_URL',
-            defaultValue: 'https://github.com/adoptium/ci-temurin-config.git',
-            description: 'Git repository URL containing pipeline configurations (JSON files)'
-        )
-        string(
-            name: 'CONFIG_REPO_BRANCH',
-            defaultValue: 'main',
-            description: 'Branch/tag to checkout from configuration repository'
-        )
-        string(
-            name: 'BUILD_REF',
-            defaultValue: '',
-            description: 'Override temurin-build branch/tag'
-        )
-        string(
-            name: 'HELPER_REF',
-            defaultValue: '',
-            description: 'Override jenkins-helper branch/tag'
-        )
-    }
+    // NOTE: Parameters and options are defined by the Job DSL script (openjdk_build_pipeline.groovy), not here.
+    // Defining them in the Jenkinsfile would override the Job DSL's settings on every pipeline run.
+    // All configuration comes from jenkins_job_config.json via the Job DSL.
 
     options {
         timestamps()
-        timeout(time: 24, unit: 'HOURS')
-        buildDiscarder(logRotator(
-            numToKeepStr: '20',
-            artifactNumToKeepStr: '5',
-            daysToKeepStr: '30'
-        ))
-        disableConcurrentBuilds()
+        // NOTE: timeout, buildDiscarder, and disableConcurrentBuilds are set by Job DSL
     }
 
     stages {
