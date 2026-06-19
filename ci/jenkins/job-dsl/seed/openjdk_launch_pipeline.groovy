@@ -29,6 +29,12 @@ if (!jenkinsConfig) {
     throw new IllegalStateException("jenkinsConfig not found in binding - ensure load_config.groovy runs first")
 }
 
+// Ensure the openjdk-launch-pipelines folder exists
+folder('openjdk-launch-pipelines') {
+    displayName('OpenJDK Launch Pipelines')
+    description('Launch orchestrator jobs that coordinate builds across multiple platforms')
+}
+
 // Create launch jobs for all active JDK versions
 println "\nCreating launch orchestrator jobs for active JDK versions:"
 jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
