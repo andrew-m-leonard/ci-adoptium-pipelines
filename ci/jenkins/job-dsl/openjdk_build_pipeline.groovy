@@ -207,15 +207,7 @@ pipelineJob(jobName) {
             }
         }
         disableResume()
-        pipelineTriggers([])
         disableConcurrentBuilds()
-    }
-    
-    // Configure additional options via configure block
-    configure { project ->
-        // Add timeout configuration
-        def timeout = jenkinsConfig.pipelineTimeoutHours ?: 24
-        project / 'properties' / 'org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty' / 'triggers'
     }
 }
 
