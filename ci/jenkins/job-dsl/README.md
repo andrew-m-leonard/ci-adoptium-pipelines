@@ -30,7 +30,6 @@ The seed job uses a **consolidated script** that contains all logic in a single 
 
 **Legacy Scripts (kept for reference):**
 - `load_config.groovy` - Original config loader (functionality now in consolidated script)
-- `openjdk_launch_pipeline.groovy` - Original launch job creator (functionality now in consolidated script)
 - `seed_job.groovy` - Original seed job (functionality now in consolidated script)
 
 **Seed Job Configuration:**

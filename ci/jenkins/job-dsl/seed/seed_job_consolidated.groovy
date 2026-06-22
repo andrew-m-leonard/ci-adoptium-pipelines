@@ -134,6 +134,25 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     
     println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
     
+    // Load platform configuration to get available platforms
+    def platforms = []
+    try {
+        def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
+        def pipelineConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
+        
+        println "    Loading platforms from ${pipelineConfigUrl}"
+        def pipelineConfigText = new URL(pipelineConfigUrl).text
+        def pipelineConfig = new groovy.json.JsonSlurper().parseText(pipelineConfigText)
+        
+        platforms = pipelineConfig.buildConfigurations.keySet() as List
+        platforms.sort()  // Sort alphabetically
+        println "    Available platforms: ${platforms.join(', ')}"
+    } catch (Exception e) {
+        println "    WARNING: Could not load platform configuration: ${e.message}"
+        println "    Using 'all' as default platform choice"
+        platforms = ['all']
+    }
+    
     def jobName = "openjdk-launch-pipelines/${version}-launch-build-pipelines"
     
     pipelineJob(jobName) {
@@ -182,9 +201,9 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             booleanParam('REGENERATE_JOBS', false,
                 'Force regeneration of platform-specific build jobs (use after config changes)')
             
-            // Platform selection (will be populated dynamically from config)
-            stringParam('PLATFORMS', 'all',
-                'Comma-separated list of platforms to build, or "all" for all available platforms')
+            // Platform selection - dynamically populated from config with 'all' at the top
+            choiceParam('PLATFORMS', ['all'] + platforms,
+                'Select platform to build, or "all" for all available platforms')
             
             // Build configuration parameters (passed to platform jobs)
             stringParam('VARIANT', defaultBuildVariant,
@@ -234,10 +253,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             buildDiscarder {
                 strategy {
                     logRotator {
-                        daysToKeepStr('30')
-                        numToKeepStr('50')
-                        artifactDaysToKeepStr('7')
-                        artifactNumToKeepStr('10')
+                        daysToKeepStr(jenkinsConfig.jobConfiguration.logRotation.daysToKeep.toString())
+                        numToKeepStr(jenkinsConfig.jobConfiguration.logRotation.numToKeep.toString())
+                        artifactDaysToKeepStr(jenkinsConfig.jobConfiguration.logRotation.artifactDaysToKeep.toString())
+                        artifactNumToKeepStr(jenkinsConfig.jobConfiguration.logRotation.artifactNumToKeep.toString())
                     }
                 }
             }

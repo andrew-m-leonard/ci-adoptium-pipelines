@@ -107,9 +107,8 @@ Launch jobs still use:
 
 2. **ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy**
    - Renamed `BUILD_VARIANT` to `VARIANT`
-
-3. **ci/jenkins/job-dsl/seed/openjdk_launch_pipeline.groovy**
-   - Renamed `BUILD_VARIANT` to `VARIANT`
+   - Added platform loading logic
+   - Changed `PLATFORMS` parameter from string to choice dropdown
 
 ### ci-temurin-config Repository
 
@@ -120,6 +119,14 @@ Launch jobs still use:
 
 5. **tools/convert-legacy-configs-to-new-architecture.py**
    - Updated to generate `VARIANT` instead of `BUILD_VARIANT` in jenkins_job_config.json
+
+### UI Improvements
+
+6. **Launch Job PLATFORMS Parameter**
+   - Changed from string input to choice dropdown
+   - Dynamically populated with all available platforms for that JDK version
+   - "all" option appears at the top of the list
+   - Platforms are sorted alphabetically for easy selection
 
 ## Jenkinsfile Usage
 
