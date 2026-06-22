@@ -129,8 +129,9 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     def configFile = "${jenkinsConfig.configFilePrefix ?: 'configurations/'}${version}${jenkinsConfig.configFileSuffix ?: '_pipeline_config.json'}"
     
     // Determine if LTS based on version number
+    // LTS versions: 8, 11, then every 4 versions from 17 onwards (17, 21, 25, 29, 33, ...)
     def versionNum = version.replaceAll(/[^\d]/, '').toInteger()
-    def isLts = (versionNum == 8 || versionNum == 11 || versionNum == 17 || versionNum == 21)
+    def isLts = (versionNum == 8 || versionNum == 11 || (versionNum >= 17 && (versionNum - 17) % 4 == 0))
     
     println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
     
