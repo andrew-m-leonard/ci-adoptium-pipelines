@@ -277,7 +277,7 @@ def repoBranch = '*/main'
 def repoCredentialsId = '' // Leave empty for public repos
 
 freeStyleJob('seed-job') {
-    displayName('Seed Job - Job Generator')
+    displayName('New OpenJDK Build CI - Seed Job - Job Generator')
     description('''
         This job generates all other Jenkins jobs from Job DSL scripts.
         Run this job to create or update all pipeline jobs.
