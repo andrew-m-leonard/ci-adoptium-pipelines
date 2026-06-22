@@ -137,7 +137,6 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     // Load platform configuration to get available platforms
     def platforms = []
     try {
-        def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
         def pipelineConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
         
         println "    Loading platforms from ${pipelineConfigUrl}"
