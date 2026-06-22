@@ -266,6 +266,9 @@ pipeline {
                         
                         // Set build description with meaningful information
                         def description = "${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
+                        if (params.SCM_REF) {
+                            description += " @ ${params.SCM_REF}"
+                        }
                         if (params.RELEASE) {
                             description += " [RELEASE]"
                         } else if (params.WEEKLY) {
