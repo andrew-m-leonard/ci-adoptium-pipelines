@@ -49,7 +49,7 @@ main() {
     local variant=$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")
     local build_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.BUILD_ARGS" "")
     local configure_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.CONFIGURE_ARGS" "")
-    local scm_ref=$(get_config_value "${CONFIG_FILE}" ".refs.scmRef" "master")
+    local scm_ref=$(get_config_value "${CONFIG_FILE}" ".refs.scmRef" "")
     local build_ref=$(get_config_value "${CONFIG_FILE}" ".refs.buildRef" "master")
     local build_repo_url=$(get_config_value "${CONFIG_FILE}" ".refs.buildRepoUrl" "https://github.com/adoptium/temurin-build.git")
     local clean_workspace=$(get_config_bool "${CONFIG_FILE}" ".parameters.cleanWorkspace" "false")
