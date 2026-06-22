@@ -149,6 +149,7 @@ pipeline {
                     
                     def platforms = env.SELECTED_PLATFORMS.split(',')
                     def buildJobs = [:]
+                    def buildResults = [:]
                     
                     platforms.each { platform ->
                         def jobName = "/openjdk-builds/jdk${env.JDK_VERSION}/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
@@ -157,29 +158,26 @@ pipeline {
                             stage("Build ${platform}") {
                                 echo "Launching build for ${platform}..."
                                 
-                                try {
-                                    build(
-                                        job: jobName,
-                                        parameters: [
-                                            string(name: 'JDK_VERSION', value: env.JDK_VERSION),
-                                            string(name: 'PLATFORM', value: platform),
-                                            string(name: 'BUILD_VARIANT', value: params.BUILD_VARIANT),
-                                            string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
-                                            string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
-                                            booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE),
-                                            booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
-                                            booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
-                                            booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
-                                            booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
-                                        ],
-                                        wait: true,
-                                        propagate: false
-                                    )
-                                    echo "✓ ${platform} build completed"
-                                } catch (Exception e) {
-                                    echo "✗ ${platform} build failed: ${e.message}"
-                                    throw e
-                                }
+                                def buildResult = build(
+                                    job: jobName,
+                                    parameters: [
+                                        string(name: 'JDK_VERSION', value: env.JDK_VERSION),
+                                        string(name: 'PLATFORM', value: platform),
+                                        string(name: 'BUILD_VARIANT', value: params.BUILD_VARIANT),
+                                        string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
+                                        string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
+                                        booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE),
+                                        booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
+                                        booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
+                                        booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
+                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
+                                    ],
+                                    wait: true,
+                                    propagate: false  // Don't fail immediately, collect all results first
+                                )
+                                
+                                buildResults[platform] = buildResult.result
+                                echo "✓ ${platform} build completed with result: ${buildResult.result}"
                             }
                         }
                     }
@@ -187,7 +185,14 @@ pipeline {
                     // Execute all platform builds in parallel
                     parallel buildJobs
                     
-                    echo "✓ All platform builds completed"
+                    // Check if any builds failed
+                    def failedBuilds = buildResults.findAll { platform, result -> result != 'SUCCESS' }
+                    if (failedBuilds) {
+                        def failedPlatforms = failedBuilds.keySet().join(', ')
+                        error("Platform builds failed: ${failedPlatforms}")
+                    }
+                    
+                    echo "✓ All platform builds completed successfully"
                 }
             }
         }
