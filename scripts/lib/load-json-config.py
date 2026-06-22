@@ -120,6 +120,7 @@ def load_configuration(args):
         json_config = json.load(f)
 
     build_configurations = json_config.get('buildConfigurations', {})
+    openjdk_version = json_config.get('openjdkVersion', jdk_version)
 
     # Construct platform key
     platform_key = get_platform_key(architecture, target_os)
@@ -151,7 +152,7 @@ def load_configuration(args):
     # Create pipeline-config.json (new format only)
     pipeline_config = {
         'buildConfig': {
-            'JAVA_TO_BUILD': jdk_version,
+            'JAVA_TO_BUILD': openjdk_version,
             'TARGET_OS': target_os,
             'ARCHITECTURE': architecture,
             'VARIANT': variant,
