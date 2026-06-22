@@ -107,6 +107,7 @@ println "✓ Configuration loaded successfully\n"
 def defaultBuildVariant = jenkinsConfig.defaultVariant ?: 'temurin'
 def defaultBuildArgs = jenkinsConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
 def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
+def defaultParams = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
 def pipelineRepoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
 def pipelineRepoBranch = 'main'
 def pipelineRepoCredentialsId = '' // Leave empty for public repos
@@ -212,19 +213,28 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments')
             
-            booleanParam('CLEAN_WORKSPACE_AFTER_STAGE', true,
+            booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
+                defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
                 'Clean workspace after each stage completes')
             
-            booleanParam('RUN_TESTS', false,
+            booleanParam('RUN_TESTS',
+                defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : false,
                 'Run test stages (smoke tests, AQA, TCK)')
             
-            booleanParam('SIGN_ARTIFACTS', false,
+            booleanParam('ENABLE_INSTALLERS',
+                defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
+                'Build installers')
+            
+            booleanParam('SIGN_ARTIFACTS',
+                defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
                 'Sign artifacts and installers')
             
-            booleanParam('PUBLISH_ARTIFACTS', false,
+            booleanParam('PUBLISH_ARTIFACTS',
+                defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
                 'Publish artifacts to release repository')
             
-            booleanParam('RUN_REPRODUCIBLE_COMPARE', false,
+            booleanParam('RUN_REPRODUCIBLE_COMPARE',
+                defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
                 'Run reproducible build comparison')
         }
 
