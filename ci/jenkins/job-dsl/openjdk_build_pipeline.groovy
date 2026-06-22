@@ -271,9 +271,17 @@ pipelineJob(jobName) {
                 }
             }
         }
-        copyArtifactPermission('*')
         disableResume()
         disableConcurrentBuilds()
+    }
+    
+    // Configure copyArtifact permission using configure block
+    configure { project ->
+        project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
+            projectNameList {
+                string('*')
+            }
+        }
     }
 }
 
