@@ -276,7 +276,7 @@ def repoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
 def repoBranch = '*/main'
 def repoCredentialsId = '' // Leave empty for public repos
 
-freeStyleJob('seed-job') {
+freeStyleJob('openjdk-build-seed-job') {
     displayName('New OpenJDK Build CI - Seed Job - Job Generator')
     description('''
         This job generates all other Jenkins jobs from Job DSL scripts.
