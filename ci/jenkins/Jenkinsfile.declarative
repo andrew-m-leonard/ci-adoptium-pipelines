@@ -140,10 +140,17 @@ def summarizePipelineConfig(config) {
 // Returns the generated config object
 def generatePipelineConfig(String configDir = './configurations') {
     
+    // Read the pipeline config file to get the openjdkVersion
+    def configFile = "${configDir}/jdk${params.JDK_VERSION}_pipeline_config.json"
+    def pipelineConfig = readJSON file: configFile
+    def openjdkVersion = pipelineConfig.openjdkVersion ?: "jdk${params.JDK_VERSION}"
+    
+    echo "Using openjdkVersion: ${openjdkVersion} (from ${configFile})"
+    
     // Build Python command arguments
-    // Prepend "jdk" to version number for config file lookup
+    // Use openjdkVersion from config file instead of just prepending "jdk"
     def pythonArgs = [
-        "--jdk-version jdk${params.JDK_VERSION}",
+        "--jdk-version ${openjdkVersion}",
         "--variant ${params.VARIANT}",
         "--target-os ${params.TARGET_OS}",
         "--architecture ${params.ARCHITECTURE}",
