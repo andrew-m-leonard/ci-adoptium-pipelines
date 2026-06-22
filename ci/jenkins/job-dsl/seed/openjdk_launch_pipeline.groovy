@@ -80,7 +80,7 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Comma-separated list of platforms to build, or "all" for all available platforms')
             
             // Build configuration parameters (passed to platform jobs)
-            stringParam('BUILD_VARIANT', jenkinsConfig.jobConfiguration.defaultParameters.BUILD_VARIANT,
+            stringParam('VARIANT', jenkinsConfig.jobConfiguration.defaultParameters.VARIANT,
                 'Build variant (temurin, dragonwell, etc.)')
             
             booleanParam('CLEAN_WORKSPACE_AFTER_STAGE', 

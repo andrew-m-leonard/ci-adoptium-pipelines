@@ -187,7 +187,7 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Comma-separated list of platforms to build, or "all" for all available platforms')
             
             // Build configuration parameters (passed to platform jobs)
-            stringParam('BUILD_VARIANT', defaultBuildVariant,
+            stringParam('VARIANT', defaultBuildVariant,
                 'Build variant (temurin, dragonwell, etc.)')
             
             stringParam('BUILD_ARGS', defaultBuildArgs,

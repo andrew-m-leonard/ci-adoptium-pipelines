@@ -2,16 +2,22 @@
  * Job DSL Script for Platform-Specific OpenJDK Build Pipeline Jobs
  *
  * This script creates platform-specific pipeline jobs for building OpenJDK.
- * It is called by the launch job with specific JDK_VERSION and PLATFORM parameters.
+ * It is called by the launch job with JDK_VERSION and PLATFORM parameters,
+ * then loads the platform configuration to extract TARGET_OS, ARCHITECTURE, and VARIANT.
  *
  * Called by: Launch job (Jenkinsfile.launch)
  * Creates: jdk${version}-${platform}-build-pipeline jobs
  *
  * Required Parameters (from launch job):
  *   - JDK_VERSION: The JDK version (e.g., "21")
- *   - PLATFORM: The platform (e.g., "linux-x64")
+ *   - PLATFORM: The platform key (e.g., "x64Linux", "aarch64Mac")
  *   - CONFIG_REPO_URL: Configuration repository URL
  *   - CONFIG_REPO_BRANCH: Configuration repository branch
+ *
+ * The script loads jdk${version}_pipeline_config.json and extracts from the platform configuration:
+ *   - TARGET_OS: Operating system (e.g., "linux", "mac")
+ *   - ARCHITECTURE: CPU architecture (e.g., "x64", "aarch64")
+ *   - VARIANT: Build variant (e.g., "temurin", "dragonwell")
  */
 
 import groovy.json.JsonSlurper
@@ -65,6 +71,58 @@ Ensure jenkins_job_config.json exists and is accessible.
 // Extract default parameters with safe navigation
 def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
 
+// Fetch platform-specific configuration to get os, arch, and variant
+def platformConfig
+def architecture
+def targetOs
+def variant
+try {
+    def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
+    def pipelineConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/configurations/jdk${jdkVersion}_pipeline_config.json"
+    
+    println "Loading platform configuration from ${pipelineConfigUrl}"
+    def pipelineConfigText = new URL(pipelineConfigUrl).text
+    def pipelineConfig = new JsonSlurper().parseText(pipelineConfigText)
+    
+    // Get platform-specific configuration
+    platformConfig = pipelineConfig.buildConfigurations[platform]
+    if (!platformConfig) {
+        throw new IllegalArgumentException("Platform '${platform}' not found in configuration for JDK ${jdkVersion}")
+    }
+    
+    // Extract os and arch from platform configuration
+    architecture = platformConfig.arch
+    targetOs = platformConfig.os
+    
+    if (!architecture || !targetOs) {
+        throw new IllegalArgumentException("Platform '${platform}' configuration missing 'arch' or 'os' fields")
+    }
+    
+    // Extract variant (default to 'temurin' if not specified)
+    variant = platformConfig.variant ?: jenkinsConfig?.defaultVariant ?: 'temurin'
+    
+    println "✓ Platform configuration loaded:"
+    println "  Platform: ${platform}"
+    println "  Architecture: ${architecture}"
+    println "  OS: ${targetOs}"
+    println "  Variant: ${variant}"
+} catch (Exception e) {
+    def errorMsg = """
+ERROR: Failed to load platform configuration!
+
+Configuration Repository: ${configRepoUrl}
+Branch: ${configRepoBranch}
+JDK Version: ${jdkVersion}
+Platform: ${platform}
+Error: ${e.message}
+
+Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration for platform '${platform}'.
+""".stripIndent()
+    
+    println errorMsg
+    throw new RuntimeException(errorMsg)
+}
+
 // Ensure the openjdk-builds folder and JDK version subfolder exist
 // Use absolute paths (starting with /) to ensure folders are created at root level
 folder('/openjdk-builds') {
@@ -99,9 +157,10 @@ pipelineJob(jobName) {
     quietPeriod(5)
 
     parameters {
-        // Fixed parameters (set by launch job)
+        // Fixed parameters (set by launch job from platform configuration)
         stringParam('JDK_VERSION', jdkVersion, 'JDK version (fixed)')
-        stringParam('PLATFORM', platform, 'Target platform (fixed)')
+        stringParam('TARGET_OS', targetOs, 'Target operating system (fixed)')
+        stringParam('ARCHITECTURE', architecture, 'Target architecture (fixed)')
         
         // Configuration repository
         stringParam('CONFIG_REPO_URL', configRepoUrl,
@@ -110,8 +169,8 @@ pipelineJob(jobName) {
             'Branch of the configuration repository')
         
         // Build configuration - with safe navigation and fallback defaults
-        stringParam('BUILD_VARIANT',
-            defaultParams?.BUILD_VARIANT ?: jenkinsConfig?.defaultVariant ?: 'temurin',
+        stringParam('VARIANT',
+            variant,
             'Build variant (temurin, dragonwell, etc.)')
         
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',

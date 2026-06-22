@@ -747,8 +747,30 @@ pipeline {
 def getNodeLabel() {
     try {
         def config = readJSON file: 'pipeline-config.json'
-        return config.buildConfig.NODE_LABEL ?: 'worker'
+        
+        // Get os and arch from buildConfig
+        def os = config.buildConfig?.os
+        def arch = config.buildConfig?.arch
+        
+        // If both os and arch are available, combine them with &&
+        if (os && arch) {
+            def label = "${os}&&${arch}"
+            echo "Using node label from config: ${label}"
+            return label
+        }
+        
+        // Fallback to NODE_LABEL if it exists (for backward compatibility)
+        if (config.buildConfig?.NODE_LABEL) {
+            echo "Using NODE_LABEL from config: ${config.buildConfig.NODE_LABEL}"
+            return config.buildConfig.NODE_LABEL
+        }
+        
+        // Final fallback
+        echo "No node label found in config, using default: worker"
+        return 'worker'
     } catch (Exception e) {
+        echo "Error reading node label from config: ${e.message}"
+        echo "Using default node label: worker"
         return 'worker'
     }
 }

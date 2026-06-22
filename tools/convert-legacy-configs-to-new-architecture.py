@@ -115,7 +115,7 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
         },
         "jobConfiguration": {
             "defaultParameters": {
-                "BUILD_VARIANT": "temurin",
+                "VARIANT": "temurin",
                 "CLEAN_WORKSPACE_AFTER_STAGE": True,
                 "RUN_TESTS": True,
                 "SIGN_ARTIFACTS": False,
