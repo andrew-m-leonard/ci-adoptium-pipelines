@@ -131,9 +131,7 @@ def summarizePipelineConfig(config) {
 // Builds Python command arguments and executes load-json-config.py
 // Sets environment variables for use in when{} blocks
 // Returns the generated config object
-def generatePipelineConfig() {
-    // Config directory is always ./configurations after sparse checkout
-    def configDir = './configurations'
+def generatePipelineConfig(String configDir = './configurations') {
     
     // Build Python command arguments
     // Prepend "jdk" to version number for config file lookup
@@ -230,23 +228,26 @@ pipeline {
                     executeStageWithTracking('Initialize') {
                         initializeStage('Initialize', [])
 
-                        // Checkout pipeline configurations from external repository
+                        // Checkout pipeline configurations from external repository into config-repo subdirectory
                         // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
-                        // Sparse checkout will create configurations/ directory with config files
-                        checkout([
-                            $class: 'GitSCM',
-                            branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
-                            userRemoteConfigs: [[
-                                url: params.CONFIG_REPO_URL
-                            ]],
-                            extensions: [
-                                [$class: 'SparseCheckoutPaths',
-                                 sparseCheckoutPaths: [[path: 'configurations/*']]]
-                            ]
-                        ])
+                        // Sparse checkout will create config-repo/configurations/ directory with config files
+                        dir('config-repo') {
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
+                                userRemoteConfigs: [[
+                                    url: params.CONFIG_REPO_URL
+                                ]],
+                                extensions: [
+                                    [$class: 'SparseCheckoutPaths',
+                                     sparseCheckoutPaths: [[path: 'configurations/*']]]
+                                ]
+                            ])
+                        }
 
                         // Generate pipeline configuration from parameters
-                        def config = generatePipelineConfig()
+                        // Pass config-repo/configurations as the config directory
+                        def config = generatePipelineConfig('./config-repo/configurations')
 
                         // Archive configuration
                         archiveArtifacts artifacts: 'pipeline-config.json',
