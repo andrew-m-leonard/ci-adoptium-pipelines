@@ -99,7 +99,7 @@ def load_configuration(args):
     # Optional parameters
     is_release = args.release
     is_weekly = args.weekly
-    scm_ref = args.scm_ref or 'master'
+    scm_ref = args.scm_ref
     build_ref = args.build_ref or 'master'
     build_repo_url = args.build_repo_url or 'https://github.com/adoptium/temurin-build.git'
     enable_tests = args.enable_tests

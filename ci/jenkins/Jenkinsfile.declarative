@@ -140,6 +140,11 @@ def summarizePipelineConfig(config) {
 // Returns the generated config object
 def generatePipelineConfig(String configDir = './configurations') {
     
+    // Validate parameters
+    if (params.RUN_REPRODUCIBLE_COMPARE && (!params.SCM_REF || params.SCM_REF.trim().isEmpty())) {
+        error("RUN_REPRODUCIBLE_COMPARE requires SCM_REF to be specified. Please provide a valid SCM reference (e.g., jdk-21.0.5+11)")
+    }
+    
     // Build Python command arguments
     // Prepend "jdk" to version number for config file lookup
     def pythonArgs = [
