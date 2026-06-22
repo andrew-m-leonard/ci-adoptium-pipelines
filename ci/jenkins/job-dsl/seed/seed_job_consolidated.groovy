@@ -174,6 +174,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         quietPeriod(5)
 
         parameters {
+            // JDK version parameter (fixed for this job)
+            stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
+                "JDK version number (e.g., 21, 17, 11) - Fixed for this job")
+            
             // Configuration repository parameters (propagated from seed job)
             // These values are set when the seed job runs and should not normally be changed
             stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',

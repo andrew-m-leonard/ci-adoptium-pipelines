@@ -26,8 +26,8 @@ pipeline {
         stage('Initialize') {
             steps {
                 script {
-                    // Extract JDK version from job name (e.g., jdk21-launch-build-pipelines -> 21)
-                    env.JDK_VERSION = env.JOB_NAME.replaceAll(/.*jdk(\d+)-launch-build-pipelines.*/, '$1')
+                    // Use JDK_VERSION parameter (set by seed job)
+                    env.JDK_VERSION = params.JDK_VERSION
                     
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Configuration Repository: ${params.CONFIG_REPO_URL}"

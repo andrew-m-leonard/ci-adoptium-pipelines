@@ -132,12 +132,13 @@ def summarizePipelineConfig(config) {
 // Sets environment variables for use in when{} blocks
 // Returns the generated config object
 def generatePipelineConfig() {
-    // Determine config directory path (handles nested structure from sparse checkout)
-    def configDir = fileExists('configurations/configurations') ? './configurations/configurations' : './configurations'
+    // Config directory is always ./configurations after sparse checkout
+    def configDir = './configurations'
     
     // Build Python command arguments
+    // Prepend "jdk" to version number for config file lookup
     def pythonArgs = [
-        "--jdk-version ${params.JDK_VERSION}",
+        "--jdk-version jdk${params.JDK_VERSION}",
         "--variant ${params.VARIANT}",
         "--target-os ${params.TARGET_OS}",
         "--architecture ${params.ARCHITECTURE}",
