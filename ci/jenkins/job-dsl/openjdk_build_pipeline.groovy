@@ -271,6 +271,7 @@ pipelineJob(jobName) {
                 }
             }
         }
+        copyArtifactPermission('*')
         disableResume()
         disableConcurrentBuilds()
     }
