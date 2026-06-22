@@ -158,8 +158,6 @@ def generatePipelineConfig() {
     if (params.BUILD_REF) {
         pythonArgs.add("--build-ref ${params.BUILD_REF}")
     }
-    pythonArgs.add("--config-repo-url ${params.CONFIG_REPO_URL}")
-    pythonArgs.add("--config-repo-branch ${params.CONFIG_REPO_BRANCH}")
     if (params.HELPER_REF) {
         pythonArgs.add("--helper-ref ${params.HELPER_REF}")
     }
