@@ -111,7 +111,7 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
             "url": "https://github.com/adoptium/ci-adoptium-pipelines.git",
             "branch": "main",
             "credentialsId": "",
-            "jenkinsfilePath": "ci/jenkins/Jenkinsfile.restartable"
+            "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative"
         },
         "jobConfiguration": {
             "defaultParameters": {
