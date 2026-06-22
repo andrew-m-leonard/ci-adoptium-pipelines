@@ -207,7 +207,7 @@ pipelineJob(jobName) {
             'Run AQA tests after build')
         
         booleanParam('ENABLE_INSTALLERS',
-            true,
+            defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
             'Build installers')
         
         booleanParam('ENABLE_SIGNER',

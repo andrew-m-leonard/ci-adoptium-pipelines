@@ -118,7 +118,8 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
                 "VARIANT": "temurin",
                 "CLEAN_WORKSPACE_AFTER_STAGE": True,
                 "RUN_TESTS": True,
-                "SIGN_ARTIFACTS": False,
+                "ENABLE_INSTALLERS": True,
+                "SIGN_ARTIFACTS": True,
                 "PUBLISH_ARTIFACTS": False,
                 "RUN_REPRODUCIBLE_COMPARE": False
             },
