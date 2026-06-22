@@ -140,17 +140,10 @@ def summarizePipelineConfig(config) {
 // Returns the generated config object
 def generatePipelineConfig(String configDir = './configurations') {
     
-    // Read the pipeline config file to get the openjdkVersion
-    def configFile = "${configDir}/jdk${params.JDK_VERSION}_pipeline_config.json"
-    def pipelineConfig = readJSON file: configFile
-    def openjdkVersion = pipelineConfig.openjdkVersion ?: "jdk${params.JDK_VERSION}"
-    
-    echo "Using openjdkVersion: ${openjdkVersion} (from ${configFile})"
-    
     // Build Python command arguments
-    // Use openjdkVersion from config file instead of just prepending "jdk"
+    // Prepend "jdk" to version number for config file lookup
     def pythonArgs = [
-        "--jdk-version ${openjdkVersion}",
+        "--jdk-version jdk${params.JDK_VERSION}",
         "--variant ${params.VARIANT}",
         "--target-os ${params.TARGET_OS}",
         "--architecture ${params.ARCHITECTURE}",
@@ -206,7 +199,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_VARIANT = config.buildConfig.VARIANT
     env.CONFIG_TARGET_OS = config.buildConfig.TARGET_OS
     env.CONFIG_ARCHITECTURE = config.buildConfig.ARCHITECTURE
-    env.CONFIG_JAVA_TO_BUILD = config.buildConfig.JAVA_TO_BUILD
+    env.CONFIG_JAVA_TO_BUILD = config.openjdkVersion ?: config.buildConfig.JAVA_TO_BUILD
     env.CONFIG_NODE_LABEL = config.buildConfig.NODE_LABEL ?: 'worker'
     env.CONFIG_BUILD_ARGS = config.buildConfig.BUILD_ARGS ?: ''
     env.CONFIG_ENABLE_TESTS = config.parameters.enableTests.toString()
