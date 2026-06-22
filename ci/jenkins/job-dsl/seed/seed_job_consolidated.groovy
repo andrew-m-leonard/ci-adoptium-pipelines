@@ -329,8 +329,8 @@ freeStyleJob('openjdk-build-seed-job') {
     }
 
     triggers {
-        // Poll SCM every hour to detect changes in Job DSL scripts
-        scm('H * * * *')
+        // Poll SCM every 15 mins to detect changes in Job DSL scripts
+        scm('H/15 * * * *')
     }
 
     steps {
