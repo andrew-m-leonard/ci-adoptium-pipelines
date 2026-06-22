@@ -263,6 +263,17 @@ pipeline {
 
                         // Display configuration summary
                         summarizePipelineConfig(config)
+                        
+                        // Set build description with meaningful information
+                        def description = "${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
+                        if (params.RELEASE) {
+                            description += " [RELEASE]"
+                        } else if (params.WEEKLY) {
+                            description += " [WEEKLY]"
+                        }
+                        description += " | BUILD_UID: ${env.BUILD_UID}"
+                        currentBuild.description = description
+                        echo "Build Description: ${description}"
 
                         finalizeStage('Initialize')
                     }
