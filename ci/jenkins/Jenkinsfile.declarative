@@ -84,14 +84,19 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     
     // Retrieve artifacts if filter specified (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
-        copyArtifacts(
-            projectName: env.JOB_NAME,
-            selector: specific(env.BUILD_NUMBER),
-            filter: artifactFilter,
-            target: '.',
-            optional: false,
-            fingerprintArtifacts: true
-        )
+        try {
+            copyArtifacts(
+                projectName: env.JOB_NAME,
+                selector: specific(env.BUILD_NUMBER),
+                filter: artifactFilter,
+                target: '.',
+                optional: false,
+                fingerprintArtifacts: true
+            )
+            echo "✅ Successfully copied artifacts: ${artifactFilter}"
+        } catch (Exception e) {
+            error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
+        }
     }
     
     // Return config for convenience (empty for Initialize stage)
