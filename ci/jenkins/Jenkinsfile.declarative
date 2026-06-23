@@ -248,16 +248,13 @@ def generatePipelineConfig(String configDir = './configurations') {
     if (params.BUILD_REF) {
         pythonArgs.add("--build-ref ${params.BUILD_REF}")
     }
-    if (params.HELPER_REF) {
-        pythonArgs.add("--helper-ref ${params.HELPER_REF}")
-    }
-    if (!params.ENABLE_TESTS) {
+    if (!params.RUN_TESTS) {
         pythonArgs.add("--no-tests")
     }
     if (!params.ENABLE_INSTALLERS) {
         pythonArgs.add("--no-installers")
     }
-    if (!params.ENABLE_SIGNER) {
+    if (!params.SIGN_ARTIFACTS) {
         pythonArgs.add("--no-signer")
     }
     if (params.EA_BETA_BUILD) {
@@ -286,9 +283,9 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_JAVA_TO_BUILD = config.buildConfig.JAVA_TO_BUILD
     env.CONFIG_NODE_LABEL = config.buildConfig.NODE_LABEL ?: 'worker'
     env.CONFIG_BUILD_ARGS = config.buildConfig.BUILD_ARGS ?: ''
-    env.CONFIG_ENABLE_TESTS = config.parameters.enableTests.toString()
+    env.CONFIG_RUN_TESTS = config.parameters.enableTests.toString()
     env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
-    env.CONFIG_ENABLE_SIGNER = config.parameters.enableSigner.toString()
+    env.CONFIG_SIGN_ARTIFACTS = config.parameters.enableSigner.toString()
     env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
     env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
     
@@ -623,7 +620,7 @@ pipeline {
             }
             when {
                 allOf {
-                    expression { env.CONFIG_ENABLE_TESTS == 'true' }
+                    expression { env.CONFIG_RUN_TESTS == 'true' }
                     expression {
                         currentBuild.result == null || currentBuild.result == 'SUCCESS'
                     }
@@ -726,7 +723,7 @@ pipeline {
             }
             when {
                 allOf {
-                    expression { env.CONFIG_ENABLE_TESTS == 'true' }
+                    expression { env.CONFIG_RUN_TESTS == 'true' }
                     expression { env.SMOKE_TESTS_PASSED == 'true' }
                 }
             }

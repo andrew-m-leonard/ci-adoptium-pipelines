@@ -198,10 +198,6 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 If this is empty, the seed job was not run with proper parameters.
                 Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
             
-            // Pipeline configuration
-            stringParam('PIPELINE_TIMEOUT_HOURS', defaultPipelineTimeoutHours.toString(),
-                "Pipeline timeout in hours (default from config: ${defaultPipelineTimeoutHours})")
-            
             // Job management
             booleanParam('REGENERATE_JOBS', false,
                 'Force regeneration of platform-specific build jobs (use after config changes)')
@@ -214,9 +210,6 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             stringParam('VARIANT', defaultBuildVariant,
                 'Build variant (temurin, dragonwell, etc.)')
 
-            stringParam('BUILD_ARGS', defaultBuildArgs,
-                'Additional build arguments')
-
             // Source control parameters
             stringParam('SCM_REF', '',
                 'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
@@ -228,10 +221,13 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
 
-            booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
-                defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
-                'Clean workspace after each stage completes')
-            
+            booleanParam('EA_BETA_BUILD',
+                false,
+                'Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
+
+            stringParam('BUILD_ARGS', defaultBuildArgs,
+                'Additional build arguments')
+
             booleanParam('RUN_TESTS',
                 defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : false,
                 'Run test stages (smoke tests, AQA, TCK)')

@@ -79,19 +79,15 @@ main() {
 # Find JDK artifact to test
 find_jdk_artifact() {
     # Look for the main JDK image, excluding other image types
-    # JDK image pattern: jdk*-hotspot.tar.gz (not jre, debugimage, testimage, or static-libs)
-    local artifact=$(find "${TARGET_DIR}" -name "*-hotspot.tar.gz" \
-        ! -name "*-jre.tar.gz" \
-        ! -name "*-debugimage.tar.gz" \
-        ! -name "*-testimage.tar.gz" \
-        ! -name "*-static-libs.tar.gz" \
+    # JDK image pattern: *jdk_*.tar.gz or *jdk_*.zip (Windows)
+    local artifact=$(find "${TARGET_DIR}" \( -name "*jdk_*.tar.gz" -o -name "*jdk_*.zip" \) \
         | head -n 1)
 
     if [[ -z "${artifact}" ]]; then
         log_error "No JDK image artifact found in ${TARGET_DIR}"
-        log_error "Looking for pattern: *-hotspot.tar.gz (excluding jre, debugimage, testimage, static-libs)"
+        log_error "Looking for pattern: *jdk_*.tar.gz or *jdk_*.zip"
         log_error "Available artifacts:"
-        find "${TARGET_DIR}" -name "*.tar.gz" -exec basename {} \; || true
+        find "${TARGET_DIR}" \( -name "*.tar.gz" -o -name "*.zip" \) -exec basename {} \; || true
         exit 1
     fi
 
@@ -109,7 +105,15 @@ extract_jdk() {
     rm -rf "${extract_dir}"
     mkdir -p "${extract_dir}"
 
-    tar -xzf "${artifact}" -C "${extract_dir}"
+    # Extract based on file extension
+    if [[ "${artifact}" == *.tar.gz ]]; then
+        tar -xzf "${artifact}" -C "${extract_dir}"
+    elif [[ "${artifact}" == *.zip ]]; then
+        unzip -q "${artifact}" -d "${extract_dir}"
+    else
+        log_error "Unsupported archive format: ${artifact}"
+        exit 1
+    fi
 
     # Find the JDK directory (usually has a version in the name)
     local jdk_dir=$(find "${extract_dir}" -maxdepth 1 -type d ! -path "${extract_dir}" | head -n 1)

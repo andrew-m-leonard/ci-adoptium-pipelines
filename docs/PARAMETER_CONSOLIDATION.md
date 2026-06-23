@@ -102,7 +102,6 @@ Updated hardcoded JSON examples to use the standardized parameter names:
 | `JDK_VERSION` | String | (set by seed) | JDK version number (e.g., 21, 17, 11) |
 | `CONFIG_REPO_URL` | String | (required) | URL of configuration repository |
 | `CONFIG_REPO_BRANCH` | String | (required) | Branch of configuration repository |
-| `PIPELINE_TIMEOUT_HOURS` | String | 8 | Pipeline timeout in hours |
 | `REGENERATE_JOBS` | Boolean | false | Force regeneration of platform jobs |
 | `PLATFORMS` | Choice | all | Platform selection (all or specific) |
 | `VARIANT` | String | temurin | Build variant |
@@ -110,12 +109,12 @@ Updated hardcoded JSON examples to use the standardized parameter names:
 | `SCM_REF` | String | "" | Git reference for JDK source |
 | `BUILD_REF` | String | "" | Git reference for build scripts |
 | `RELEASE_TYPE` | Choice | NIGHTLY | Release type (NIGHTLY/WEEKLY/RELEASE) |
-| `CLEAN_WORKSPACE_AFTER_STAGE` | Boolean | true | Clean workspace after each stage |
 | `RUN_TESTS` | Boolean | false | Run test stages |
 | `ENABLE_INSTALLERS` | Boolean | true | Build installers |
 | `SIGN_ARTIFACTS` | Boolean | false | Sign artifacts and installers |
 | `PUBLISH_ARTIFACTS` | Boolean | false | Publish to release repository |
 | `RUN_REPRODUCIBLE_COMPARE` | Boolean | false | Run reproducible build comparison |
+| `EA_BETA_BUILD` | Boolean | false | Enable EA/Beta build (adds --with-version-opt=ea) |
 
 ### Build Job Parameters
 
@@ -136,8 +135,8 @@ Updated hardcoded JSON examples to use the standardized parameter names:
 | `PUBLISH_ARTIFACTS` | Boolean | false | Publish to release repository |
 | `RUN_REPRODUCIBLE_COMPARE` | Boolean | false | Run reproducible build comparison |
 | `ENABLE_INSTALLERS` | Boolean | true | Build installers |
-| `ENABLE_TCK` | Boolean | false | Run TCK tests |
-| `EA_BETA_BUILD` | Boolean | false | Enable EA/Beta build |
+| `ENABLE_TCK` | Boolean | false | Run TCK tests (Temurin only, release/weekly builds) |
+| `EA_BETA_BUILD` | Boolean | false | Enable EA/Beta build (adds --with-version-opt=ea) |
 
 ## Migration Notes
 

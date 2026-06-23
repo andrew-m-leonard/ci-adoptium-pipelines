@@ -173,10 +173,6 @@ pipelineJob(jobName) {
             variant,
             'Build variant (temurin, dragonwell, etc.)')
         
-        booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
-            defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
-            'Clean workspace after each stage completes')
-        
         booleanParam('RUN_TESTS',
             defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
             'Run test stages (smoke tests, AQA, TCK)')
@@ -227,10 +223,10 @@ pipelineJob(jobName) {
         stringParam('BUILD_REF',
             '',
             'Override temurin-build branch/tag')
-        
-        stringParam('HELPER_REF',
-            '',
-            'Override jenkins-helper branch/tag')
+
+        booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
+            defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
+            'Clean workspace after each stage completes')
     }
 
     definition {

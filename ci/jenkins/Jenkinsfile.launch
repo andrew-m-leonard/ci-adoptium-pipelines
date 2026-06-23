@@ -19,7 +19,6 @@ pipeline {
     
     options {
         timestamps()
-        timeout(time: params.PIPELINE_TIMEOUT_HOURS?.toInteger() ?: 8, unit: 'HOURS')
     }
     
     stages {
@@ -170,12 +169,12 @@ pipeline {
                                         string(name: 'SCM_REF', value: params.SCM_REF ?: ''),
                                         string(name: 'BUILD_REF', value: params.BUILD_REF ?: ''),
                                         string(name: 'RELEASE_TYPE', value: params.RELEASE_TYPE),
-                                        booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE),
                                         booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
                                         booleanParam(name: 'ENABLE_INSTALLERS', value: params.ENABLE_INSTALLERS),
                                         booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
                                         booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
-                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
+                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE),
+                                        booleanParam(name: 'EA_BETA_BUILD', value: params.EA_BETA_BUILD)
                                     ],
                                     wait: true,
                                     propagate: false  // Don't fail immediately, collect all results first

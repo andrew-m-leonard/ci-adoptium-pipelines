@@ -18,7 +18,6 @@
 #   SCM_REF             - Git reference for OpenJDK source (default: from config)
 #   BUILD_REF           - Git reference for temurin-build (default: master)
 #   CI_REF              - Git reference for ci-jenkins-pipelines (default: master)
-#   HELPER_REF          - Git reference for helper scripts (default: master)
 #   RELEASE             - Whether this is a release build (default: false)
 #   WEEKLY              - Whether this is a weekly build (default: false)
 #
@@ -54,7 +53,6 @@ main() {
     export SCM_REF="${SCM_REF:-}"
     export BUILD_REF="${BUILD_REF:-master}"
     export CI_REF="${CI_REF:-master}"
-    export HELPER_REF="${HELPER_REF:-master}"
     export AQA_REF="${AQA_REF:-}"
     export RELEASE="${RELEASE:-false}"
     export WEEKLY="${WEEKLY:-false}"
@@ -219,7 +217,6 @@ generate_build_configuration() {
   "SCM_REF": "${SCM_REF}",
   "BUILD_REF": "${BUILD_REF}",
   "CI_REF": "${CI_REF}",
-  "HELPER_REF": "${HELPER_REF}",
   "AQA_REF": "${AQA_REF}",
   "AQA_AUTO_GEN": true,
   "BUILD_ARGS": "${build_args}",
@@ -280,8 +277,7 @@ EOF
     "SIGN_ARTIFACTS": true,
     "SCM_REF": "${SCM_REF}",
     "CI_REF": "${CI_REF}",
-    "BUILD_REF": "${BUILD_REF}",
-    "HELPER_REF": "${HELPER_REF}"
+    "BUILD_REF": "${BUILD_REF}"
   },
   "parameters": {
     "enableTests": true,
