@@ -77,6 +77,33 @@ def validatePrerequisites(String currentStage, List<String> requiredStages) {
     def stageResults = env.BUILD_STAGE_RESULTS ?
         parseStageResults(env.BUILD_STAGE_RESULTS) : [:]
 
+    // Special case: If BUILD_STAGE_RESULTS is empty and we're not in Initialize stage,
+    // this is likely a Rebuild of a restarted build. Fail with clear user error.
+    if (stageResults.isEmpty() && currentStage != 'Initialize') {
+        def errorMsg = """
+╔════════════════════════════════════════════════════════════════════════════╗
+║                              USER ERROR                                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Cannot validate prerequisites for '${currentStage}' stage.
+
+BUILD_STAGE_RESULTS is empty, which indicates this is a Rebuild of a
+restarted build. When you Rebuild a build that was restarted from a stage,
+Jenkins creates a new build without the stage completion history.
+
+SOLUTION:
+  Instead of using 'Rebuild', use 'Restart from Stage' to continue from
+  where the original build left off. This preserves the stage completion
+  history needed for prerequisite validation.
+
+  OR
+
+  Run a fresh build from the beginning (Initialize stage).
+"""
+        echo errorMsg
+        error(errorMsg)
+    }
+
     def missingStages = []
     def failedStages = []
 
@@ -97,6 +124,7 @@ def validatePrerequisites(String currentStage, List<String> requiredStages) {
         if (!failedStages.isEmpty()) {
             errorMsg += "\n  Failed stages: ${failedStages.join(', ')}"
         }
+        echo errorMsg
         error(errorMsg)
     }
 
