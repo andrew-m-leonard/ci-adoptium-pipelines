@@ -47,6 +47,7 @@ copy_artifacts() {
     else
         log_warn "No artifacts found in ${source} or copy failed"
         return 1
+    fi
 }
 
 # Determine the output filename for the build artifact
@@ -101,6 +102,10 @@ determine_filename() {
         # Example: jdk8u212-b03 -> 8u212b03
         name_tag="${name_tag#jdk}"   # Remove jdk prefix
         name_tag="${name_tag//-b/b}" # Replace -b with b
+        
+        # Remove _adopt suffix if present
+        # Example: 21.0.5_11_adopt -> 21.0.5_11
+        name_tag="${name_tag%_adopt}"
 
         filename="${filename}_${name_tag}"
     else
@@ -118,7 +123,6 @@ determine_filename() {
     log_info "Determined filename: ${filename}"
     echo "${filename}"
     return 0
-    fi
 }
 
 # Verify artifact exists
