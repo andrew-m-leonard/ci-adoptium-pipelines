@@ -44,6 +44,7 @@ def ensureBuildUidHelperLoaded() {
 // This is needed because when restarting from a stage, the Initialize stage is skipped
 // and the build description would not be set
 def ensureBuildDescriptionSet() {
+    echo "BBB"
     // Read config to get build details
     def config = [:]
     if (fileExists('pipeline-config.json')) {
