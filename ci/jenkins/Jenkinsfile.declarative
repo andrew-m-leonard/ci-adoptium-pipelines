@@ -540,13 +540,13 @@ pipeline {
                     executeStageWithTracking('Validate SBOM') {
                         def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,workspace/target/**/*sbom*.json')
 
-                        // Execute SBOM validation script
-                        def validateScript = load 'scripts/stages/12-validate-sbom.groovy'
-                        def result = validateScript(config)
+                        // Set environment variables for the SBOM validation script
+                        env.WORKSPACE = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
 
-                        if (result != 'SUCCESS') {
-                            error("SBOM validation failed")
-                        }
+                        // Execute SBOM validation script (bash)
+                        sh 'bash scripts/stages/12-validate-sbom.sh'
 
                         finalizeStage('Validate SBOM')
                     }

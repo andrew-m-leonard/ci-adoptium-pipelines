@@ -36,7 +36,7 @@ from workspace_manager import WorkspaceManager
 
 class PipelineRunner:
     # Define stage order
-    STAGES = ['initialize', 'build', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
+    STAGES = ['initialize', 'build', 'validate-sbom', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
 
     def __init__(self, args):
         self.args = args
@@ -100,19 +100,23 @@ class PipelineRunner:
             if 'build' in self.stages_to_run and not self.args.skip_build:
                 self.stage_build()
 
-            # Stage 3: Sign (if enabled and applicable)
+            # Stage 3: Validate SBOM (if SBOM generation is enabled)
+            if 'validate-sbom' in self.stages_to_run and not self.args.skip_build:
+                self.stage_validate_sbom()
+
+            # Stage 4: Sign (if enabled and applicable)
             if 'sign' in self.stages_to_run and self.args.enable_signer and not self.args.skip_build:
                 self.stage_sign()
 
-            # Stage 4: Build Installers (if enabled)
+            # Stage 5: Build Installers (if enabled)
             if 'installer' in self.stages_to_run and self.args.enable_installers and not self.args.skip_build:
                 self.stage_installer()
 
-            # Stage 5: Smoke Tests (if enabled)
+            # Stage 6: Smoke Tests (if enabled)
             if 'smoke-tests' in self.stages_to_run and self.args.enable_tests and not self.args.skip_build:
                 self.stage_smoke_tests()
 
-            # Stage 6: Reproducible Compare (if enabled)
+            # Stage 7: Reproducible Compare (if enabled)
             if 'reproducible-compare' in self.stages_to_run and self.args.compare_build and not self.args.skip_build:
                 self.stage_reproducible_compare()
 
@@ -275,6 +279,52 @@ class PipelineRunner:
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Build stage complete")
         print(f"   Artifacts in: {self.artifacts_dir}")
+
+        # Post-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('post')
+    
+    def stage_validate_sbom(self):
+        """Stage 3: Validate SBOM files (if SBOM generation is enabled)"""
+        # Check if SBOM generation is enabled by reading the config
+        try:
+            with open(self.config_file, 'r') as f:
+                config = json.load(f)
+                build_args = config.get('buildConfig', {}).get('BUILD_ARGS', '')
+                
+                if '--create-sbom' not in build_args:
+                    print("\nℹ️  Skipping SBOM validation (--create-sbom not in BUILD_ARGS)")
+                    return
+        except Exception as e:
+            print(f"\n⚠️  Warning: Could not read config file to check SBOM status: {e}")
+            print("   Skipping SBOM validation")
+            return
+
+        print("\n" + "=" * 80)
+        print("STAGE 3: Validate SBOM")
+        print("=" * 80)
+
+        # Pre-stage cleanup
+        self.workspace_mgr.cleanup_stage_workspace('pre')
+
+        env = os.environ.copy()
+        env['WORKSPACE'] = str(self.stage_workspace)
+        env['CONFIG_FILE'] = str(self.config_file)
+        env['TARGET_DIR'] = str(self.artifacts_dir)
+
+        cmd = [str(self.script_dir / 'scripts' / 'stages' / '12-validate-sbom.sh')]
+
+        print(f"Running: {' '.join(cmd)}")
+        print(f"Environment:")
+        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
+        print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+
+        try:
+            subprocess.run(cmd, env=env, check=True)
+            print("\n✅ SBOM validation stage complete")
+        except subprocess.CalledProcessError as e:
+            print(f"\n❌ SBOM validation failed with exit code {e.returncode}")
+            raise
 
         # Post-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('post')
