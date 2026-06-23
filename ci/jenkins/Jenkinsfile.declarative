@@ -348,7 +348,7 @@ pipeline {
                         }
 
                         // Archive build artifacts
-                        archiveArtifacts artifacts: 'workspace/target/**/*',
+                        archiveArtifacts artifacts: "${env.TARGET_DIR.replace(env.WORKSPACE + '/', '')}/**/*",
                                        fingerprint: true,
                                        allowEmptyArchive: false
 
@@ -558,12 +558,12 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Validate SBOM') {
-                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,workspace/target/**/*sbom*.json')
+                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json')
 
                         // Set environment variables for the SBOM validation script
                         env.WORKSPACE = "${WORKSPACE}"
                         env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.TARGET_DIR = "${WORKSPACE}"
 
                         // Execute SBOM validation script (bash)
                         sh 'bash scripts/stages/12-validate-sbom.sh'
@@ -589,12 +589,12 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Smoke Tests') {
-                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip')
+                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
                         // Set environment variables for the smoke test script
                         env.WORKSPACE = "${WORKSPACE}"
                         env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.TARGET_DIR = "${WORKSPACE}"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
 
                         // Execute smoke test script (bash)
@@ -644,12 +644,12 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Reproducible Compare Build') {
-                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip')
+                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
                         // Set environment variables for the comparison script
                         env.WORKSPACE = "${WORKSPACE}"
                         env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.TARGET_DIR = "${WORKSPACE}"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
                         env.SCM_REF = params.SCM_REF
                         env.RELEASE = params.RELEASE ? 'true' : 'false'
@@ -660,7 +660,8 @@ pipeline {
                             returnStatus: true
                         )
 
-                        // Archive comparison results
+                        // Archive comparison results (output directory is fixed by repro_compare.sh)
+                        // Note: This stage outputs to ${WORKSPACE}/reproducible-compare/ regardless of TARGET_DIR
                         archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt,reproducible-compare/reprotest.diff,reproducible-compare/reproducible_evidence.log,reproducible-compare/ReproduciblePercent',
                                        fingerprint: true,
                                        allowEmptyArchive: true
