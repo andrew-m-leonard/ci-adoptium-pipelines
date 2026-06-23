@@ -121,7 +121,6 @@ determine_filename() {
     export FILENAME="${filename}"
     
     log_info "Determined filename: ${filename}"
-    echo "${filename}"
     return 0
 }
 
