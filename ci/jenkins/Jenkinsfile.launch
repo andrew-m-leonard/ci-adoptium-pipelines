@@ -163,11 +163,16 @@ pipeline {
                                     parameters: [
                                         string(name: 'JDK_VERSION', value: env.JDK_VERSION),
                                         string(name: 'PLATFORM', value: platform),
-                                        string(name: 'BUILD_VARIANT', value: params.BUILD_VARIANT),
+                                        string(name: 'VARIANT', value: params.VARIANT),
+                                        string(name: 'BUILD_ARGS', value: params.BUILD_ARGS ?: ''),
                                         string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
                                         string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
+                                        string(name: 'SCM_REF', value: params.SCM_REF ?: ''),
+                                        string(name: 'BUILD_REF', value: params.BUILD_REF ?: ''),
+                                        string(name: 'RELEASE_TYPE', value: params.RELEASE_TYPE),
                                         booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE),
                                         booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
+                                        booleanParam(name: 'ENABLE_INSTALLERS', value: params.ENABLE_INSTALLERS),
                                         booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
                                         booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
                                         booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)

@@ -197,19 +197,17 @@ pipelineJob(jobName) {
         choiceParam('RELEASE_TYPE',
             ['NIGHTLY', 'WEEKLY', 'RELEASE'],
             'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
-        
-        booleanParam('ENABLE_TESTS',
-            defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
-            'Run AQA tests after build')
-        
+
+        stringParam('SCM_REF', '',
+            'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
+
+        stringParam('BUILD_REF', '',
+            'Git reference for the build scripts repository (leave empty for default branch)')
+
         booleanParam('ENABLE_INSTALLERS',
             defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
             'Build installers')
-        
-        booleanParam('ENABLE_SIGNER',
-            defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
-            'Sign artifacts')
-        
+
         booleanParam('ENABLE_TCK',
             false,
             'Run TCK tests (Temurin only, release/weekly builds)')

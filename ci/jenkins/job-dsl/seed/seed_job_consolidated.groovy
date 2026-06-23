@@ -213,10 +213,21 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             // Build configuration parameters (passed to platform jobs)
             stringParam('VARIANT', defaultBuildVariant,
                 'Build variant (temurin, dragonwell, etc.)')
-            
+
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments')
-            
+
+            // Source control parameters
+            stringParam('SCM_REF', '',
+                'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
+
+            stringParam('BUILD_REF', '',
+                'Git reference for the build scripts repository (leave empty for default branch)')
+
+            choiceParam('RELEASE_TYPE',
+                ['NIGHTLY', 'WEEKLY', 'RELEASE'],
+                'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
+
             booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
                 defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
                 'Clean workspace after each stage completes')
