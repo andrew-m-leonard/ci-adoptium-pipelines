@@ -437,7 +437,9 @@ class PipelineRunner:
         env['BUILD_NUMBER'] = self.build_number
         env['TARGET_DIR'] = str(self.artifacts_dir)
         env['SCM_REF'] = self.args.scm_ref
-        env['RELEASE'] = 'true' if self.args.release else 'false'
+        # Set RELEASE based on release_type (true if RELEASE, false otherwise)
+        release_type = (self.args.release_type or 'NIGHTLY').upper()
+        env['RELEASE'] = 'true' if release_type == 'RELEASE' else 'false'
 
         # Optional: BUILD_REPO_URL and BUILD_REF
         if self.args.build_repo_url:

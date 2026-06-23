@@ -161,7 +161,6 @@ pipeline {
                                     job: jobName,
                                     parameters: [
                                         string(name: 'JDK_VERSION', value: env.JDK_VERSION),
-                                        string(name: 'PLATFORM', value: platform),
                                         string(name: 'VARIANT', value: params.VARIANT),
                                         string(name: 'BUILD_ARGS', value: params.BUILD_ARGS ?: ''),
                                         string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
