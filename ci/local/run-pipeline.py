@@ -587,8 +587,7 @@ Examples:
 
     # Required arguments
     parser.add_argument('--jdk-version', required=True,
-                        choices=['jdk8u', 'jdk11u', 'jdk17u', 'jdk21u', 'jdk22u', 'jdk23u', 'jdk'],
-                        help='JDK version to build')
+                        help='JDK version to build (e.g., jdk21, jdk8). Must be in format jdkNN where NN is the version number.')
     parser.add_argument('--variant', required=True,
                         choices=['temurin', 'openj9', 'hotspot'],
                         help='Build variant')
@@ -651,6 +650,11 @@ Examples:
     parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
 
     args = parser.parse_args()
+
+    # Validate jdk-version format (must be jdkNN where NN is a number)
+    import re
+    if not re.match(r'^jdk\d+$', args.jdk_version):
+        parser.error(f"Invalid --jdk-version format: '{args.jdk_version}'. Must be in format jdkNN where NN is the version number (e.g., jdk21, jdk8).")
 
     # Run pipeline
     runner = PipelineRunner(args)

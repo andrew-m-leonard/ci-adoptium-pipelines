@@ -452,52 +452,47 @@ execute_build() {
 extract_build_metadata() {
     log_info "Extracting build metadata"
 
-    local build_repo_dir="${WORKSPACE}/temurin-build"
-    local target_dir="${build_repo_dir}/workspace/target"
-
-    # Look for version information
+    # Get VERSION_STRING from build spec.gmk (most reliable source)
     local version="unknown"
-    local version_file=""
+    local spec_file="${WORKSPACE}/workspace/build/src/build/"*/spec.gmk
 
-    # Try different possible locations for version/release file
-    for possible_file in \
-        "${target_dir}/metadata/version.txt" \
-        "${target_dir}/version.txt" \
-        "${WORKSPACE}/workspace/build/src/build/"*/images/jdk/release; do
-
-        if [[ -f "${possible_file}" ]]; then
-            version_file="${possible_file}"
-            break
-        fi
-    done
-
-    if [[ -n "${version_file}" ]]; then
-        if [[ "${version_file}" == */release ]]; then
-            # Extract version from release file
-            version=$(grep "JAVA_VERSION=" "${version_file}" | cut -d'"' -f2 || echo "unknown")
+    if [[ -f ${spec_file} ]]; then
+        # Extract VERSION_STRING value from spec.gmk
+        version=$(grep "^VERSION_STRING[ ]*:=" ${spec_file} | sed "s/^VERSION_STRING[ ]*:=[ ]*//")
+        if [[ -n "${version}" ]]; then
+            log_info "Build version: ${version}"
         else
-            version=$(cat "${version_file}" || echo "unknown")
+            log_warn "VERSION_STRING not found in spec.gmk"
+            version="unknown"
         fi
-        log_info "Build version: ${version}"
     else
-        log_warn "Version file not found"
+        log_warn "spec.gmk not found at: ${spec_file}"
     fi
 
-    # Create build metadata JSON
-    cat > "${WORKSPACE}/build-metadata.json" <<EOF
-{
-  "version": "${version}",
-  "buildNumber": "${BUILD_NUMBER}",
-  "timestamp": $(date +%s),
-  "timestampISO": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "stage": "${STAGE_NAME}",
-  "workspace": "${WORKSPACE}",
-  "javaVersion": "$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")",
-  "targetOS": "$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")",
-  "architecture": "$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")",
-  "variant": "$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")"
-}
-EOF
+    # Create build metadata JSON using jq to properly escape values
+    jq -n \
+        --arg version "${version}" \
+        --arg buildNumber "${BUILD_NUMBER}" \
+        --arg timestamp "$(date +%s)" \
+        --arg timestampISO "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg stage "${STAGE_NAME}" \
+        --arg workspace "${WORKSPACE}" \
+        --arg javaVersion "$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")" \
+        --arg targetOS "$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")" \
+        --arg architecture "$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")" \
+        --arg variant "$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")" \
+        '{
+            version: $version,
+            buildNumber: $buildNumber,
+            timestamp: ($timestamp | tonumber),
+            timestampISO: $timestampISO,
+            stage: $stage,
+            workspace: $workspace,
+            javaVersion: $javaVersion,
+            targetOS: $targetOS,
+            architecture: $architecture,
+            variant: $variant
+        }' > "${WORKSPACE}/build-metadata.json"
 
     log_info "Build metadata saved to build-metadata.json"
 
@@ -526,12 +521,12 @@ organize_build_outputs() {
     log_info "Searching for JDK artifacts..."
     local artifacts_found=0
 
-    # Look for tar.gz and zip files
+    # Look for tar.gz, zip, and json files (including SBOM)
     while IFS= read -r -d '' artifact; do
         log_info "Found artifact: $(basename ${artifact})"
         cp "${artifact}" "${TARGET_DIR}/"
         artifacts_found=$((artifacts_found + 1))
-    done < <(find "${target_dir}" -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print0)
+    done < <(find "${target_dir}" -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.json" \) -print0)
 
     if [[ ${artifacts_found} -eq 0 ]]; then
         log_error "No tar.gz or zip artifacts found in ${target_dir}"
