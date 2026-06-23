@@ -210,10 +210,8 @@ class PipelineRunner:
         ]
 
         # Add optional parameters
-        if self.args.release:
-            cmd.append('--release')
-        if self.args.weekly:
-            cmd.append('--weekly')
+        if self.args.release_type:
+            cmd.extend(['--release-type', self.args.release_type])
         if self.args.scm_ref:
             cmd.extend(['--scm-ref', self.args.scm_ref])
         if self.args.build_ref:
@@ -544,7 +542,7 @@ Examples:
       --variant temurin \\
       --target-os linux \\
       --architecture x64 \\
-      --release \\
+      --release-type RELEASE \\
       --scm-ref jdk-21.0.2+13 \\
       --build-ref master
 
@@ -580,7 +578,7 @@ Examples:
       --target-os mac \\
       --architecture aarch64 \\
       --scm-ref jdk-21.0.2+13 \\
-      --release \\
+      --release-type RELEASE \\
       --compare-build
         """
     )
@@ -605,10 +603,8 @@ Examples:
                         help='Build number (default: local-YYYYMMDD-HHMMSS)')
 
     # Build type
-    parser.add_argument('--release', action='store_true',
-                        help='Release build')
-    parser.add_argument('--weekly', action='store_true',
-                        help='Weekly build')
+    parser.add_argument('--release-type', choices=['NIGHTLY', 'WEEKLY', 'RELEASE'],
+                        help='Type of release build (NIGHTLY=default, WEEKLY=weekly builds, RELEASE=official releases)')
 
     # Git refs
     parser.add_argument('--scm-ref',

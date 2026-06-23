@@ -408,8 +408,17 @@ execute_build() {
     export SCM_REF="${scm_ref}"
     export CONFIGURE_ARGS="${configure_args}"
 
-    # Additional environment variables
-    export FILENAME="${FILENAME:-}"
+    # Determine output filename if not already set
+    if [[ -z "${FILENAME:-}" ]]; then
+        log_info "FILENAME not set, determining from build configuration"
+        determine_filename || {
+            log_error "Failed to determine filename"
+            return 1
+        }
+    else
+        log_info "Using provided FILENAME: ${FILENAME}"
+    fi
+    
     export OVERRIDE_FILE_NAME_VERSION="${OVERRIDE_FILE_NAME_VERSION:-}"
 
     log_info "Environment variables set:"

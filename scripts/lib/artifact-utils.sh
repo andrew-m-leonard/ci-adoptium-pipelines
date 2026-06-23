@@ -47,6 +47,77 @@ copy_artifacts() {
     else
         log_warn "No artifacts found in ${source} or copy failed"
         return 1
+}
+
+# Determine the output filename for the build artifact
+# Sets the FILENAME environment variable
+# Requires: JAVA_TO_BUILD, ARCHITECTURE, TARGET_OS, VARIANT, SCM_REF (optional)
+determine_filename() {
+    local java_to_build="${JAVA_TO_BUILD}"
+    local architecture="${ARCHITECTURE}"
+    local os="${TARGET_OS}"
+    local variant="${VARIANT}"
+    local scm_ref="${SCM_REF:-}"
+
+    # Validate required variables
+    if [[ -z "${java_to_build}" || -z "${architecture}" || -z "${os}" || -z "${variant}" ]]; then
+        log_error "Missing required variables for determine_filename"
+        log_error "JAVA_TO_BUILD=${java_to_build}, ARCHITECTURE=${architecture}, TARGET_OS=${os}, VARIANT=${variant}"
+        return 1
+    fi
+
+    # Determine file extension based on OS
+    local extension="tar.gz"
+    if [[ "${os}" == "windows" ]]; then
+        extension="zip"
+    fi
+
+    # Convert java_to_build to uppercase and trim whitespace
+    java_to_build=$(echo "${java_to_build}" | tr '[:lower:]' '[:upper:]' | xargs)
+
+    # Add "U" to javaToBuild filename prefix for non-head versions
+    # Skip if already ends with U or equals JDK
+    if [[ ! "${java_to_build}" =~ U$ ]] && [[ "${java_to_build}" != "JDK" ]]; then
+        java_to_build="${java_to_build}U"
+    fi
+
+    # Construct base filename
+    local filename="Open${java_to_build}-jdk_${architecture}_${os}_${variant}"
+    
+    # For compatibility with existing releases, use hotspot for temurin variant
+    if [[ "${variant}" == "temurin" ]]; then
+        filename="Open${java_to_build}-jdk_${architecture}_${os}_hotspot"
+    fi
+
+    # Add version tag or timestamp
+    if [[ -n "${scm_ref}" ]]; then
+        # For java 11+: remove jdk- prefix and replace + with _
+        # Example: jdk-11.0.3+7 -> 11.0.3_7
+        local name_tag="${scm_ref}"
+        name_tag="${name_tag#jdk-}"  # Remove jdk- prefix
+        name_tag="${name_tag//+/_}"  # Replace + with _
+
+        # For java 8: remove jdk prefix and -b before build number
+        # Example: jdk8u212-b03 -> 8u212b03
+        name_tag="${name_tag#jdk}"   # Remove jdk prefix
+        name_tag="${name_tag//-b/b}" # Replace -b with b
+
+        filename="${filename}_${name_tag}"
+    else
+        # Use timestamp if no SCM_REF provided
+        local timestamp=$(date -u '+%Y-%m-%d-%H-%M')
+        filename="${filename}_${timestamp}"
+    fi
+
+    # Add extension
+    filename="${filename}.${extension}"
+
+    # Export as environment variable
+    export FILENAME="${filename}"
+    
+    log_info "Determined filename: ${filename}"
+    echo "${filename}"
+    return 0
     fi
 }
 

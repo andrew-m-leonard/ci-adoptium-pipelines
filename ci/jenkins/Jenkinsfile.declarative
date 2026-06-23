@@ -59,10 +59,8 @@ def ensureBuildDescriptionSet() {
     if (params.SCM_REF) {
         displayName += " @ ${params.SCM_REF}"
     }
-    if (params.RELEASE) {
-        displayName += " [RELEASE]"
-    } else if (params.WEEKLY) {
-        displayName += " [WEEKLY]"
+    if (params.RELEASE_TYPE && params.RELEASE_TYPE != 'NIGHTLY') {
+        displayName += " [${params.RELEASE_TYPE}]"
     }
     
     // Build description: <Restart of #ORIG_NUMBER> | BUILD_UID: <UID>
@@ -232,11 +230,14 @@ def generatePipelineConfig(String configDir = './configurations') {
     ]
 
     // Add optional parameters
-    if (params.RELEASE) {
-        pythonArgs.add("--release")
-    }
-    if (params.WEEKLY) {
-        pythonArgs.add("--weekly")
+    if (params.RELEASE_TYPE) {
+        // Validate RELEASE_TYPE parameter
+        def validReleaseTypes = ['NIGHTLY', 'WEEKLY', 'RELEASE']
+        if (!validReleaseTypes.contains(params.RELEASE_TYPE)) {
+            error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')}")
+        }
+        pythonArgs.add("--release-type")
+        pythonArgs.add(params.RELEASE_TYPE)
     }
     if (params.SCM_REF) {
         pythonArgs.add("--scm-ref ${params.SCM_REF}")
@@ -691,7 +692,7 @@ pipeline {
                         env.TARGET_DIR = "${WORKSPACE}"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
                         env.SCM_REF = params.SCM_REF
-                        env.RELEASE = params.RELEASE ? 'true' : 'false'
+                        env.RELEASE = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
 
                         // Execute reproducible compare script (handles all output internally)
                         def comparisonExitCode = sh(

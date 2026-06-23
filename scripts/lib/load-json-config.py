@@ -97,8 +97,10 @@ def load_configuration(args):
     output_dir = args.output_dir
 
     # Optional parameters
-    is_release = args.release
-    is_weekly = args.weekly
+    # Determine release type from --release-type parameter (defaults to NIGHTLY)
+    release_type = args.release_type or 'NIGHTLY'
+    is_release = (release_type == 'RELEASE')
+    is_weekly = (release_type == 'WEEKLY')
     scm_ref = args.scm_ref
     build_ref = args.build_ref or 'master'
     build_repo_url = args.build_repo_url or 'https://github.com/adoptium/temurin-build.git'
@@ -228,7 +230,7 @@ Examples:
       --variant temurin \\
       --target-os linux \\
       --architecture x64 \\
-      --release \\
+      --release-type RELEASE \\
       --scm-ref jdk-17.0.10+7
 
   # Disable tests and installers
@@ -252,8 +254,9 @@ Examples:
     parser.add_argument('--config-dir', default='./configurations', help='Configuration directory (default: ./configurations)')
     parser.add_argument('--output-dir', default='.', help='Output directory for generated configs (default: .)')
 
-    parser.add_argument('--release', action='store_true', help='Release build')
-    parser.add_argument('--weekly', action='store_true', help='Weekly build')
+    # Release type - supports both new and legacy parameters
+    parser.add_argument('--release-type', choices=['NIGHTLY', 'WEEKLY', 'RELEASE'],
+                        help='Type of release build (NIGHTLY=default, WEEKLY=weekly builds, RELEASE=official releases)')
     parser.add_argument('--scm-ref', help='OpenJDK source branch/tag (default: master)')
     parser.add_argument('--build-ref', help='temurin-build branch/tag (default: master)')
     parser.add_argument('--build-repo-url', help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')

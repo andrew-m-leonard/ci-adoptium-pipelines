@@ -194,13 +194,9 @@ pipelineJob(jobName) {
             'Run reproducible build comparison')
         
         // Additional build parameters
-        booleanParam('RELEASE',
-            false,
-            'Is this a release build?')
-        
-        booleanParam('WEEKLY',
-            false,
-            'Is this a weekly build?')
+        choiceParam('RELEASE_TYPE',
+            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
+            'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
         
         booleanParam('ENABLE_TESTS',
             defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
