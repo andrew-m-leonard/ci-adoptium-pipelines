@@ -215,14 +215,6 @@ pipelineJob(jobName) {
         booleanParam('REPRODUCIBLE_COMPARE_BUILD',
             defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
             'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)')
-        
-        stringParam('SCM_REF',
-            '',
-            'Override OpenJDK source branch/tag (required for REPRODUCIBLE_COMPARE_BUILD)')
-        
-        stringParam('BUILD_REF',
-            '',
-            'Override temurin-build branch/tag')
 
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
