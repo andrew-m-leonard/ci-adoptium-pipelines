@@ -54,16 +54,19 @@ def ensureBuildDescriptionSet() {
         return
     }
     
-    // Build description from config
-    def description = "${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
+    // Build display name: #BUILD_NUMBER - JAVA_TO_BUILD VARIANT OS-ARCH @ SCM_REF [RELEASE|WEEKLY]
+    def displayName = "#${currentBuild.number} - ${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
     if (params.SCM_REF) {
-        description += " @ ${params.SCM_REF}"
+        displayName += " @ ${params.SCM_REF}"
     }
     if (params.RELEASE) {
-        description += " [RELEASE]"
+        displayName += " [RELEASE]"
     } else if (params.WEEKLY) {
-        description += " [WEEKLY]"
+        displayName += " [WEEKLY]"
     }
+    
+    // Build description: <Restart of #ORIG_NUMBER> | BUILD_UID: <UID>
+    def description = ""
     
     // Detect if this is a restart by checking if BUILD_UID exists and differs from a new one
     // If BUILD_UID is already set and we're not in Initialize stage, this is a restart
@@ -89,13 +92,17 @@ def ensureBuildDescriptionSet() {
             }
         }
         if (originalBuildNumber != currentBuild.number) {
-            description += " | Restart of #${originalBuildNumber}"
+            description = "Restart of #${originalBuildNumber} | "
         }
     }
     
-    description += " | BUILD_UID: ${env.BUILD_UID}"
+    description += "BUILD_UID: ${env.BUILD_UID}"
     
-    // Always set description to ensure BUILD_UID is current (important for restarts)
+    // Always set display name and description to ensure BUILD_UID is current (important for restarts)
+    if (currentBuild.displayName != displayName) {
+        currentBuild.displayName = displayName
+        echo "Build Display Name: ${displayName}"
+    }
     if (currentBuild.description != description) {
         currentBuild.description = description
         echo "Build Description: ${description}"
