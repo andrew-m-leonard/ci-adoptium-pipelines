@@ -98,7 +98,15 @@ def load_configuration(args):
 
     # Optional parameters
     # Determine release type from --release-type parameter (defaults to NIGHTLY)
-    release_type = args.release_type or 'NIGHTLY'
+    # Convert to uppercase for case-insensitive comparison
+    release_type = (args.release_type or 'NIGHTLY').upper()
+    
+    # Validate release type
+    valid_release_types = ['NIGHTLY', 'WEEKLY', 'RELEASE']
+    if release_type not in valid_release_types:
+        print(f"ERROR: Invalid release type '{args.release_type}'. Must be one of: {', '.join(valid_release_types)} (case-insensitive)", file=sys.stderr)
+        sys.exit(1)
+    
     is_release = (release_type == 'RELEASE')
     is_weekly = (release_type == 'WEEKLY')
     scm_ref = args.scm_ref
@@ -254,9 +262,9 @@ Examples:
     parser.add_argument('--config-dir', default='./configurations', help='Configuration directory (default: ./configurations)')
     parser.add_argument('--output-dir', default='.', help='Output directory for generated configs (default: .)')
 
-    # Release type - supports both new and legacy parameters
-    parser.add_argument('--release-type', choices=['NIGHTLY', 'WEEKLY', 'RELEASE'],
-                        help='Type of release build (NIGHTLY=default, WEEKLY=weekly builds, RELEASE=official releases)')
+    # Release type - case-insensitive (will be converted to uppercase)
+    parser.add_argument('--release-type', type=str,
+                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
     parser.add_argument('--scm-ref', help='OpenJDK source branch/tag (default: master)')
     parser.add_argument('--build-ref', help='temurin-build branch/tag (default: master)')
     parser.add_argument('--build-repo-url', help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')

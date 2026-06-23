@@ -211,7 +211,15 @@ class PipelineRunner:
 
         # Add optional parameters
         if self.args.release_type:
-            cmd.extend(['--release-type', self.args.release_type])
+            # Convert to uppercase for case-insensitive handling
+            release_type = self.args.release_type.upper()
+            
+            # Validate release type
+            valid_release_types = ['NIGHTLY', 'WEEKLY', 'RELEASE']
+            if release_type not in valid_release_types:
+                raise ValueError(f"Invalid release type '{self.args.release_type}'. Must be one of: {', '.join(valid_release_types)} (case-insensitive)")
+            
+            cmd.extend(['--release-type', release_type])
         if self.args.scm_ref:
             cmd.extend(['--scm-ref', self.args.scm_ref])
         if self.args.build_ref:
@@ -602,9 +610,9 @@ Examples:
     parser.add_argument('--build-number',
                         help='Build number (default: local-YYYYMMDD-HHMMSS)')
 
-    # Build type
-    parser.add_argument('--release-type', choices=['NIGHTLY', 'WEEKLY', 'RELEASE'],
-                        help='Type of release build (NIGHTLY=default, WEEKLY=weekly builds, RELEASE=official releases)')
+    # Build type - case-insensitive (will be converted to uppercase)
+    parser.add_argument('--release-type', type=str,
+                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
 
     # Git refs
     parser.add_argument('--scm-ref',

@@ -231,13 +231,16 @@ def generatePipelineConfig(String configDir = './configurations') {
 
     // Add optional parameters
     if (params.RELEASE_TYPE) {
+        // Convert to uppercase for case-insensitive handling
+        def releaseType = params.RELEASE_TYPE.toUpperCase()
+        
         // Validate RELEASE_TYPE parameter
         def validReleaseTypes = ['NIGHTLY', 'WEEKLY', 'RELEASE']
-        if (!validReleaseTypes.contains(params.RELEASE_TYPE)) {
-            error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')}")
+        if (!validReleaseTypes.contains(releaseType)) {
+            error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')} (case-insensitive)")
         }
         pythonArgs.add("--release-type")
-        pythonArgs.add(params.RELEASE_TYPE)
+        pythonArgs.add(releaseType)
     }
     if (params.SCM_REF) {
         pythonArgs.add("--scm-ref ${params.SCM_REF}")

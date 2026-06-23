@@ -146,6 +146,8 @@ if self.args.release_type:
 | `WEEKLY` | Weekly builds | Scheduled weekly releases |
 | `RELEASE` | Official releases | Production releases |
 
+**Note**: Parameter values are **case-insensitive**. You can use `release`, `Release`, or `RELEASE` - all will be converted to uppercase internally.
+
 ## Validation
 
 The `RELEASE_TYPE` parameter is validated at multiple layers for robustness:
@@ -157,31 +159,48 @@ The `RELEASE_TYPE` parameter is validated at multiple layers for robustness:
 - **Values**: `['NIGHTLY', 'WEEKLY', 'RELEASE']`
 
 ### 2. Jenkinsfile (Pipeline Script)
-- **Location**: [`Jenkinsfile.declarative`](../ci/jenkins/Jenkinsfile.declarative:232) lines 232-241
-- **Method**: Explicit validation before passing to Python
-- **Effect**: Fails fast with clear error message if invalid value provided programmatically
-- **Error Message**: `Invalid RELEASE_TYPE: 'xyz'. Must be one of: NIGHTLY, WEEKLY, RELEASE`
+- **Location**: [`Jenkinsfile.declarative`](../ci/jenkins/Jenkinsfile.declarative:232) lines 232-244
+- **Method**: Converts to uppercase, then validates before passing to Python
+- **Effect**: Case-insensitive input, fails fast with clear error message if invalid value
+- **Error Message**: `Invalid RELEASE_TYPE: 'xyz'. Must be one of: NIGHTLY, WEEKLY, RELEASE (case-insensitive)`
 
 ```groovy
+// Convert to uppercase for case-insensitive handling
+def releaseType = params.RELEASE_TYPE.toUpperCase()
+
+// Validate RELEASE_TYPE parameter
 def validReleaseTypes = ['NIGHTLY', 'WEEKLY', 'RELEASE']
-if (!validReleaseTypes.contains(params.RELEASE_TYPE)) {
-    error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')}")
+if (!validReleaseTypes.contains(releaseType)) {
+    error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')} (case-insensitive)")
 }
 ```
 
 ### 3. Python Scripts (load-json-config.py, run-pipeline.py)
-- **Location**: Argument parser definition
-- **Method**: `choices=['NIGHTLY', 'WEEKLY', 'RELEASE']` in argparse
-- **Effect**: Automatic validation with helpful error message
-- **Error Message**: `error: argument --release-type: invalid choice: 'xyz' (choose from 'NIGHTLY', 'WEEKLY', 'RELEASE')`
+- **Location**: Argument parser and processing logic
+- **Method**: Converts to uppercase, then validates against allowed values
+- **Effect**: Case-insensitive input with clear error message for invalid values
+- **Error Message**: `ERROR: Invalid release type 'xyz'. Must be one of: NIGHTLY, WEEKLY, RELEASE (case-insensitive)`
+
+```python
+# Convert to uppercase for case-insensitive comparison
+release_type = (args.release_type or 'NIGHTLY').upper()
+
+# Validate release type
+valid_release_types = ['NIGHTLY', 'WEEKLY', 'RELEASE']
+if release_type not in valid_release_types:
+    print(f"ERROR: Invalid release type '{args.release_type}'. Must be one of: {', '.join(valid_release_types)} (case-insensitive)", file=sys.stderr)
+    sys.exit(1)
+```
 
 ### Defense in Depth
 
 This multi-layer validation ensures:
 1. **UI Protection**: Dropdown prevents typos in Jenkins UI
-2. **API Protection**: Jenkinsfile validation catches programmatic errors
-3. **Script Protection**: Python validation provides final safety net
-4. **Clear Errors**: Each layer provides helpful error messages
+2. **Case Insensitivity**: All layers accept lowercase, mixed case, or uppercase
+3. **API Protection**: Jenkinsfile validation catches programmatic errors
+4. **Script Protection**: Python validation provides final safety net
+5. **Clear Errors**: Each layer provides helpful error messages
+6. **Consistent Behavior**: All layers normalize to uppercase internally
 
 ## Migration Guide
 
