@@ -40,6 +40,37 @@ def ensureBuildUidHelperLoaded() {
     return buildUidHelper
 }
 
+// Helper function to ensure build description is set
+// This is needed because when restarting from a stage, the Initialize stage is skipped
+// and the build description would not be set
+def ensureBuildDescriptionSet() {
+    // Only set if not already set (to avoid overwriting on every stage)
+    if (!currentBuild.description) {
+        // Read config to get build details
+        def config = [:]
+        if (fileExists('pipeline-config.json')) {
+            config = readJSON(file: 'pipeline-config.json')
+        } else {
+            // If config doesn't exist yet, we're in Initialize stage, skip for now
+            return
+        }
+        
+        // Build description from config
+        def description = "${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
+        if (params.SCM_REF) {
+            description += " @ ${params.SCM_REF}"
+        }
+        if (params.RELEASE) {
+            description += " [RELEASE]"
+        } else if (params.WEEKLY) {
+            description += " [WEEKLY]"
+        }
+        description += " | BUILD_UID: ${env.BUILD_UID}"
+        currentBuild.description = description
+        echo "Build Description: ${description}"
+    }
+}
+
 // Helper function to execute stage with automatic result tracking
 // This eliminates the need for repetitive post blocks in every stage
 // Saves ~12KB of bytecode by replacing 60 post blocks with 1 function
@@ -81,6 +112,9 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     if (stageName != 'Initialize') {
         buildUidHelper.validatePrerequisites(stageName, prerequisites)
     }
+    
+    // Ensure build description is set (for stage restarts)
+    ensureBuildDescriptionSet()
     
     // Retrieve artifacts if filter specified (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
@@ -270,20 +304,6 @@ pipeline {
 
                         // Display configuration summary
                         summarizePipelineConfig(config)
-                        
-                        // Set build description with meaningful information
-                        def description = "${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
-                        if (params.SCM_REF) {
-                            description += " @ ${params.SCM_REF}"
-                        }
-                        if (params.RELEASE) {
-                            description += " [RELEASE]"
-                        } else if (params.WEEKLY) {
-                            description += " [WEEKLY]"
-                        }
-                        description += " | BUILD_UID: ${env.BUILD_UID}"
-                        currentBuild.description = description
-                        echo "Build Description: ${description}"
 
                         finalizeStage('Initialize')
                     }
