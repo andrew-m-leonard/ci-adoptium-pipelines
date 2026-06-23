@@ -89,11 +89,17 @@ archiveArtifacts artifacts: "${env.TARGET_DIR.replace(env.WORKSPACE + '/', '')}/
 env.TARGET_DIR = "${WORKSPACE}"
 ```
 
+**initializeStage artifacts:**
+```groovy
+'pipeline-config.json,*sbom*.json'
+```
+
 **archiveArtifacts:** None
 
 **Consistency:** ✅ **CONSISTENT**
 - This stage validates SBOM files but doesn't produce new artifacts
-- `TARGET_DIR` points to workspace root where SBOM files were copied from Build stage
+- `TARGET_DIR` points to workspace root where `copyArtifacts` places files (Jenkins flattens paths)
+- Artifact filter uses flattened paths: `*sbom*.json` not `workspace/target/**/*sbom*.json`
 - No archiving needed as SBOM files were already archived in Build stage
 
 **Script Reference:** [`scripts/stages/12-validate-sbom.sh`](../scripts/stages/12-validate-sbom.sh)
@@ -107,18 +113,24 @@ env.TARGET_DIR = "${WORKSPACE}"
 
 **TARGET_DIR:**
 ```groovy
-env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+env.TARGET_DIR = "${WORKSPACE}"
+```
+
+**initializeStage artifacts:**
+```groovy
+'pipeline-config.json,*.tar.gz,*.zip'
 ```
 
 **archiveArtifacts:** None
 
 **Consistency:** ✅ **CONSISTENT**
-- Stage reads artifacts from `TARGET_DIR` but doesn't produce new artifacts
+- Stage reads artifacts from `TARGET_DIR` (workspace root where copyArtifacts places them)
+- Artifact filter uses flattened paths: `*.tar.gz,*.zip` not `workspace/target/**/*.tar.gz`
 - Test results are logged but not archived separately
-- Uses same `TARGET_DIR` as Build stage for consistency
+- Jenkins `copyArtifacts` flattens directory structure, so files appear in workspace root
 
 **Script Reference:** [`scripts/stages/13-smoke-tests.sh`](../scripts/stages/13-smoke-tests.sh)
-- Extracts and tests JDK from `${TARGET_DIR}`
+- Extracts and tests JDK from `${TARGET_DIR}` (workspace root)
 
 ---
 
@@ -128,7 +140,12 @@ env.TARGET_DIR = "${WORKSPACE}/workspace/target"
 
 **TARGET_DIR:**
 ```groovy
-env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+env.TARGET_DIR = "${WORKSPACE}"
+```
+
+**initializeStage artifacts:**
+```groovy
+'pipeline-config.json,*.tar.gz,*.zip'
 ```
 
 **archiveArtifacts:**
@@ -141,14 +158,16 @@ archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt,reproduc
 ```
 
 **Consistency:** ⚠️ **SPECIAL CASE**
-- `TARGET_DIR` points to build artifacts (input)
+- `TARGET_DIR` points to workspace root where `copyArtifacts` places build artifacts (input)
+- Artifact filter uses flattened paths: `*.tar.gz,*.zip` not `workspace/target/**/*.tar.gz`
 - Output directory is hardcoded by `repro_compare.sh` to `${WORKSPACE}/reproducible-compare/`
 - This is intentional: comparison results are separate from build artifacts
 - The script creates its own output directory structure
 
 **Script Reference:** [`scripts/stages/20-reproducible-compare.sh`](../scripts/stages/20-reproducible-compare.sh)
 - Line 54: Creates `COMPARE_WORKSPACE="${WORKSPACE}/reproducible-compare"`
-- Comparison results are written to this fixed location
+- Reads build artifacts from `${TARGET_DIR}` (workspace root)
+- Writes comparison results to fixed location
 
 ---
 
@@ -161,6 +180,59 @@ archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt,reproduc
 **archiveArtifacts:** None (handled by downstream job)
 
 **Notes:** Triggers downstream AQA test job which handles its own artifact management.
+
+---
+
+## Critical Concept: Jenkins copyArtifacts Flattening
+
+**IMPORTANT:** Jenkins `copyArtifacts` step flattens the directory structure when copying artifacts between jobs or stages.
+
+### Example
+
+**Build Stage archives:**
+```groovy
+env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+archiveArtifacts artifacts: "workspace/target/**/*"
+```
+
+This creates archived artifacts with paths like:
+- `workspace/target/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11.tar.gz`
+- `workspace/target/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11_sbom.json`
+
+**Downstream Stage copies:**
+```groovy
+copyArtifacts projectName: 'upstream-job',
+              filter: '*.tar.gz,*.zip,*sbom*.json',
+              target: '.'
+```
+
+Jenkins **flattens** the paths, so files appear in workspace root:
+- `${WORKSPACE}/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11.tar.gz`
+- `${WORKSPACE}/OpenJDK21U-jdk_x64_linux_hotspot_21.0.5_11_sbom.json`
+
+### Implications for TARGET_DIR
+
+**Build Stage (produces artifacts):**
+```groovy
+env.TARGET_DIR = "${WORKSPACE}/workspace/target"  // Where build outputs go
+```
+
+**Downstream Stages (consume artifacts):**
+```groovy
+env.TARGET_DIR = "${WORKSPACE}"  // Where copyArtifacts places files (flattened)
+```
+
+### Implications for initializeStage Artifact Filters
+
+**WRONG (assumes directory structure is preserved):**
+```groovy
+initializeStage('Smoke Tests', ['Build'], 'workspace/target/**/*.tar.gz')
+```
+
+**CORRECT (uses flattened paths):**
+```groovy
+initializeStage('Smoke Tests', ['Build'], '*.tar.gz,*.zip')
+```
 
 ---
 
@@ -227,24 +299,29 @@ When adding or modifying a stage:
 
 ## Common Patterns
 
-### Pattern 1: Standard Build Output
+### Pattern 1: Build Stage (Produces Artifacts)
 ```groovy
+// Build stage creates artifacts in nested directory
 env.TARGET_DIR = "${WORKSPACE}/workspace/target"
-// ... run build script ...
+// ... run build script that writes to TARGET_DIR ...
 archiveArtifacts artifacts: "${env.TARGET_DIR.replace(env.WORKSPACE + '/', '')}/**/*"
 ```
 
-### Pattern 2: Validation/Test Stage (No New Artifacts)
+### Pattern 2: Downstream Stage (Consumes Artifacts)
 ```groovy
-env.TARGET_DIR = "${WORKSPACE}/workspace/target"  // Input location
-// ... run validation ...
+// Downstream stage receives flattened artifacts from copyArtifacts
+initializeStage('Smoke Tests', ['Build'], '*.tar.gz,*.zip')  // Flattened paths
+env.TARGET_DIR = "${WORKSPACE}"  // copyArtifacts places files in workspace root
+// ... run validation/test script that reads from TARGET_DIR ...
 // No archiveArtifacts needed
 ```
 
 ### Pattern 3: Fixed Output Directory (Documented Exception)
 ```groovy
-env.TARGET_DIR = "${WORKSPACE}/workspace/target"  // Input location
-// ... run comparison ...
+// Stage reads from TARGET_DIR but writes to fixed location
+initializeStage('Compare', ['Build'], '*.tar.gz,*.zip')  // Flattened input paths
+env.TARGET_DIR = "${WORKSPACE}"  // Input location (flattened)
+// ... run comparison script ...
 // Archive from fixed location (documented in comment)
 archiveArtifacts artifacts: 'reproducible-compare/...'
 ```
