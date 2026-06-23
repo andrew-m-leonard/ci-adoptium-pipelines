@@ -614,14 +614,6 @@ pipeline {
                             returnStatus: true
                         )
 
-                        // Save test result and set environment variable
-                        def testMetadata = [
-                            smokeTestsPassed: smokeTestExitCode == 0,
-                            testedAt: currentBuild.startTimeInMillis
-                        ]
-                        writeJSON file: 'test-metadata.json', json: testMetadata
-                        archiveArtifacts artifacts: 'test-metadata.json', fingerprint: true
-
                         // Set environment variable for downstream stages
                         env.SMOKE_TESTS_PASSED = (smokeTestExitCode == 0).toString()
 

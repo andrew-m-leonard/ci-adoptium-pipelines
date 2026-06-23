@@ -454,7 +454,7 @@ extract_build_metadata() {
 
     # Get VERSION_STRING from build spec.gmk (most reliable source)
     local version="unknown"
-    local spec_file="${WORKSPACE}/workspace/build/src/build/"*/spec.gmk
+    local spec_file="${WORKSPACE}/temurin-build/workspace/build/src/build/"*/spec.gmk
 
     if [[ -f ${spec_file} ]]; then
         # Extract VERSION_STRING value from spec.gmk

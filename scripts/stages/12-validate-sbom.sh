@@ -68,8 +68,13 @@ if [ -z "${JAVA_VERSION:-}" ]; then
     echo "Extracted JAVA_VERSION from config: ${JAVA_VERSION}"
 fi
 
+# Extract numeric version for validateSBOM.sh (e.g., "jdk21u" -> "21")
+# validateSBOM.sh expects just the numeric version as first argument
+JDK_NUMERIC_VERSION=$(echo "${JAVA_VERSION}" | sed 's/[^0-9]//g')
+echo "Extracted numeric JDK version: ${JDK_NUMERIC_VERSION}"
+
 if [ -z "${SCM_REF:-}" ]; then
-    SCM_REF=$(python3 -c "import json; config=json.load(open('${CONFIG_FILE}')); print(config['buildConfig'].get('SCM_REF', 'HEAD'))")
+    SCM_REF=$(python3 -c "import json; config=json.load(open('${CONFIG_FILE}')); print(config.get('refs', {}).get('scmRef', 'HEAD'))")
     echo "Extracted SCM_REF from config: ${SCM_REF}"
 fi
 
@@ -94,7 +99,7 @@ while IFS= read -r sbom_file; do
         echo "Validating SBOM: ${sbom_file}"
         
         if bash "${VALIDATE_SBOM_SCRIPT}" \
-            "${JAVA_VERSION}" \
+            "${JDK_NUMERIC_VERSION}" \
             "${SCM_REF}" \
             "${sbom_file}"; then
             echo "SUCCESS: SBOM validation passed for ${sbom_file}"
