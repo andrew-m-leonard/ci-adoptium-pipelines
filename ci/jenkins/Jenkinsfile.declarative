@@ -43,16 +43,11 @@ def ensureBuildUidHelperLoaded() {
 // Helper function to ensure build description is set
 // This is needed because when restarting from a stage, the Initialize stage is skipped
 // and the build description would not be set
-def ensureBuildDescriptionSet() {
+def ensureBuildDescriptionSet(def config) {
 
-    // Read config to get build details
-    def config = [:]
-    if (fileExists('pipeline-config.json')) {
-        config = readJSON(file: 'pipeline-config.json')
-        echo "Config loaded from pipeline-config.json"
-    } else {
-        // If config doesn't exist yet, we're in Initialize stage, skip for now
-        return
+    // Validate config parameter
+    if (config == null || config.isEmpty()) {
+        error("ensureBuildDescriptionSet() requires a valid config object")
     }
     
     // Build display name: #BUILD_NUMBER - JAVA_TO_BUILD VARIANT OS-ARCH @ SCM_REF [RELEASE|WEEKLY]
@@ -176,16 +171,15 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
         }
     }
     
-    // Ensure build description is set (for stage restarts)
-    // IMPORTANT: Must be called AFTER copyArtifacts so pipeline-config.json exists
-    ensureBuildDescriptionSet()
-    
     // Return config for convenience (empty for Initialize stage)
     if (stageName == 'Initialize') {
         return [:]  // Return empty map for Initialize stage
     } else {
+        // Read config from appropriate location
         def configPath = inputArtifactsDir ? "${inputArtifactsDir}/pipeline-config.json" : 'pipeline-config.json'
-        return readJSON(file: configPath)
+        def config = readJSON(file: configPath)
+        ensureBuildDescriptionSet(config)        
+        return config
     }
 }
 
@@ -355,6 +349,9 @@ pipeline {
 
                         // Display configuration summary
                         summarizePipelineConfig(config)
+
+                        // Set build description now that config exists
+                        ensureBuildDescriptionSet(config)
 
                         finalizeStage('Initialize')
                     }
