@@ -131,7 +131,7 @@ def executeStageWithTracking(String stageName, Closure body) {
 // Handles workspace cleanup, checkout, BUILD_UID setup, prerequisites, and artifact retrieval
 // Saves additional bytecode by consolidating repeated initialization code
 // Special handling for 'Initialize' stage which creates the config file
-def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json') {
+def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json', String inputArtifactsDir = null) {
     // Echo stage banner
     echo "=== ${stageName} ==="
     
@@ -151,16 +151,24 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     
     // Retrieve artifacts if filter specified (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
+        // Determine target directory for artifacts
+        def targetDir = inputArtifactsDir ?: '.'
+        
+        // Create input artifacts directory if specified
+        if (inputArtifactsDir) {
+            sh "mkdir -p ${inputArtifactsDir}"
+        }
+        
         try {
             copyArtifacts(
                 projectName: env.JOB_NAME,
                 selector: specific(env.BUILD_NUMBER),
                 filter: artifactFilter,
-                target: '.',
+                target: targetDir,
                 optional: false,
                 fingerprintArtifacts: true
             )
-            echo "✅ Successfully copied artifacts: ${artifactFilter}"
+            echo "✅ Successfully copied artifacts to ${targetDir}: ${artifactFilter}"
         } catch (Exception e) {
             error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
         }
@@ -174,7 +182,8 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     if (stageName == 'Initialize') {
         return [:]  // Return empty map for Initialize stage
     } else {
-        return readJSON(file: 'pipeline-config.json')
+        def configPath = inputArtifactsDir ? "${inputArtifactsDir}/pipeline-config.json" : 'pipeline-config.json'
+        return readJSON(file: configPath)
     }
 }
 
@@ -363,7 +372,7 @@ pipeline {
                         // Set environment variables for the build script
                         env.WORKSPACE = "${WORKSPACE}"
                         env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}/workspace/target"
+                        env.TARGET_DIR = "${WORKSPACE}/build_output"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
 
                         // Execute build stage script (bash)
@@ -388,7 +397,7 @@ pipeline {
                         }
 
                         // Archive build artifacts
-                        archiveArtifacts artifacts: "${env.TARGET_DIR.replace(env.WORKSPACE + '/', '')}/**/*",
+                        archiveArtifacts artifacts: "build_output/**/*",
                                        fingerprint: true,
                                        allowEmptyArchive: false
 
@@ -598,12 +607,15 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Validate SBOM') {
-                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json')
+                        // Set directories before initializeStage
+                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        env.TARGET_DIR = "${WORKSPACE}/sbom_validation_output"
+                        
+                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', env.INPUT_ARTIFACTS_DIR)
 
                         // Set environment variables for the SBOM validation script
                         env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
 
                         // Execute SBOM validation script (bash)
                         sh 'bash scripts/stages/12-validate-sbom.sh'
@@ -629,12 +641,15 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Smoke Tests') {
-                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
+                        // Set directories before initializeStage
+                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        env.TARGET_DIR = "${WORKSPACE}/smoke_test_output"
+                        
+                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', env.INPUT_ARTIFACTS_DIR)
 
                         // Set environment variables for the smoke test script
                         env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
 
                         // Execute smoke test script (bash)
@@ -684,12 +699,15 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Reproducible Compare Build') {
-                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
+                        // Set directories before initializeStage
+                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"
+                        
+                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', env.INPUT_ARTIFACTS_DIR)
 
                         // Set environment variables for the comparison script
                         env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
-                        env.TARGET_DIR = "${WORKSPACE}"
+                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
                         env.BUILD_NUMBER = env.BUILD_NUMBER
                         env.SCM_REF = params.SCM_REF
                         env.RELEASE = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'

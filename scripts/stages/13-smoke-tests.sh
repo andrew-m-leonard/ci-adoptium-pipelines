@@ -4,10 +4,11 @@
 # Runs quick validation tests to ensure the JDK build is functional
 #
 # Required Environment Variables:
-#   WORKSPACE     - Root workspace directory
-#   CONFIG_FILE   - Path to pipeline-config.json
-#   TARGET_DIR    - Directory containing artifacts (reads/writes here)
-#   BUILD_NUMBER  - Build number (optional)
+#   WORKSPACE     - Stage workspace directory
+#   CONFIG_FILE          - Path to pipeline-config.json
+#   INPUT_ARTIFACTS_DIR  - Directory containing input artifacts from previous stage
+#   TARGET_DIR           - Directory for this stage's output
+#   BUILD_NUMBER         - Build number (optional)
 #
 # Outputs:
 #   ${TARGET_DIR}/test-results/*  - Test results
@@ -35,6 +36,7 @@ main() {
 
     # Validate environment
     validate_standard_environment
+    require_dir "${INPUT_ARTIFACTS_DIR}"
     require_dir "${TARGET_DIR}"
 
     # Load configuration
@@ -80,14 +82,14 @@ main() {
 find_jdk_artifact() {
     # Look for the main JDK image, excluding other image types
     # JDK image pattern: *jdk_*.tar.gz or *jdk_*.zip (Windows)
-    local artifact=$(find "${TARGET_DIR}" \( -name "*jdk_*.tar.gz" -o -name "*jdk_*.zip" \) \
+    local artifact=$(find "${INPUT_ARTIFACTS_DIR}" \( -name "*jdk_*.tar.gz" -o -name "*jdk_*.zip" \) \
         | head -n 1)
 
     if [[ -z "${artifact}" ]]; then
-        log_error "No JDK image artifact found in ${TARGET_DIR}"
+        log_error "No JDK image artifact found in ${INPUT_ARTIFACTS_DIR}"
         log_error "Looking for pattern: *jdk_*.tar.gz or *jdk_*.zip"
         log_error "Available artifacts:"
-        find "${TARGET_DIR}" \( -name "*.tar.gz" -o -name "*.zip" \) -exec basename {} \; || true
+        find "${INPUT_ARTIFACTS_DIR}" \( -name "*.tar.gz" -o -name "*.zip" \) -exec basename {} \; || true
         exit 1
     fi
 

@@ -272,6 +272,7 @@ class PipelineRunner:
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['TARGET_DIR'] = str(self.artifacts_dir)
+        # Build stage doesn't need INPUT_ARTIFACTS_DIR (first stage)
 
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '02-build.sh')]
 
@@ -280,7 +281,7 @@ class PipelineRunner:
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
         print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
         print(f"  BUILD_NUMBER={env['BUILD_NUMBER']}")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
 
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Build stage complete")
@@ -315,6 +316,7 @@ class PipelineRunner:
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
+        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '12-validate-sbom.sh')]
@@ -323,7 +325,8 @@ class PipelineRunner:
         print(f"Environment:")
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
         print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
 
         try:
             subprocess.run(cmd, env=env, check=True)
@@ -348,6 +351,7 @@ class PipelineRunner:
         env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
+        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '06-sign.sh')]
@@ -355,8 +359,8 @@ class PipelineRunner:
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
-        print(f"  Note: Reads artifacts, signs them, writes back to artifacts_dir")
+        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
 
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Sign stage complete")
@@ -377,6 +381,7 @@ class PipelineRunner:
         env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
+        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '07-installer.sh')]
@@ -384,8 +389,8 @@ class PipelineRunner:
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
-        print(f"  Note: Reads signed artifacts, creates installers in artifacts_dir")
+        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
 
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Installer stage complete")
@@ -406,6 +411,7 @@ class PipelineRunner:
         env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
+        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
         cmd = [str(self.script_dir / 'scripts' / 'stages' / '13-smoke-tests.sh')]
@@ -413,8 +419,8 @@ class PipelineRunner:
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
-        print(f"  Note: Reads JDK artifacts, writes test results to artifacts_dir")
+        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
 
         subprocess.run(cmd, env=env, check=True)
         print("\n✅ Smoke tests complete")
@@ -435,6 +441,7 @@ class PipelineRunner:
         env['WORKSPACE'] = str(self.stage_workspace)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
+        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
         env['SCM_REF'] = self.args.scm_ref
         # Set RELEASE based on release_type (true if RELEASE, false otherwise)
@@ -452,7 +459,8 @@ class PipelineRunner:
         print(f"Running: {' '.join(cmd)}")
         print(f"Environment:")
         print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (artifacts_dir)")
+        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
+        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
         print(f"  SCM_REF={env['SCM_REF']}")
         print(f"  RELEASE={env['RELEASE']}")
         print(f"  Note: Compares locally built JDK against production Adoptium binary")

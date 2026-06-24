@@ -4,10 +4,11 @@
 # Builds platform-specific installers (MSI, PKG, DEB, RPM, etc.)
 #
 # Required Environment Variables:
-#   WORKSPACE     - Root workspace directory
-#   CONFIG_FILE   - Path to pipeline-config.json
-#   TARGET_DIR    - Directory containing artifacts (reads/writes here)
-#   BUILD_NUMBER  - Build number (optional)
+#   WORKSPACE     - Stage workspace directory
+#   CONFIG_FILE          - Path to pipeline-config.json
+#   INPUT_ARTIFACTS_DIR  - Directory containing input artifacts from previous stage
+#   TARGET_DIR           - Directory for this stage's output
+#   BUILD_NUMBER         - Build number (optional)
 #
 # Outputs:
 #   ${TARGET_DIR}/installers/*  - Platform installers
@@ -31,6 +32,7 @@ main() {
 
     # Validate environment
     validate_standard_environment
+    require_dir "${INPUT_ARTIFACTS_DIR}"
     require_dir "${TARGET_DIR}"
 
     # Load configuration
@@ -100,10 +102,10 @@ build_installers() {
     mkdir -p "${TARGET_DIR}/installers"
 
     # Find JDK artifact
-    local jdk_artifact=$(find "${TARGET_DIR}" -name "*.tar.gz" -o -name "*.zip" | head -n 1)
+    local jdk_artifact=$(find "${INPUT_ARTIFACTS_DIR}" -name "*.tar.gz" -o -name "*.zip" | head -n 1)
 
     if [[ -z "${jdk_artifact}" ]]; then
-        log_error "No JDK artifact found in ${TARGET_DIR}"
+        log_error "No JDK artifact found in ${INPUT_ARTIFACTS_DIR}"
         exit 1
     fi
 

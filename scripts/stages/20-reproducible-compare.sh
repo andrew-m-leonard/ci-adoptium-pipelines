@@ -8,10 +8,11 @@ set -euo pipefail
 # reproducibility. Uses temurin-build/tooling/reproducible/repro_compare.sh
 #
 # Required Environment Variables:
-#   WORKSPACE         - Jenkins/local workspace directory
-#   CONFIG_FILE       - Path to pipeline-config.json
-#   TARGET_DIR        - Directory containing build artifacts
-#   SCM_REF           - Git tag/ref for the build (e.g., jdk-21.0.2+13)
+#   WORKSPACE         - Stage workspace directory
+#   CONFIG_FILE          - Path to pipeline-config.json
+#   INPUT_ARTIFACTS_DIR  - Directory containing input artifacts from previous stage
+#   TARGET_DIR           - Directory for this stage's output
+#   SCM_REF              - Git tag/ref for the build (e.g., jdk-21.0.2+13)
 #   RELEASE           - Boolean: true for release builds, false for EA
 #
 # Optional Environment Variables:
@@ -179,16 +180,16 @@ case "${JDK_EXT}" in
 esac
 log_info "Upstream JDK unpacked"
 
-# Find the locally built JDK in TARGET_DIR
-log_info "Finding locally built JDK in: ${TARGET_DIR}"
+# Find the locally built JDK in INPUT_ARTIFACTS_DIR
+log_info "Finding locally built JDK in: ${INPUT_ARTIFACTS_DIR}"
 # Try multiple patterns: OpenJDK* (Adoptium naming) or jdk* (temurin-build naming)
-BUILT_JDK_FILE=$(find "${TARGET_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" -o -name "OpenJDK*jdk-*.${JDK_EXT}" -o -name "jdk*-hotspot.${JDK_EXT}" -o -name "jdk*.${JDK_EXT}" | grep -v "debugimage\|testimage\|static-libs\|jre" | head -n 1)
+BUILT_JDK_FILE=$(find "${INPUT_ARTIFACTS_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" -o -name "OpenJDK*jdk-*.${JDK_EXT}" -o -name "jdk*-hotspot.${JDK_EXT}" -o -name "jdk*.${JDK_EXT}" | grep -v "debugimage\|testimage\|static-libs\|jre" | head -n 1)
 
 if [ -z "${BUILT_JDK_FILE}" ]; then
-    log_error "No locally built JDK found in ${TARGET_DIR}"
+    log_error "No locally built JDK found in ${INPUT_ARTIFACTS_DIR}"
     log_error "Expected patterns: OpenJDK*-jdk_*.${JDK_EXT}, OpenJDK*jdk-*.${JDK_EXT}, jdk*-hotspot.${JDK_EXT}, or jdk*.${JDK_EXT}"
-    log_error "Files found in ${TARGET_DIR}:"
-    ls -la "${TARGET_DIR}"
+    log_error "Files found in ${INPUT_ARTIFACTS_DIR}:"
+    ls -la "${INPUT_ARTIFACTS_DIR}"
     exit 1
 fi
 

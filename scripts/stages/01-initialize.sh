@@ -7,7 +7,7 @@
 # 3. Generating the BUILD_CONFIGURATION JSON for the build
 #
 # Required Environment Variables:
-#   WORKSPACE           - Root workspace directory
+#   WORKSPACE           - Stage workspace directory
 #   JAVA_VERSION        - JDK version to build (e.g., jdk21u, jdk17u)
 #   TARGET_OS           - Target operating system (e.g., mac, linux, windows)
 #   ARCHITECTURE        - Target architecture (e.g., aarch64, x64)

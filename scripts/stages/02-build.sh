@@ -11,7 +11,7 @@
 #   - Boot JDK installed
 #
 # Required Environment Variables:
-#   WORKSPACE     - Root workspace directory
+#   WORKSPACE     - Stage workspace directory
 #   CONFIG_FILE   - Path to pipeline-config.json
 #   TARGET_DIR    - Directory for build artifacts (reads/writes here)
 #   BUILD_NUMBER  - Build number (optional, defaults to 'local')

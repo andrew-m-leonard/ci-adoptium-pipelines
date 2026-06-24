@@ -4,10 +4,11 @@
 # Signs JDK artifacts (tar.gz, zip files)
 #
 # Required Environment Variables:
-#   WORKSPACE     - Root workspace directory
-#   CONFIG_FILE   - Path to pipeline-config.json
-#   TARGET_DIR    - Directory containing artifacts (reads/writes here)
-#   BUILD_NUMBER  - Build number (optional)
+#   WORKSPACE     - Stage workspace directory
+#   CONFIG_FILE          - Path to pipeline-config.json
+#   INPUT_ARTIFACTS_DIR  - Directory containing input artifacts from previous stage
+#   TARGET_DIR           - Directory for this stage's output
+#   BUILD_NUMBER         - Build number (optional)
 #
 # Outputs:
 #   ${TARGET_DIR}/signed/*       - Signed artifacts
@@ -32,6 +33,7 @@ main() {
 
     # Validate environment
     validate_standard_environment
+    require_dir "${INPUT_ARTIFACTS_DIR}"
     require_dir "${TARGET_DIR}"
 
     # Load configuration
@@ -70,12 +72,12 @@ main() {
 
 # Find artifacts that need signing
 find_artifacts_to_sign() {
-    log_info "Finding artifacts to sign in ${TARGET_DIR}"
+    log_info "Finding artifacts to sign in ${INPUT_ARTIFACTS_DIR}"
 
-    local tar_files=$(find "${TARGET_DIR}" -name "*.tar.gz" -o -name "*.zip" | wc -l)
+    local tar_files=$(find "${INPUT_ARTIFACTS_DIR}" -name "*.tar.gz" -o -name "*.zip" | wc -l)
 
     if [[ ${tar_files} -eq 0 ]]; then
-        log_error "No artifacts found to sign in ${TARGET_DIR}"
+        log_error "No artifacts found to sign in ${INPUT_ARTIFACTS_DIR}"
         exit 1
     fi
 
@@ -93,7 +95,7 @@ sign_artifacts() {
     mkdir -p "${TARGET_DIR}/signed"
 
     # Find all tar.gz and zip files
-    find "${TARGET_DIR}" -type f \( -name "*.tar.gz" -o -name "*.zip" \) | while read -r artifact; do
+    find "${INPUT_ARTIFACTS_DIR}" -type f \( -name "*.tar.gz" -o -name "*.zip" \) | while read -r artifact; do
         local filename=$(basename "${artifact}")
         log_info "Processing: ${filename}"
 

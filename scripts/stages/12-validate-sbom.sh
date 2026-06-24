@@ -9,9 +9,10 @@ set -euo pipefail
 # validateSBOM.sh script.
 #
 # Required Environment Variables:
-#   WORKSPACE     - Jenkins workspace directory
-#   CONFIG_FILE   - Path to pipeline-config.json
-#   TARGET_DIR    - Directory containing build artifacts
+#   WORKSPACE     - Stage workspace directory
+#   CONFIG_FILE          - Path to pipeline-config.json
+#   INPUT_ARTIFACTS_DIR  - Directory containing input artifacts from previous stage
+#   TARGET_DIR           - Directory for this stage's output
 #
 # Optional Environment Variables:
 #   JAVA_VERSION  - Java version being built (extracted from config if not set)
@@ -34,6 +35,11 @@ fi
 
 if [ -z "${CONFIG_FILE:-}" ]; then
     echo "ERROR: CONFIG_FILE environment variable is not set"
+    exit 1
+fi
+
+if [ -z "${INPUT_ARTIFACTS_DIR:-}" ]; then
+    echo "ERROR: INPUT_ARTIFACTS_DIR environment variable is not set"
     exit 1
 fi
 
@@ -79,11 +85,11 @@ if [ -z "${SCM_REF:-}" ]; then
 fi
 
 # Find all SBOM JSON files (excluding metadata files)
-echo "Searching for SBOM files in ${TARGET_DIR}..."
-SBOM_FILES=$(find "${TARGET_DIR}" -name '*sbom*.json' -type f | grep -v metadata || true)
+echo "Searching for SBOM files in ${INPUT_ARTIFACTS_DIR}..."
+SBOM_FILES=$(find "${INPUT_ARTIFACTS_DIR}" -name '*sbom*.json' -type f | grep -v metadata || true)
 
 if [ -z "${SBOM_FILES}" ]; then
-    echo "WARNING: No SBOM files found in ${TARGET_DIR}"
+    echo "WARNING: No SBOM files found in ${INPUT_ARTIFACTS_DIR}"
     echo "This may indicate that SBOM generation was not successful"
     exit 1
 fi
