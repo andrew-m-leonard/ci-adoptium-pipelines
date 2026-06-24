@@ -278,13 +278,40 @@ else
 fi
 
 ################################################################################
+# Copy results to TARGET_DIR
+################################################################################
+
+log_section "Copying comparison results to TARGET_DIR"
+
+# Ensure TARGET_DIR exists
+mkdir -p "${TARGET_DIR}"
+
+# Copy comparison report
+if [ -f "${COMPARE_OUTPUT}" ]; then
+    cp "${COMPARE_OUTPUT}" "${TARGET_DIR}/comparison-report.txt"
+    log_info "Copied comparison report to: ${TARGET_DIR}/comparison-report.txt"
+fi
+
+# Copy reproducibility percentage if available
+if [ -f "${COMPARE_WORKSPACE}/ReproduciblePercent" ]; then
+    cp "${COMPARE_WORKSPACE}/ReproduciblePercent" "${TARGET_DIR}/ReproduciblePercent"
+    log_info "Copied reproducibility percentage to: ${TARGET_DIR}/ReproduciblePercent"
+fi
+
+# Copy reprotest.diff if available
+if [ -f "${COMPARE_WORKSPACE}/reprotest.diff" ]; then
+    cp "${COMPARE_WORKSPACE}/reprotest.diff" "${TARGET_DIR}/reprotest.diff"
+    log_info "Copied reprotest.diff to: ${TARGET_DIR}/reprotest.diff"
+fi
+
+################################################################################
 # Cleanup and Summary
 ################################################################################
 
 log_section "Comparison Summary"
 
 log_info "Comparison workspace: ${COMPARE_WORKSPACE}"
-log_info "Comparison report: ${COMPARE_OUTPUT}"
+log_info "Comparison report: ${TARGET_DIR}/comparison-report.txt"
 log_info "Upstream JDK: ${UPSTREAM_JDK_DIR}"
 log_info "Built JDK: ${BUILT_JDK_DIR}"
 
