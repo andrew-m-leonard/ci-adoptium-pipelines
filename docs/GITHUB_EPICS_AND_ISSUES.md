@@ -457,42 +457,58 @@ Create comprehensive documentation covering all aspects of the Phase 1 implement
 
 ## EPIC 2: Remaining Build Stages Rollout
 
-**Title**: Phase 2 - Complete Build Pipeline for JDK21u Linux x64
+**Title**: Phase 2 - Complete Build Pipeline for JDK21u (Linux, Windows, Mac)
 
 **Description**:
-Implement the remaining build pipeline stages to complete the full build workflow for JDK21u Linux x64 Temurin. This phase extends Phase 1's foundation (Initialize, Build, Validate SBOM, Reproducible Compare) with the complete signing, assembly, and installer creation workflow.
+Implement the remaining build pipeline stages to complete the full build workflow for JDK21u Temurin across Linux x64, Windows x64, and Mac aarch64 platforms. This phase extends Phase 1's foundation (Initialize, Build, Validate SBOM, Reproducible Compare) with the complete signing, assembly, and installer creation workflow.
+
+**Rationale for Multi-Platform Phase 2**:
+To properly implement and test the Internal Sign and Assemble stages, we need to build on Windows and Mac platforms since these stages have platform-specific requirements (MSI installers for Windows, PKG installers for Mac, DEB/RPM for Linux). Including all three platforms in Phase 2 ensures the stage implementations are truly portable and work across all major platforms.
+
+**Target Platforms**:
+- JDK21u Linux x64 Temurin (from Phase 1)
+- JDK21u Windows x64 Temurin (new)
+- JDK21u Mac aarch64 Temurin (new)
 
 **Additional Stages to Implement**:
-1. **Internal Sign** - Internal artifact signing for testing
-2. **Assemble** - Assemble build artifacts into distribution packages
+1. **Internal Sign** - Internal artifact signing for testing (platform-specific)
+2. **Assemble** - Assemble build artifacts into distribution packages (platform-specific)
 3. **Sign Artifacts** - Sign JDK artifacts with production certificates
 4. **Build Installers** - Create platform-specific installers (MSI, PKG, DEB, RPM)
-5. **Sign Installers** - Sign installer packages
+5. **Sign Installers** - Sign installer packages (platform-specific)
 6. **GPG Sign** - Create GPG signatures for artifacts
 7. **Verify Signing** - Validate all signatures are correct
 
 **Goals**:
 - Implement all 7 remaining stages as portable shell scripts
+- Ensure stages work across Linux, Windows, and Mac platforms
 - Integrate stages into Jenkins declarative pipeline
 - Add stages to local execution framework
 - Maintain INPUT_ARTIFACTS_DIR/TARGET_DIR pattern
 - Support stage-level restart for all new stages
-- Validate complete pipeline on private Jenkins instance
+- Validate complete pipeline on private Jenkins instance for all three platforms
 
 **Success Criteria**:
 - [ ] All 7 stages implemented as shell scripts
+- [ ] All stages work on Linux, Windows, and Mac
 - [ ] All stages integrated into Jenkinsfile.declarative
 - [ ] All stages work in local execution (run-pipeline.py)
 - [ ] Artifact flow works correctly between stages
 - [ ] Stage restart capability validated
-- [ ] Complete pipeline runs successfully on private Jenkins
-- [ ] All artifacts properly signed and verified
-- [ ] Installers created and signed correctly
+- [ ] Complete pipeline runs successfully on private Jenkins for:
+  - [ ] JDK21u Linux x64
+  - [ ] JDK21u Windows x64
+  - [ ] JDK21u Mac aarch64
+- [ ] All artifacts properly signed and verified on all platforms
+- [ ] Platform-specific installers created and signed correctly:
+  - [ ] DEB/RPM for Linux
+  - [ ] MSI for Windows
+  - [ ] PKG for Mac
 - [ ] Documentation updated
 
-**Timeline**: Weeks 5-7
+**Timeline**: Weeks 5-8
 **Priority**: P0 (Blocker)
-**Labels**: `epic`, `phase-2`, `build-stages`
+**Labels**: `epic`, `phase-2`, `build-stages`, `multi-platform`
 
 ---
 
@@ -997,9 +1013,11 @@ Perform final validation across all Tier 1 platforms to ensure consistency and r
 ## Additional EPICs (Summary)
 
 ### EPIC 4: Tier 2 Rollout
-- Mac aarch64 platforms
-- Windows x64 platforms
-- Timeline: Weeks 10-11
+- Linux aarch64 platforms
+- Mac x64 platforms
+- Timeline: Weeks 9-10
+
+**Note**: Mac aarch64 JDK21u and Windows x64 JDK21u moved to Phase 2 (EPIC 2) to support proper implementation and testing of Internal Sign and Assemble stages.
 
 ### EPIC 5: Tier 3 Rollout
 - Linux aarch64 platforms
