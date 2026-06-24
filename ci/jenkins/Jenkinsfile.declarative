@@ -49,6 +49,7 @@ def ensureBuildDescriptionSet() {
     def config = [:]
     if (fileExists('pipeline-config.json')) {
         config = readJSON(file: 'pipeline-config.json')
+        echo "Config loaded from pipeline-config.json"
     } else {
         // If config doesn't exist yet, we're in Initialize stage, skip for now
         return
@@ -105,6 +106,7 @@ def ensureBuildDescriptionSet() {
         currentBuild.description = description
         echo "Build Description: ${description}"
     }
+    echo "Build UID: ${env.BUILD_UID}"
 }
 
 // Helper function to execute stage with automatic result tracking
