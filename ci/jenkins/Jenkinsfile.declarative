@@ -396,10 +396,12 @@ pipeline {
                             error("Build failed with exit code: ${buildExitCode}")
                         }
 
-                        // Archive build artifacts
-                        archiveArtifacts artifacts: "build_output/**/*",
-                                       fingerprint: true,
-                                       allowEmptyArchive: false
+                        // Archive build artifacts (use relative path from TARGET_DIR)
+                        dir(env.TARGET_DIR) {
+                            archiveArtifacts artifacts: "**/*",
+                                           fingerprint: true,
+                                           allowEmptyArchive: false
+                        }
 
                         finalizeStage('Build')
                     }
@@ -718,11 +720,12 @@ pipeline {
                             returnStatus: true
                         )
 
-                        // Archive comparison results (output directory is fixed by repro_compare.sh)
-                        // Note: This stage outputs to ${WORKSPACE}/reproducible-compare/ regardless of TARGET_DIR
-                        archiveArtifacts artifacts: 'reproducible-compare/comparison-report.txt,reproducible-compare/reprotest.diff,reproducible-compare/reproducible_evidence.log,reproducible-compare/ReproduciblePercent',
-                                       fingerprint: true,
-                                       allowEmptyArchive: true
+                        // Archive comparison results from TARGET_DIR (contents only, no directory wrapper)
+                        dir(env.TARGET_DIR) {
+                            archiveArtifacts artifacts: '**/*',
+                                           fingerprint: true,
+                                           allowEmptyArchive: true
+                        }
 
                         // Set build result if comparison failed
                         if (comparisonExitCode != 0) {
