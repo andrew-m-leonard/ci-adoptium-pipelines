@@ -183,7 +183,8 @@ log_info "Upstream JDK unpacked"
 # Find the locally built JDK in INPUT_ARTIFACTS_DIR
 log_info "Finding locally built JDK in: ${INPUT_ARTIFACTS_DIR}"
 # Try multiple patterns: OpenJDK* (Adoptium naming) or jdk* (temurin-build naming)
-BUILT_JDK_FILE=$(find "${INPUT_ARTIFACTS_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" -o -name "OpenJDK*jdk-*.${JDK_EXT}" -o -name "jdk*-hotspot.${JDK_EXT}" -o -name "jdk*.${JDK_EXT}" | grep -v "debugimage\|testimage\|static-libs\|jre" | head -n 1)
+# Exclude source tarballs (-src), debug images, test images, static libs, and JRE
+BUILT_JDK_FILE=$(find "${INPUT_ARTIFACTS_DIR}" -name "OpenJDK*-jdk_*.${JDK_EXT}" | grep -v "sources\debugimage\|testimage\|static-libs\|jre" | head -n 1)
 
 if [ -z "${BUILT_JDK_FILE}" ]; then
     log_error "No locally built JDK found in ${INPUT_ARTIFACTS_DIR}"
