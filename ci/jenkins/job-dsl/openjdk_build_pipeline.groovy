@@ -208,10 +208,6 @@ pipelineJob(jobName) {
             false,
             'Run TCK tests (Temurin only, release/weekly builds)')
         
-        booleanParam('EA_BETA_BUILD',
-            false,
-            'Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
-        
         booleanParam('REPRODUCIBLE_COMPARE_BUILD',
             defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
             'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)')

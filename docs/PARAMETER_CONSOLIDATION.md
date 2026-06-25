@@ -114,7 +114,6 @@ Updated hardcoded JSON examples to use the standardized parameter names:
 | `SIGN_ARTIFACTS` | Boolean | false | Sign artifacts and installers |
 | `PUBLISH_ARTIFACTS` | Boolean | false | Publish to release repository |
 | `RUN_REPRODUCIBLE_COMPARE` | Boolean | false | Run reproducible build comparison |
-| `EA_BETA_BUILD` | Boolean | false | Enable EA/Beta build (adds --with-version-opt=ea) |
 
 ### Build Job Parameters
 
@@ -136,7 +135,7 @@ Updated hardcoded JSON examples to use the standardized parameter names:
 | `RUN_REPRODUCIBLE_COMPARE` | Boolean | false | Run reproducible build comparison |
 | `ENABLE_INSTALLERS` | Boolean | true | Build installers |
 | `ENABLE_TCK` | Boolean | false | Run TCK tests (Temurin only, release/weekly builds) |
-| `EA_BETA_BUILD` | Boolean | false | Enable EA/Beta build (adds --with-version-opt=ea) |
+| `RELEASE_TYPE` (WEEKLY) | — | — | Implies EA/Beta build (adds --with-version-opt=ea) |
 
 ## Migration Notes
 

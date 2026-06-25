@@ -262,7 +262,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     if (!params.SIGN_ARTIFACTS) {
         pythonArgs.add("--no-signer")
     }
-    if (params.EA_BETA_BUILD) {
+    if (params.RELEASE_TYPE?.toUpperCase() == 'WEEKLY') {
         pythonArgs.add("--ea-beta-build")
     }
 

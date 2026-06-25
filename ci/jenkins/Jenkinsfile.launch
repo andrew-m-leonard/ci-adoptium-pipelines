@@ -172,8 +172,7 @@ pipeline {
                                         booleanParam(name: 'ENABLE_INSTALLERS', value: params.ENABLE_INSTALLERS),
                                         booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
                                         booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
-                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE),
-                                        booleanParam(name: 'EA_BETA_BUILD', value: params.EA_BETA_BUILD)
+                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
                                     ],
                                     wait: true,
                                     propagate: false  // Don't fail immediately, collect all results first

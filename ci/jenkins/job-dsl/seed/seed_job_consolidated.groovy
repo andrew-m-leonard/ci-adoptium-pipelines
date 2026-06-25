@@ -221,10 +221,6 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
 
-            booleanParam('EA_BETA_BUILD',
-                false,
-                'Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
-
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments')
 
