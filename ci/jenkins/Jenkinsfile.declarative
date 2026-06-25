@@ -90,7 +90,7 @@ def ensureBuildDescriptionSet(def config) {
         }
     }
     
-    description += "BUILD_UID: ${env.BUILD_UID}"
+    description += "BUILD_UID: ${env.BUILD_UID} | GROUP_UID: ${env.GROUP_UID}"
     
     // Always set display name and description to ensure BUILD_UID is current (important for restarts)
     if (currentBuild.displayName != displayName) {

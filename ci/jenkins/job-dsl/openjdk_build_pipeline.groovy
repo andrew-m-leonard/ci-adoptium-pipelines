@@ -194,6 +194,9 @@ pipelineJob(jobName) {
             ['NIGHTLY', 'WEEKLY', 'RELEASE'],
             'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
 
+        stringParam('GROUP_UID', '',
+            'Optional group identifier linking all platform builds from the same launch (set automatically by Launch pipeline)')
+
         stringParam('SCM_REF', '',
             'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 

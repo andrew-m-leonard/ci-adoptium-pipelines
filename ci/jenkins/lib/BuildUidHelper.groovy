@@ -149,6 +149,22 @@ def initializeBuildContext(String stageName) {
         echo "Reusing existing BUILD_UID: ${env.BUILD_UID}"
     }
 
+    // Resolve GROUP_UID: use param if supplied, reuse env if already set, else auto-generate
+    if (!env.GROUP_UID) {
+        def supplied = params?.GROUP_UID?.trim()
+        if (supplied) {
+            env.GROUP_UID = supplied
+            echo "Using supplied GROUP_UID: ${env.GROUP_UID}"
+        } else {
+            def timestamp = new Date().format('yyyyMMdd-HHmmss')
+            def random = UUID.randomUUID().toString().take(8)
+            env.GROUP_UID = "group-${timestamp}-${random}"
+            echo "Generated new GROUP_UID: ${env.GROUP_UID}"
+        }
+    } else {
+        echo "Reusing existing GROUP_UID: ${env.GROUP_UID}"
+    }
+
     // Load existing stage results if available
     if (env.BUILD_STAGE_RESULTS) {
         def results = parseStageResults(env.BUILD_STAGE_RESULTS)

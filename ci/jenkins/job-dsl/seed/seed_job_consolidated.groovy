@@ -221,6 +221,9 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
 
+            stringParam('GROUP_UID', '',
+                'Optional group identifier to associate all platform builds from this launch together (e.g., "April 2026 CPU JDK 21"). Auto-generated if not specified.')
+
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments')
 

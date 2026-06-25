@@ -482,6 +482,8 @@ extract_build_metadata() {
     jq -n \
         --arg version "${version}" \
         --arg buildNumber "${BUILD_NUMBER}" \
+        --arg buildUid "${BUILD_UID:-}" \
+        --arg groupUid "${GROUP_UID:-}" \
         --arg timestamp "$(date +%s)" \
         --arg timestampISO "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg stage "${STAGE_NAME}" \
@@ -493,6 +495,8 @@ extract_build_metadata() {
         '{
             version: $version,
             buildNumber: $buildNumber,
+            buildUid: $buildUid,
+            groupUid: $groupUid,
             timestamp: ($timestamp | tonumber),
             timestampISO: $timestampISO,
             stage: $stage,

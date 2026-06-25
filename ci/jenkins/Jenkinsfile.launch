@@ -10,6 +10,23 @@
 
 import groovy.json.JsonSlurper
 
+/**
+ * Resolve GROUP_UID: use the supplied parameter value or auto-generate a unique one.
+ * Sets env.GROUP_UID and updates the build description.
+ */
+def resolveGroupUid() {
+    if (params.GROUP_UID?.trim()) {
+        env.GROUP_UID = params.GROUP_UID.trim()
+        echo "Using supplied GROUP_UID: ${env.GROUP_UID}"
+    } else {
+        def timestamp = new Date().format('yyyyMMdd-HHmmss')
+        def random = UUID.randomUUID().toString().take(8)
+        env.GROUP_UID = "group-${timestamp}-${random}"
+        echo "Generated GROUP_UID: ${env.GROUP_UID}"
+    }
+    currentBuild.description = "GROUP_UID: ${env.GROUP_UID}"
+}
+
 pipeline {
     agent any
     
@@ -27,12 +44,16 @@ pipeline {
                 script {
                     // Use JDK_VERSION parameter (set by seed job)
                     env.JDK_VERSION = params.JDK_VERSION
-                    
+
+                    // Resolve GROUP_UID (generates one if not supplied)
+                    resolveGroupUid()
+
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Configuration Repository: ${params.CONFIG_REPO_URL}"
                     echo "Configuration Branch: ${params.CONFIG_REPO_BRANCH}"
                     echo "Regenerate Jobs: ${params.REGENERATE_JOBS}"
                     echo "Platforms: ${params.PLATFORMS}"
+                    echo "GROUP_UID: ${env.GROUP_UID}"
                 }
             }
         }
@@ -168,6 +189,7 @@ pipeline {
                                         string(name: 'SCM_REF', value: params.SCM_REF ?: ''),
                                         string(name: 'BUILD_REF', value: params.BUILD_REF ?: ''),
                                         string(name: 'RELEASE_TYPE', value: params.RELEASE_TYPE),
+                                        string(name: 'GROUP_UID', value: env.GROUP_UID),
                                         booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
                                         booleanParam(name: 'ENABLE_INSTALLERS', value: params.ENABLE_INSTALLERS),
                                         booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
