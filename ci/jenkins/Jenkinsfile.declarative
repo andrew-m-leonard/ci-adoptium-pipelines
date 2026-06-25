@@ -108,9 +108,6 @@ def ensureBuildDescriptionSet(def config) {
 // This eliminates the need for repetitive post blocks in every stage
 // Saves ~12KB of bytecode by replacing 60 post blocks with 1 function
 def executeStageWithTracking(String stageName, Closure body) {
-    // Ensure buildUidHelper is loaded before executing stage
-    ensureBuildUidHelperLoaded()
-    
     try {
         body()
         buildUidHelper.recordStageResult(stageName, 'SUCCESS')
@@ -138,7 +135,10 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     // Checkout ci-adoptium-pipelines repository
     checkout scm
     
-    // Initialize BUILD_UID and build context (helper already loaded in executeStageWithTracking)
+    // Load BuildUidHelper after checkout (needed for stage restarts)
+    ensureBuildUidHelperLoaded()
+    
+    // Initialize BUILD_UID and build context
     buildUidHelper.initializeBuildContext(stageName)
     
     // Validate prerequisites (skip for Initialize stage)
