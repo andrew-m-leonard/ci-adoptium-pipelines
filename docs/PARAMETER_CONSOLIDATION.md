@@ -15,7 +15,7 @@ Added three new parameters to the launch job to support source control and relea
 ```groovy
 // Source control parameters
 stringParam('SCM_REF', '',
-    'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
+    'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 
 stringParam('BUILD_REF', '',
     'Git reference for the build scripts repository (leave empty for default branch)')
@@ -44,7 +44,7 @@ Added the same source control parameters to build jobs for consistency:
 
 ```groovy
 stringParam('SCM_REF', '',
-    'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
+    'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 
 stringParam('BUILD_REF', '',
     'Git reference for the build scripts repository (leave empty for default branch)')

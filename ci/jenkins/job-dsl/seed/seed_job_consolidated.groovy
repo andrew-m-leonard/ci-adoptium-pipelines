@@ -212,7 +212,7 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
             // Source control parameters
             stringParam('SCM_REF', '',
-                'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.1+12)')
+                'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 
             stringParam('BUILD_REF', '',
                 'Git reference for the build scripts repository (leave empty for default branch)')

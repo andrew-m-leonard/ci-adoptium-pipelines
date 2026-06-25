@@ -218,7 +218,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     
     // Validate parameters
     if (params.RUN_REPRODUCIBLE_COMPARE && (!params.SCM_REF || params.SCM_REF.trim().isEmpty())) {
-        def errorMsg = "RUN_REPRODUCIBLE_COMPARE requires SCM_REF to be specified. Please provide a valid SCM reference (e.g., jdk-21.0.5+11)"
+        def errorMsg = "RUN_REPRODUCIBLE_COMPARE requires SCM_REF to be specified. Please provide a valid SCM reference (e.g., jdk-21.0.12+6_adopt)"
         echo "ERROR: ${errorMsg}"
         error(errorMsg)
     }
