@@ -544,7 +544,7 @@ pipeline {
                     expression { env.CONFIG_VARIANT == 'temurin' }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
-                        expression { env.JOB_NAME.contains('pr-tester') }
+                        expression { env.JOB_NAME?.contains('pr-tester') }
                     }
                 }
             }
@@ -579,7 +579,7 @@ pipeline {
                     expression { env.CONFIG_VARIANT == 'temurin' }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
-                        expression { env.JOB_NAME.contains('pr-tester') }
+                        expression { env.JOB_NAME?.contains('pr-tester') }
                     }
                 }
             }
@@ -603,7 +603,7 @@ pipeline {
                 label 'worker'
             }
             when {
-                expression { env.CONFIG_BUILD_ARGS.contains('--create-sbom') }
+                expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
             }
             steps {
                 script {
