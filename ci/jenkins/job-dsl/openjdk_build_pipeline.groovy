@@ -192,7 +192,7 @@ pipelineJob(jobName) {
         // Additional build parameters
         choiceParam('RELEASE_TYPE',
             ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-            'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
+            'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
 
         stringParam('SCM_REF', '',
             'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')

@@ -22,7 +22,7 @@ stringParam('BUILD_REF', '',
 
 choiceParam('RELEASE_TYPE',
     ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-    'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly builds, RELEASE=official releases)')
+    'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
 ```
 
 ### 2. Build Job Duplicate Parameters Removed
