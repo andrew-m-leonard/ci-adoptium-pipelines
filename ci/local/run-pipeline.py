@@ -232,7 +232,7 @@ class PipelineRunner:
             cmd.append('--no-installers')
         if not self.args.enable_signer:
             cmd.append('--no-signer')
-        if self.args.ea_beta_build:
+        if (self.args.release_type or '').upper() == 'WEEKLY':
             cmd.append('--ea-beta-build')
         if self.args.compare_build:
             cmd.append('--compare-build')
@@ -622,7 +622,7 @@ Examples:
 
     # Build type - case-insensitive (will be converted to uppercase)
     parser.add_argument('--release-type', type=str,
-                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
+                        help='Type of release build: NIGHTLY (default), WEEKLY (EA beta builds), or RELEASE (case-insensitive)')
 
     # Git refs
     parser.add_argument('--scm-ref',
@@ -658,8 +658,6 @@ Examples:
                         help='Disable artifact signing')
     parser.add_argument('--compare-build', action='store_true',
                         help='Enable reproducible build comparison against production Adoptium binaries (requires --scm-ref)')
-    parser.add_argument('--ea-beta-build', action='store_true',
-                        help='Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
 
     parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
 
