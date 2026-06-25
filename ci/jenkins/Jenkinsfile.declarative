@@ -801,6 +801,20 @@ pipeline {
             script {
                 echo "=== Pipeline Cleanup ==="
 
+                // Detect user error: Rebuild of a Restarted build.
+                // In that scenario the Initialize stage is skipped (its when{} guard passes only
+                // on a true first run), so BUILD_UID is never set and every subsequent stage
+                // also skips.  All stages appear green but nothing actually ran — mark the
+                // build FAILURE so the operator knows the rebuild was invalid.
+                if (env.BUILD_UID == null) {
+                    currentBuild.result = 'FAILURE'
+                    echo "❌ ERROR: BUILD_UID is not set — no stages executed. " +
+                         "This is most likely caused by performing a Rebuild on a build that was " +
+                         "itself a Restart (e.g. 'Restart from Stage: Validate SBOM'). " +
+                         "Rebuilding a Restarted build is not supported because the pipeline " +
+                         "environment cannot be reconstructed. Please trigger a new build instead."
+                }
+
                 // Final cleanup: Clean entire workspace if CLEAN_WORKSPACE_AFTER_STAGE=true
                 // Note: Individual stages already perform their own post-cleanup
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
