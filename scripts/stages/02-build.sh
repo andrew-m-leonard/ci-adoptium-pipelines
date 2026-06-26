@@ -461,21 +461,25 @@ execute_build() {
 extract_build_metadata() {
     log_info "Extracting build metadata"
 
-    # Get VERSION_STRING from build spec.gmk (most reliable source)
     local version="unknown"
-    local spec_file="${WORKSPACE}/temurin-build/workspace/build/src/build/"*/spec.gmk
 
-    if [[ -f ${spec_file} ]]; then
-        # Extract VERSION_STRING value from spec.gmk
-        version=$(grep "^VERSION_STRING[ ]*:=" ${spec_file} | sed "s/^VERSION_STRING[ ]*:=[ ]*//")
-        if [[ -n "${version}" ]]; then
+    # Get VERSION_STRING from build spec.gmk (most reliable source)
+    # Use find rather than a glob in [[ -f ]] — bash does not expand globs in [[ ]]
+    local spec_file
+    spec_file=$(find "${WORKSPACE}/temurin-build/workspace/build/src/build" \
+                    -name "spec.gmk" 2>/dev/null | head -1)
+    if [[ -n "${spec_file}" && -f "${spec_file}" ]]; then
+        local v
+        v=$(grep "^VERSION_STRING[ ]*:=" "${spec_file}" \
+            | sed "s/^VERSION_STRING[ ]*:=[ ]*//" | tr -d '[:space:]')
+        if [[ -n "${v}" ]]; then
+            version="${v}"
             log_info "Build version: ${version}"
         else
             log_warn "VERSION_STRING not found in spec.gmk"
-            version="unknown"
         fi
     else
-        log_warn "spec.gmk not found at: ${spec_file}"
+        log_warn "spec.gmk not found under ${WORKSPACE}/temurin-build/workspace/build/src/build"
     fi
 
     # Create build metadata JSON using jq to properly escape values
