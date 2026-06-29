@@ -552,7 +552,7 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Build Installers') {
-                        def config = initializeStage('Build Installers', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,workspace/target/metadata/**/*')
+                        def config = initializeStage('Build Installers', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
 
                         // Execute installer build script (vendor-overridable)
                         def installerExitCode = runStageScript('07-installer', config)
