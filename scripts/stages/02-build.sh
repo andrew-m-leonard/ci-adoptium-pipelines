@@ -473,7 +473,7 @@ extract_build_metadata() {
         v=$(grep "^VERSION_STRING[ ]*:=" "${spec_file}" \
             | sed "s/^VERSION_STRING[ ]*:=[ ]*//" | tr -d '[:space:]')
         if [[ -n "${v}" ]]; then
-            version="${v}"
+            version="jdk-${v}"
             log_info "Build version: ${version}"
         else
             log_warn "VERSION_STRING not found in spec.gmk"
