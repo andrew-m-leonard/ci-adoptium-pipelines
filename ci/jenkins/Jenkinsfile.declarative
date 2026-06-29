@@ -128,34 +128,34 @@ def executeStageWithTracking(String stageName, Closure body) {
 def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json', String inputArtifactsDir = null) {
     // Echo stage banner
     echo "=== ${stageName} ==="
-    
+
     // Pre-cleanup: Always clean workspace for restartability
     cleanWs()
-    
+
     // Checkout ci-adoptium-pipelines repository
     checkout scm
-    
+
     // Load BuildUidHelper after checkout (needed for stage restarts)
     ensureBuildUidHelperLoaded()
-    
+
     // Initialize BUILD_UID and build context
     buildUidHelper.initializeBuildContext(stageName)
-    
+
     // Validate prerequisites (skip for Initialize stage)
     if (stageName != 'Initialize') {
         buildUidHelper.validatePrerequisites(stageName, prerequisites)
     }
-    
+
     // Retrieve artifacts if filter specified (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
         // Determine target directory for artifacts
         def targetDir = inputArtifactsDir ?: '.'
-        
+
         // Create input artifacts directory if specified
         if (inputArtifactsDir) {
             sh "mkdir -p ${inputArtifactsDir}"
         }
-        
+
         try {
             copyArtifacts(
                 projectName: env.JOB_NAME,
@@ -170,15 +170,23 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
             error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
         }
     }
-    
+
     // Return config for convenience (empty for Initialize stage)
     if (stageName == 'Initialize') {
         return [:]  // Return empty map for Initialize stage
     } else {
-        // Read config from appropriate location
-        def configPath = inputArtifactsDir ? "${inputArtifactsDir}/pipeline-config.json" : 'pipeline-config.json'
-        def config = readJSON(file: configPath)
-        ensureBuildDescriptionSet(config)        
+        // Set standard common environment variables available to all stage scripts.
+        // INPUT_ARTIFACTS_DIR is the directory where copied artifacts land (or workspace
+        // root when no dedicated dir is used). CONFIG_FILE always points to the
+        // pipeline-config.json inside that directory.
+        env.WORKSPACE        = "${WORKSPACE}"
+        env.BUILD_NUMBER     = "${BUILD_NUMBER}"
+        env.INPUT_ARTIFACTS_DIR = inputArtifactsDir ?: "${WORKSPACE}"
+        env.CONFIG_FILE      = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
+
+        // Read config from the resolved CONFIG_FILE location
+        def config = readJSON(file: env.CONFIG_FILE)
+        ensureBuildDescriptionSet(config)
         return config
     }
 }
@@ -299,6 +307,66 @@ def generatePipelineConfig(String configDir = './configurations') {
 
 // ============================================================================
 
+/**
+ * Resolve and execute a stage script, returning an exit code.
+ * Searches config-repo/vendor-scripts/ first, then scripts/stages/ (this repo).
+ * Supports .sh, .groovy, and .py implementations.
+ *
+ * Resolution order:
+ *   1. config-repo/vendor-scripts/<stem>.sh
+ *   2. config-repo/vendor-scripts/<stem>.groovy
+ *   3. config-repo/vendor-scripts/<stem>.py
+ *   4. scripts/stages/<stem>.sh
+ *   5. scripts/stages/<stem>.groovy
+ *   6. scripts/stages/<stem>.py
+ *   7. built-in no-op (returns 0 — does not fail the build)
+ *
+ * Script contracts:
+ *   .sh     — signals failure via exit code
+ *   .py     — signals failure via exit code
+ *   .groovy — call(Map config) must return an int exit code (0 = success)
+ *
+ * Returns: int exit code — 0 = success, non-zero = failure.
+ *          Caller decides whether to error() or mark UNSTABLE.
+ *
+ * @param scriptStem  Script stem e.g. '03-internal-sign'
+ * @param config      Pipeline config map — forwarded to .groovy scripts as the call() argument.
+ *                    .sh and .py scripts receive config indirectly via environment variables
+ *                    set by initializeStage(): WORKSPACE, BUILD_NUMBER, INPUT_ARTIFACTS_DIR,
+ *                    and CONFIG_FILE (path to pipeline-config.json, readable with jq/python json).
+ */
+def runStageScript(String scriptStem, def config = null) {
+    def candidates = [
+        [path: "config-repo/vendor-scripts/${scriptStem}.sh",     type: 'sh'],
+        [path: "config-repo/vendor-scripts/${scriptStem}.groovy", type: 'groovy'],
+        [path: "config-repo/vendor-scripts/${scriptStem}.py",     type: 'py'],
+        [path: "scripts/stages/${scriptStem}.sh",                 type: 'sh'],
+        [path: "scripts/stages/${scriptStem}.groovy",             type: 'groovy'],
+        [path: "scripts/stages/${scriptStem}.py",                 type: 'py'],
+    ]
+
+    def found = candidates.find { fileExists(it.path) }
+
+    if (!found) {
+        echo "ℹ️  No script found for '${scriptStem}' — stage is a no-op"
+        return 0
+    }
+
+    echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
+
+    switch (found.type) {
+        case 'sh':
+            return sh(script: "bash ${found.path}", returnStatus: true)
+        case 'groovy':
+            def script = load found.path
+            return script(config) ?: 0
+        case 'py':
+            return sh(script: "python3 ${found.path}", returnStatus: true)
+    }
+}
+
+// ============================================================================
+
 pipeline {
     agent none
 
@@ -333,7 +401,10 @@ pipeline {
                                 ]],
                                 extensions: [
                                     [$class: 'SparseCheckoutPaths',
-                                     sparseCheckoutPaths: [[path: 'configurations/*']]]
+                                     sparseCheckoutPaths: [
+                                         [path: 'configurations/*'],
+                                         [path: 'vendor-scripts/*']
+                                     ]]
                                 ]
                             ])
                         }
@@ -368,29 +439,11 @@ pipeline {
                     executeStageWithTracking('Build') {
                         def config = initializeStage('Build', ['Initialize'])
 
-                        // Set environment variables for the build script
-                        env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${WORKSPACE}/pipeline-config.json"
+                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/build_output"
-                        env.BUILD_NUMBER = env.BUILD_NUMBER
 
-                        // Execute build stage script (bash)
-                        def buildExitCode = sh(
-                            script: '''
-                                #!/bin/bash
-                                set -e
-
-                                echo "Running JDK build..."
-                                echo "  WORKSPACE: ${WORKSPACE}"
-                                echo "  CONFIG_FILE: ${CONFIG_FILE}"
-                                echo "  TARGET_DIR: ${TARGET_DIR}"
-
-                                # Execute the build stage script
-                                bash scripts/stages/02-build.sh
-                            ''',
-                            returnStatus: true
-                        )
-
+                        // Execute build stage script (vendor-overridable)
+                        def buildExitCode = runStageScript('02-build', config)
                         if (buildExitCode != 0) {
                             error("Build failed with exit code: ${buildExitCode}")
                         }
@@ -427,9 +480,9 @@ pipeline {
                     executeStageWithTracking('Internal Sign') {
                         def config = initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
-                        // Execute internal sign script
-                        def signScript = load 'scripts/stages/03-internal-sign.groovy'
-                        signScript(config)
+                        // Execute internal sign script (vendor-overridable)
+                        def signExitCode = runStageScript('03-internal-sign', config)
+                        if (signExitCode != 0) { error("Internal Sign failed with exit code: ${signExitCode}") }
 
                         finalizeStage('Internal Sign')
                     }
@@ -456,9 +509,9 @@ pipeline {
                     executeStageWithTracking('Assemble') {
                         def config = initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
-                        // Execute assemble script
-                        def assembleScript = load 'scripts/stages/04-assemble.groovy'
-                        assembleScript(config)
+                        // Execute assemble script (vendor-overridable)
+                        def assembleExitCode = runStageScript('04-assemble', config)
+                        if (assembleExitCode != 0) { error("Assemble failed with exit code: ${assembleExitCode}") }
 
                         finalizeStage('Assemble')
                     }
@@ -478,9 +531,9 @@ pipeline {
                     executeStageWithTracking('Sign Artifacts') {
                         def config = initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
-                        // Execute sign script
-                        def signScript = load 'scripts/stages/06-sign.groovy'
-                        signScript(config)
+                        // Execute sign artifacts script (vendor-overridable)
+                        def signExitCode = runStageScript('06-sign', config)
+                        if (signExitCode != 0) { error("Sign Artifacts failed with exit code: ${signExitCode}") }
 
                         finalizeStage('Sign Artifacts')
                     }
@@ -500,9 +553,9 @@ pipeline {
                     executeStageWithTracking('Build Installers') {
                         def config = initializeStage('Build Installers', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,workspace/target/metadata/**/*')
 
-                        // Execute installer build script
-                        def installerScript = load 'scripts/stages/07-installer.groovy'
-                        installerScript(config)
+                        // Execute installer build script (vendor-overridable)
+                        def installerExitCode = runStageScript('07-installer', config)
+                        if (installerExitCode != 0) { error("Build Installers failed with exit code: ${installerExitCode}") }
 
                         finalizeStage('Build Installers')
                     }
@@ -525,9 +578,9 @@ pipeline {
                     executeStageWithTracking('Sign Installers') {
                         def config = initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
-                        // Execute installer sign script
-                        def signInstallerScript = load 'scripts/stages/08-sign-installer.groovy'
-                        signInstallerScript(config)
+                        // Execute sign installers script (vendor-overridable)
+                        def signInstExitCode = runStageScript('08-sign-installer', config)
+                        if (signInstExitCode != 0) { error("Sign Installers failed with exit code: ${signInstExitCode}") }
 
                         finalizeStage('Sign Installers')
                     }
@@ -553,15 +606,15 @@ pipeline {
                     executeStageWithTracking('GPG Sign') {
                         def config = initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
 
-                        // Execute GPG sign script
-                        def gpgSignScript = load 'scripts/stages/09-gpg-sign.groovy'
-                        gpgSignScript(config)
+                        // Execute GPG sign script (vendor-overridable)
+                        def gpgExitCode = runStageScript('09-gpg-sign', config)
+                        if (gpgExitCode != 0) { error("GPG Sign failed with exit code: ${gpgExitCode}") }
 
-                        // SBOM signing if applicable
+                        // SBOM signing if applicable (vendor-overridable)
                         if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
                             echo "=== SBOM JSF Signing ==="
-                            def sbomSignScript = load 'scripts/stages/10-sbom-sign.groovy'
-                            sbomSignScript(config)
+                            def sbomExitCode = runStageScript('10-sbom-sign', config)
+                            if (sbomExitCode != 0) { error("SBOM Sign failed with exit code: ${sbomExitCode}") }
                         }
 
                         finalizeStage('GPG Sign')
@@ -588,9 +641,9 @@ pipeline {
                     executeStageWithTracking('Verify Signing') {
                         def config = initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
-                        // Execute verify script
-                        def verifyScript = load 'scripts/stages/11-verify-signing.groovy'
-                        verifyScript(config)
+                        // Execute verify signing script (vendor-overridable)
+                        def verifyExitCode = runStageScript('11-verify-signing', config)
+                        if (verifyExitCode != 0) { error("Verify Signing failed with exit code: ${verifyExitCode}") }
 
                         finalizeStage('Verify Signing')
                     }
@@ -608,18 +661,14 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Validate SBOM') {
-                        // Set directories before initializeStage
-                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', "${WORKSPACE}/stage_input_artifacts")
+
+                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/sbom_validation_output"
-                        
-                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', env.INPUT_ARTIFACTS_DIR)
 
-                        // Set environment variables for the SBOM validation script
-                        env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-
-                        // Execute SBOM validation script (bash)
-                        sh 'bash scripts/stages/12-validate-sbom.sh'
+                        // Execute SBOM validation script (vendor-overridable)
+                        def sbomValExitCode = runStageScript('12-validate-sbom', config)
+                        if (sbomValExitCode != 0) { error("Validate SBOM failed with exit code: ${sbomValExitCode}") }
 
                         finalizeStage('Validate SBOM')
                     }
@@ -642,33 +691,13 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Smoke Tests') {
-                        // Set directories before initializeStage
-                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+
+                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/smoke_test_output"
-                        
-                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', env.INPUT_ARTIFACTS_DIR)
 
-                        // Set environment variables for the smoke test script
-                        env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-                        env.BUILD_NUMBER = env.BUILD_NUMBER
-
-                        // Execute smoke test script (bash)
-                        def smokeTestExitCode = sh(
-                            script: '''
-                                #!/bin/bash
-                                set -e
-
-                                echo "Running smoke tests..."
-                                echo "  WORKSPACE: ${WORKSPACE}"
-                                echo "  CONFIG_FILE: ${CONFIG_FILE}"
-                                echo "  TARGET_DIR: ${TARGET_DIR}"
-
-                                # Execute the smoke test stage script
-                                bash scripts/stages/13-smoke-tests.sh
-                            ''',
-                            returnStatus: true
-                        )
+                        // Execute smoke test script (vendor-overridable)
+                        def smokeTestExitCode = runStageScript('13-smoke-tests', config)
 
                         // Set environment variable for downstream stages
                         env.SMOKE_TESTS_PASSED = (smokeTestExitCode == 0).toString()
@@ -700,24 +729,15 @@ pipeline {
             steps {
                 script {
                     executeStageWithTracking('Reproducible Compare Build') {
-                        // Set directories before initializeStage
-                        env.INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
+                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+
+                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"
-                        
-                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', env.INPUT_ARTIFACTS_DIR)
+                        env.SCM_REF    = params.SCM_REF
+                        env.RELEASE    = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
 
-                        // Set environment variables for the comparison script
-                        env.WORKSPACE = "${WORKSPACE}"
-                        env.CONFIG_FILE = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-                        env.BUILD_NUMBER = env.BUILD_NUMBER
-                        env.SCM_REF = params.SCM_REF
-                        env.RELEASE = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
-
-                        // Execute reproducible compare script (handles all output internally)
-                        def comparisonExitCode = sh(
-                            script: 'bash scripts/stages/20-reproducible-compare.sh',
-                            returnStatus: true
-                        )
+                        // Execute reproducible compare script (vendor-overridable)
+                        def comparisonExitCode = runStageScript('20-reproducible-compare', config)
 
                         // Archive comparison results from TARGET_DIR (contents only, no directory wrapper)
                         dir(env.TARGET_DIR) {
@@ -752,9 +772,9 @@ pipeline {
                     executeStageWithTracking('AQA Tests') {
                         def config = initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                        // Execute AQA test script
-                        def aqaTestScript = load 'scripts/stages/14-aqa-tests.groovy'
-                        aqaTestScript(config)
+                        // Execute AQA test script (vendor-overridable)
+                        def aqaExitCode = runStageScript('14-aqa-tests', config)
+                        if (aqaExitCode != 0) { error("AQA Tests failed with exit code: ${aqaExitCode}") }
 
                         finalizeStage('AQA Tests')
                     }
@@ -785,9 +805,9 @@ pipeline {
                     executeStageWithTracking('TCK Tests') {
                         def config = initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                        // Execute TCK test script
-                        def tckTestScript = load 'scripts/stages/15-tck-tests.groovy'
-                        tckTestScript(config)
+                        // Execute TCK test script (vendor-overridable)
+                        def tckExitCode = runStageScript('15-tck-tests', config)
+                        if (tckExitCode != 0) { error("TCK Tests failed with exit code: ${tckExitCode}") }
 
                         finalizeStage('TCK Tests')
                     }
