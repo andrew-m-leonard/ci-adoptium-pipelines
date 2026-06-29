@@ -300,6 +300,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
     env.CONFIG_SIGN_ARTIFACTS = config.parameters.enableSigner.toString()
     env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
+    env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
     env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
     
     return config
@@ -810,6 +811,31 @@ pipeline {
                         if (tckExitCode != 0) { error("TCK Tests failed with exit code: ${tckExitCode}") }
 
                         finalizeStage('TCK Tests')
+                    }
+                }
+            }
+        }
+
+        stage('Publish Artifacts') {
+            agent {
+                label 'worker'
+            }
+            when {
+                expression { env.CONFIG_PUBLISH_ARTIFACTS == 'true' }
+            }
+            steps {
+                script {
+                    executeStageWithTracking('Publish Artifacts') {
+                        def config = initializeStage('Publish Artifacts', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/*.msi,**/*.pkg,**/metadata/**/*')
+
+                        // Stage-specific env vars
+                        env.TARGET_DIR = "${WORKSPACE}/publish_output"
+
+                        // Execute publish artifacts script (vendor-overridable)
+                        def publishExitCode = runStageScript('16-publish', config)
+                        if (publishExitCode != 0) { error("Publish Artifacts failed with exit code: ${publishExitCode}") }
+
+                        finalizeStage('Publish Artifacts')
                     }
                 }
             }

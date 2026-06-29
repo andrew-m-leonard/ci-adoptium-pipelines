@@ -39,8 +39,8 @@ lower-cased hyphenated description:
 | Build                  | `02-build`               | Full implementation (`.sh`)    |
 | Internal Sign          | `03-internal-sign`       | No-op stub (`.sh`)             |
 | Assemble               | `04-assemble`            | No-op stub (`.sh`)             |
-| Sign Artifacts         | `06-sign`                | Full implementation (`.sh`)    |
-| Build Installers       | `07-installer`           | Full implementation (`.sh`)    |
+| Sign Artifacts         | `06-sign`                | No-op stub (`.sh`)             |
+| Build Installers       | `07-installer`           | No-op stub (`.sh`)             |
 | Sign Installers        | `08-sign-installer`      | No-op stub (`.sh`)             |
 | GPG Sign               | `09-gpg-sign`            | No-op stub (`.sh`)             |
 | SBOM Sign              | `10-sbom-sign`           | No-op stub (`.sh`)             |
@@ -49,6 +49,7 @@ lower-cased hyphenated description:
 | Smoke Tests            | `13-smoke-tests`         | Full implementation (`.sh`)    |
 | AQA Tests              | `14-aqa-tests`           | No-op stub (`.sh`)             |
 | TCK Tests              | `15-tck-tests`           | No-op stub (`.sh`)             |
+| Publish Artifacts      | `16-publish`             | No-op stub (`.sh`)             |
 | Reproducible Compare   | `20-reproducible-compare`| Full implementation (`.sh`)    |
 
 **Full implementation** — a working default used by all vendors unless overridden.  
