@@ -188,6 +188,7 @@ pipeline {
                                         string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
                                         string(name: 'SCM_REF', value: params.SCM_REF ?: ''),
                                         string(name: 'BUILD_REF', value: params.BUILD_REF ?: ''),
+                                        string(name: 'AQA_REF', value: params.AQA_REF ?: ''),
                                         string(name: 'RELEASE_TYPE', value: params.RELEASE_TYPE),
                                         string(name: 'GROUP_UID', value: env.GROUP_UID),
                                         booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),

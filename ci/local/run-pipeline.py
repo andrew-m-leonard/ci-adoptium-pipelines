@@ -224,6 +224,8 @@ class PipelineRunner:
             cmd.extend(['--scm-ref', self.args.scm_ref])
         if self.args.build_ref:
             cmd.extend(['--build-ref', self.args.build_ref])
+        if self.args.aqa_ref:
+            cmd.extend(['--aqa-ref', self.args.aqa_ref])
         if self.args.build_repo_url:
             cmd.extend(['--build-repo-url', self.args.build_repo_url])
         if not self.args.enable_tests:
@@ -629,6 +631,8 @@ Examples:
                         help='OpenJDK source branch/tag (default: master)')
     parser.add_argument('--build-ref',
                         help='temurin-build branch/tag (default: master)')
+    parser.add_argument('--aqa-ref',
+                        help='aqa-tests branch/tag (default: master)')
     parser.add_argument('--build-repo-url',
                         help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')
 

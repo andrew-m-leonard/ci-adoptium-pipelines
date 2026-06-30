@@ -203,6 +203,9 @@ pipelineJob(jobName) {
         stringParam('BUILD_REF', '',
             'Git reference for the build scripts repository (leave empty for default branch)')
 
+        stringParam('AQA_REF', '',
+            'Git reference (tag/branch) for the aqa-tests repository (leave empty for default branch)')
+
         booleanParam('ENABLE_INSTALLERS',
             defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
             'Build installers')

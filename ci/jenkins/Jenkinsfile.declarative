@@ -261,6 +261,9 @@ def generatePipelineConfig(String configDir = './configurations') {
     if (params.BUILD_REF) {
         pythonArgs.add("--build-ref ${params.BUILD_REF}")
     }
+    if (params.AQA_REF) {
+        pythonArgs.add("--aqa-ref ${params.AQA_REF}")
+    }
     if (!params.RUN_TESTS) {
         pythonArgs.add("--no-tests")
     }
@@ -301,6 +304,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_SIGN_ARTIFACTS = config.parameters.enableSigner.toString()
     env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
     env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
+    env.AQA_REF = config.refs.aqaRef ?: 'master'
     env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
     
     return config

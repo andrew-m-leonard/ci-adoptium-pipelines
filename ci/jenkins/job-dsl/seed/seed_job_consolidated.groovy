@@ -217,6 +217,9 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             stringParam('BUILD_REF', '',
                 'Git reference for the build scripts repository (leave empty for default branch)')
 
+            stringParam('AQA_REF', '',
+                'Git reference (tag/branch) for the aqa-tests repository (leave empty for default branch)')
+
             choiceParam('RELEASE_TYPE',
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
