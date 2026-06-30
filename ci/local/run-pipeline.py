@@ -356,6 +356,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['TARGET_DIR'] = str(self.artifacts_dir)
@@ -395,6 +396,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
@@ -419,6 +421,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
@@ -443,6 +446,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
@@ -467,6 +471,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
@@ -491,6 +496,7 @@ class PipelineRunner:
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
+        env['PIPELINE_ROOT'] = str(self.script_dir)
         env['CONFIG_FILE'] = str(self.config_file)
         env['BUILD_NUMBER'] = self.build_number
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
