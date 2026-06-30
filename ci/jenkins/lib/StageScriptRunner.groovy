@@ -11,16 +11,12 @@
  *   7. built-in no-op (returns 0)
  *
  * Usage in Jenkinsfile:
- *   def stageRunner = load('ci/jenkins/lib/StageScriptRunner.groovy').init(this)
+ *   def stageRunner = load('ci/jenkins/lib/StageScriptRunner.groovy')
  *   def exitCode = stageRunner.run('13-smoke-tests', config)
+ *
+ * Note: This file is a CpsScript itself — pipeline steps (echo, sh, env, load,
+ * fileExists, etc.) are called directly without any delegation wrapper.
  */
-
-def steps  // Pipeline steps context (the Jenkinsfile's 'this')
-
-def init(pipelineSteps) {
-    this.steps = pipelineSteps
-    return this
-}
 
 /**
  * Resolve and execute a stage script, returning an exit code.
@@ -40,28 +36,28 @@ def run(String scriptStem, def config = null) {
         [path: "scripts/stages/${scriptStem}.py",                 type: 'py'],
     ]
 
-    def found = candidates.find { steps.fileExists(it.path) }
+    def found = candidates.find { fileExists(it.path) }
 
     if (!found) {
-        steps.echo "ℹ️  No script found for '${scriptStem}' — stage is a no-op"
+        echo "ℹ️  No script found for '${scriptStem}' — stage is a no-op"
         return 0
     }
 
-    steps.echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
+    echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
 
     // Ensure TARGET_DIR exists before the script runs (if set by the stage)
-    if (steps.env.TARGET_DIR) {
-        steps.sh "mkdir -p ${steps.env.TARGET_DIR}"
+    if (env.TARGET_DIR) {
+        sh "mkdir -p ${env.TARGET_DIR}"
     }
 
     switch (found.type) {
         case 'sh':
-            return steps.sh(script: "bash ${found.path}", returnStatus: true)
+            return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
-            def script = steps.load(found.path)
+            def script = load(found.path)
             return script(config) ?: 0
         case 'py':
-            return steps.sh(script: "python3 ${found.path}", returnStatus: true)
+            return sh(script: "python3 ${found.path}", returnStatus: true)
     }
 }
 

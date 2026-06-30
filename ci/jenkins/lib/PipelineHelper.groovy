@@ -5,17 +5,14 @@
  *           ensureBuildDescriptionSet()
  *
  * Usage in Jenkinsfile:
- *   def pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy').init(this)
+ *   def pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy')
  *   pipelineHelper.executeStageWithTracking('Build') { ... }
+ *
+ * Note: This file is a CpsScript itself — pipeline steps (echo, sh, env, params,
+ * currentBuild, load, etc.) are called directly without any delegation wrapper.
  */
 
-def steps          // Pipeline steps context (the Jenkinsfile's 'this')
 def buildUidHelper // Lazy-loaded by initializeStage()
-
-def init(pipelineSteps) {
-    this.steps = pipelineSteps
-    return this
-}
 
 /**
  * Execute a stage body with automatic result tracking via BuildUidHelper.
@@ -28,7 +25,7 @@ def executeStageWithTracking(String stageName, Closure body) {
         buildUidHelper.recordStageResult(stageName, 'ABORTED')
         throw e
     } catch (Exception e) {
-        def result = steps.currentBuild.result ?: 'FAILURE'
+        def result = currentBuild.result ?: 'FAILURE'
         buildUidHelper.recordStageResult(stageName, result)
         throw e
     }
@@ -42,22 +39,22 @@ def executeStageWithTracking(String stageName, Closure body) {
  * or an empty map for the Initialize stage.
  */
 def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json', String inputArtifactsDir = null) {
-    steps.echo "=== ${stageName} ==="
+    echo "=== ${stageName} ==="
 
     // Pre-cleanup: Always clean workspace for restartability
-    steps.cleanWs()
+    cleanWs()
 
     // Checkout ci-adoptium-pipelines repository
-    steps.checkout steps.scm
+    checkout scm
 
     // Checkout config repo (vendor-scripts, configurations, adoptium_pipeline_config.json)
-    if (steps.params.CONFIG_REPO_URL) {
-        steps.dir('config-repo') {
-            steps.checkout([
+    if (params.CONFIG_REPO_URL) {
+        dir('config-repo') {
+            checkout([
                 $class: 'GitSCM',
-                branches: [[name: "*/${steps.params.CONFIG_REPO_BRANCH}"]],
+                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
                 userRemoteConfigs: [[
-                    url: steps.params.CONFIG_REPO_URL
+                    url: params.CONFIG_REPO_URL
                 ]],
                 extensions: [
                     [$class: 'SparseCheckoutPaths',
@@ -73,8 +70,8 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
 
     // Lazy-load BuildUidHelper (only once, persists across stages via the field)
     if (buildUidHelper == null) {
-        steps.echo "Loading BuildUidHelper library..."
-        buildUidHelper = steps.load('ci/jenkins/lib/BuildUidHelper.groovy')
+        echo "Loading BuildUidHelper library..."
+        buildUidHelper = load('ci/jenkins/lib/BuildUidHelper.groovy')
     }
 
     // Initialize BUILD_UID and build context
@@ -90,21 +87,21 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
         def targetDir = inputArtifactsDir ?: '.'
 
         if (inputArtifactsDir) {
-            steps.sh "mkdir -p ${inputArtifactsDir}"
+            sh "mkdir -p ${inputArtifactsDir}"
         }
 
         try {
-            steps.copyArtifacts(
-                projectName: steps.env.JOB_NAME,
-                selector: steps.specific(steps.env.BUILD_NUMBER),
+            copyArtifacts(
+                projectName: env.JOB_NAME,
+                selector: specific(env.BUILD_NUMBER),
                 filter: artifactFilter,
                 target: targetDir,
                 optional: false,
                 fingerprintArtifacts: true
             )
-            steps.echo "✅ Successfully copied artifacts to ${targetDir}: ${artifactFilter}"
+            echo "✅ Successfully copied artifacts to ${targetDir}: ${artifactFilter}"
         } catch (Exception e) {
-            steps.error("Failed to copy artifacts '${artifactFilter}' from build ${steps.env.BUILD_NUMBER}: ${e.message}")
+            error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
         }
     }
 
@@ -112,12 +109,12 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     if (stageName == 'Initialize') {
         return [:]
     } else {
-        steps.env.WORKSPACE        = "${steps.env.WORKSPACE}"
-        steps.env.BUILD_NUMBER     = "${steps.env.BUILD_NUMBER}"
-        steps.env.INPUT_ARTIFACTS_DIR = inputArtifactsDir ?: "${steps.env.WORKSPACE}"
-        steps.env.CONFIG_FILE      = "${steps.env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
+        env.WORKSPACE             = "${env.WORKSPACE}"
+        env.BUILD_NUMBER          = "${env.BUILD_NUMBER}"
+        env.INPUT_ARTIFACTS_DIR   = inputArtifactsDir ?: "${env.WORKSPACE}"
+        env.CONFIG_FILE           = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
 
-        def config = steps.readJSON(file: steps.env.CONFIG_FILE)
+        def config = readJSON(file: env.CONFIG_FILE)
         ensureBuildDescriptionSet(config)
         return config
     }
@@ -127,11 +124,11 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
  * Common stage finalization: post-cleanup and completion message.
  */
 def finalizeStage(String stageName) {
-    if (steps.params.CLEAN_WORKSPACE_AFTER_STAGE) {
-        steps.cleanWs()
+    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
+        cleanWs()
     }
-    steps.echo "=== ${stageName} Complete ==="
-    steps.echo "BUILD_UID: ${steps.env.BUILD_UID}"
+    echo "=== ${stageName} Complete ==="
+    echo "BUILD_UID: ${env.BUILD_UID}"
 }
 
 /**
@@ -139,26 +136,26 @@ def finalizeStage(String stageName) {
  */
 def ensureBuildDescriptionSet(def config) {
     if (config == null || config.isEmpty()) {
-        steps.error("ensureBuildDescriptionSet() requires a valid config object")
+        error("ensureBuildDescriptionSet() requires a valid config object")
     }
 
-    def displayName = "#${steps.currentBuild.number} - ${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
-    if (steps.params.SCM_REF) {
-        displayName += " @ ${steps.params.SCM_REF}"
+    def displayName = "#${currentBuild.number} - ${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
+    if (params.SCM_REF) {
+        displayName += " @ ${params.SCM_REF}"
     }
-    if (steps.params.RELEASE_TYPE && steps.params.RELEASE_TYPE != 'NIGHTLY') {
-        displayName += " [${steps.params.RELEASE_TYPE}]"
+    if (params.RELEASE_TYPE && params.RELEASE_TYPE != 'NIGHTLY') {
+        displayName += " [${params.RELEASE_TYPE}]"
     }
 
     def description = ""
-    def isRestart = steps.env.BUILD_UID && steps.env.BUILD_UID != '' && steps.currentBuild.number > 1
+    def isRestart = env.BUILD_UID && env.BUILD_UID != '' && currentBuild.number > 1
     if (isRestart) {
-        def originalBuildNumber = steps.currentBuild.number
-        def checkBuild = steps.currentBuild.previousBuild
+        def originalBuildNumber = currentBuild.number
+        def checkBuild = currentBuild.previousBuild
         while (checkBuild != null) {
             try {
                 def prevBuildUid = checkBuild.getBuildVariables()?.get('BUILD_UID')
-                if (prevBuildUid == steps.env.BUILD_UID) {
+                if (prevBuildUid == env.BUILD_UID) {
                     originalBuildNumber = checkBuild.number
                     checkBuild = checkBuild.previousBuild
                 } else {
@@ -168,22 +165,22 @@ def ensureBuildDescriptionSet(def config) {
                 break
             }
         }
-        if (originalBuildNumber != steps.currentBuild.number) {
+        if (originalBuildNumber != currentBuild.number) {
             description = "Restart of #${originalBuildNumber} | "
         }
     }
 
-    description += "BUILD_UID: ${steps.env.BUILD_UID} | GROUP_UID: ${steps.env.GROUP_UID}"
+    description += "BUILD_UID: ${env.BUILD_UID} | GROUP_UID: ${env.GROUP_UID}"
 
-    if (steps.currentBuild.displayName != displayName) {
-        steps.currentBuild.displayName = displayName
-        steps.echo "Build Display Name: ${displayName}"
+    if (currentBuild.displayName != displayName) {
+        currentBuild.displayName = displayName
+        echo "Build Display Name: ${displayName}"
     }
-    if (steps.currentBuild.description != description) {
-        steps.currentBuild.description = description
-        steps.echo "Build Description: ${description}"
+    if (currentBuild.description != description) {
+        currentBuild.description = description
+        echo "Build Description: ${description}"
     }
-    steps.echo "Build UID: ${steps.env.BUILD_UID}"
+    echo "Build UID: ${env.BUILD_UID}"
 }
 
 return this
