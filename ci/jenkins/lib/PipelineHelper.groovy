@@ -12,7 +12,7 @@
  * currentBuild, load, etc.) are called directly without any delegation wrapper.
  */
 
-def buildUidHelper // Lazy-loaded by initializeStage()
+buildUidHelper = null // Lazy-loaded by initializeStage(); explicit null initialises the Binding entry
 
 /**
  * Execute a stage body with automatic result tracking via BuildUidHelper.
