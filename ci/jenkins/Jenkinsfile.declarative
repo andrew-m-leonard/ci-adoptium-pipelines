@@ -135,6 +135,27 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     // Checkout ci-adoptium-pipelines repository
     checkout scm
 
+    // Checkout config repo (vendor-scripts, configurations, adoptium_pipeline_config.json)
+    if (params.CONFIG_REPO_URL) {
+        dir('config-repo') {
+            checkout([
+                $class: 'GitSCM',
+                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
+                userRemoteConfigs: [[
+                    url: params.CONFIG_REPO_URL
+                ]],
+                extensions: [
+                    [$class: 'SparseCheckoutPaths',
+                     sparseCheckoutPaths: [
+                         [path: 'configurations/*'],
+                         [path: 'vendor-scripts/*'],
+                         [path: 'adoptium_pipeline_config.json']
+                     ]]
+                ]
+            ])
+        }
+    }
+
     // Load BuildUidHelper after checkout (needed for stage restarts)
     ensureBuildUidHelperLoaded()
 
@@ -434,29 +455,8 @@ pipeline {
                     executeStageWithTracking('Initialize') {
                         initializeStage('Initialize', [])
 
-                        // Checkout pipeline configurations from external repository into config-repo subdirectory
-                        // This allows separation of code (ci-adoptium-pipelines) from config (vendor-specific)
-                        // Sparse checkout will create config-repo/configurations/ directory with config files
-                        dir('config-repo') {
-                            checkout([
-                                $class: 'GitSCM',
-                                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
-                                userRemoteConfigs: [[
-                                    url: params.CONFIG_REPO_URL
-                                ]],
-                                extensions: [
-                                    [$class: 'SparseCheckoutPaths',
-                                     sparseCheckoutPaths: [
-                                         [path: 'configurations/*'],
-                                         [path: 'vendor-scripts/*'],
-                                         [path: 'adoptium_pipeline_config.json']
-                                     ]]
-                                ]
-                            ])
-                        }
-
                         // Generate pipeline configuration from parameters
-                        // Pass config-repo/configurations as the config directory
+                        // config-repo/ already checked out by initializeStage()
                         def config = generatePipelineConfig('./config-repo/configurations')
 
                         // Archive configuration
