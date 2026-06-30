@@ -60,21 +60,59 @@ Please configure the seed job with these parameters and try again.
 // Extract GitHub owner/repo from URL for raw.githubusercontent.com access
 def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
 
-// Read configuration from repository
-def jenkinsConfig
+// -------------------------------------------------------------------------
+// Load CI-agnostic pipeline configuration (adoptium_pipeline_config.json)
+// -------------------------------------------------------------------------
+def pipelineConfig
 try {
-    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json"
-    println "Loading Jenkins configuration from ${configUrl}"
+    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/adoptium_pipeline_config.json"
+    println "Loading Adoptium pipeline configuration from ${configUrl}"
     println "  Repository: ${configRepoUrl}"
     println "  Branch: ${configRepoBranch}"
     
     def configText = new URL(configUrl).text
-    jenkinsConfig = new JsonSlurper().parseText(configText)
-    println "✓ Successfully loaded Jenkins configuration"
-    println "  Active JDK versions: ${jenkinsConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
+    pipelineConfig = new JsonSlurper().parseText(configText)
+    println "✓ Successfully loaded adoptium_pipeline_config.json"
+    println "  Active JDK versions: ${pipelineConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
 } catch (Exception e) {
     def errorMsg = """
-ERROR: Failed to load Jenkins job configuration from configuration repository!
+ERROR: Failed to load adoptium_pipeline_config.json from configuration repository!
+
+Configuration Repository: ${configRepoUrl}
+Branch: ${configRepoBranch}
+Configuration URL: https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/adoptium_pipeline_config.json
+Error: ${e.message}
+
+The adoptium_pipeline_config.json file must exist in the configuration repository.
+This file defines CI-agnostic settings: active JDK versions, default build args, repository info.
+
+Please ensure:
+1. The configuration repository is accessible
+2. The adoptium_pipeline_config.json file exists at the root
+3. The file contains valid JSON with activeJdkVersions array
+4. The CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters are correct
+
+Seed job cannot proceed without this configuration.
+""".stripIndent()
+    
+    println errorMsg
+    throw new RuntimeException(errorMsg)
+}
+
+// -------------------------------------------------------------------------
+// Load Jenkins-specific job configuration (jenkins_job_config.json)
+// -------------------------------------------------------------------------
+def jenkinsConfig
+try {
+    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json"
+    println "Loading Jenkins job configuration from ${configUrl}"
+    
+    def configText = new URL(configUrl).text
+    jenkinsConfig = new JsonSlurper().parseText(configText)
+    println "✓ Successfully loaded jenkins_job_config.json"
+} catch (Exception e) {
+    def errorMsg = """
+ERROR: Failed to load jenkins_job_config.json from configuration repository!
 
 Configuration Repository: ${configRepoUrl}
 Branch: ${configRepoBranch}
@@ -82,15 +120,7 @@ Configuration URL: https://raw.githubusercontent.com/${repoPath}/${configRepoBra
 Error: ${e.message}
 
 The jenkins_job_config.json file must exist in the configuration repository.
-This file defines which JDK versions are active and should have jobs created.
-
-Please ensure:
-1. The configuration repository is accessible
-2. The jenkins_job_config.json file exists at the root
-3. The file contains valid JSON with activeJdkVersions array
-4. The CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters are correct
-
-Seed job cannot proceed without this configuration.
+This file defines Jenkins-specific settings: job parameters, log rotation, Jenkinsfile path.
 """.stripIndent()
     
     println errorMsg
@@ -103,14 +133,16 @@ println "✓ Configuration loaded successfully\n"
 // STEP 2: Create Launch Orchestrator Jobs
 // ============================================================================
 
-// Default values for job configuration
-def defaultBuildVariant = jenkinsConfig.defaultVariant ?: 'temurin'
-def defaultBuildArgs = jenkinsConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
+// Default values from CI-agnostic pipeline config
+def defaultBuildVariant = pipelineConfig.defaultVariant ?: 'temurin'
+def defaultBuildArgs = pipelineConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
+def pipelineRepoUrl = pipelineConfig.repository?.url ?: 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
+def pipelineRepoBranch = pipelineConfig.repository?.branch ?: 'main'
+def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
+
+// Default values from Jenkins-specific config
 def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
 def defaultParams = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
-def pipelineRepoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
-def pipelineRepoBranch = 'main'
-def pipelineRepoCredentialsId = '' // Leave empty for public repos
 
 // Create the openjdk-launch-pipelines folder for launch orchestrator jobs
 folder('openjdk-launch-pipelines') {
@@ -125,9 +157,9 @@ folder('openjdk-builds') {
 }
 
 println "Creating launch orchestrator jobs for active JDK versions:"
-jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
+pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     def version = versionInfo.version
-    def configFile = "${jenkinsConfig.configFilePrefix ?: 'configurations/'}${version}${jenkinsConfig.configFileSuffix ?: '_pipeline_config.json'}"
+    def configFile = "${pipelineConfig.configFilePrefix ?: 'configurations/'}${version}${pipelineConfig.configFileSuffix ?: '_pipeline_config.json'}"
     
     // Determine if LTS based on version number
     // LTS versions: 8, 11, then every 4 versions from 17 onwards (17, 21, 25, 29, 33, ...)
@@ -215,10 +247,10 @@ jenkinsConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 
             stringParam('BUILD_REF', '',
-                'Git reference for the build scripts repository (leave empty for default branch)')
+                'Git reference for the build scripts repository (empty = use config repo default)')
 
             stringParam('AQA_REF', '',
-                'Git reference (tag/branch) for the aqa-tests repository (leave empty for default branch)')
+                'Git reference (tag/branch) for the aqa-tests repository (empty = use config repo default)')
 
             choiceParam('RELEASE_TYPE',
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
@@ -294,10 +326,10 @@ println "✓ Launch orchestrator jobs created successfully\n"
 // STEP 3: Create Seed Job (Self-Updating)
 // ============================================================================
 
-// Repository configuration
-def repoUrl = 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
-def repoBranch = '*/main'
-def repoCredentialsId = '' // Leave empty for public repos
+// Repository configuration (from CI-agnostic pipeline config)
+def repoUrl = pipelineConfig.repository?.url ?: 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
+def repoBranch = "*/${pipelineConfig.repository?.branch ?: 'main'}"
+def repoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
 
 freeStyleJob('openjdk-build-seed-job') {
     displayName('New OpenJDK Build CI - Seed Job - Job Generator')

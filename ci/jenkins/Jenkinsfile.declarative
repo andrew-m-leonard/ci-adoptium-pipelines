@@ -230,6 +230,42 @@ def generatePipelineConfig(String configDir = './configurations') {
         echo "ERROR: ${errorMsg}"
         error(errorMsg)
     }
+
+    // Load adoptium_pipeline_config.json for vendor defaults
+    def adoptiumConfig = [:]
+    def adoptiumConfigFile = './config-repo/adoptium_pipeline_config.json'
+    if (fileExists(adoptiumConfigFile)) {
+        adoptiumConfig = readJSON file: adoptiumConfigFile
+        echo "✓ Loaded adoptium_pipeline_config.json"
+    } else {
+        error("adoptium_pipeline_config.json not found in config repo — this file is required")
+    }
+    def repoDefaults = adoptiumConfig.repository ?: [:]
+
+    // Resolve BUILD_REF and AQA_REF: use job param if non-empty, otherwise config repo default
+    def buildRef = params.BUILD_REF?.trim() ?: repoDefaults.buildBranch
+    def aqaRef = params.AQA_REF?.trim() ?: repoDefaults.aqaBranch
+    def buildRepoUrl = repoDefaults.buildRepoUrl
+    def aqaRepoUrl = repoDefaults.aqaRepoUrl
+
+    // Validate — these must be resolved from one source or the other
+    if (!buildRef) {
+        error("BUILD_REF is empty and repository.buildBranch is missing from adoptium_pipeline_config.json")
+    }
+    if (!aqaRef) {
+        error("AQA_REF is empty and repository.aqaBranch is missing from adoptium_pipeline_config.json")
+    }
+    if (!buildRepoUrl) {
+        error("repository.buildRepoUrl is missing from adoptium_pipeline_config.json")
+    }
+    if (!aqaRepoUrl) {
+        error("repository.aqaRepoUrl is missing from adoptium_pipeline_config.json")
+    }
+
+    echo "  Build Ref     : ${buildRef}"
+    echo "  AQA Ref       : ${aqaRef}"
+    echo "  Build Repo URL: ${buildRepoUrl}"
+    echo "  AQA Repo URL  : ${aqaRepoUrl}"
     
     // Build Python command arguments
     // Prepend "jdk" to version number for config file lookup
@@ -258,12 +294,11 @@ def generatePipelineConfig(String configDir = './configurations') {
     if (params.SCM_REF) {
         pythonArgs.add("--scm-ref ${params.SCM_REF}")
     }
-    if (params.BUILD_REF) {
-        pythonArgs.add("--build-ref ${params.BUILD_REF}")
-    }
-    if (params.AQA_REF) {
-        pythonArgs.add("--aqa-ref ${params.AQA_REF}")
-    }
+    // Always pass resolved refs and repo URLs (required by load-json-config.py)
+    pythonArgs.add("--build-ref ${buildRef}")
+    pythonArgs.add("--aqa-ref ${aqaRef}")
+    pythonArgs.add("--build-repo-url ${buildRepoUrl}")
+    pythonArgs.add("--aqa-repo-url ${aqaRepoUrl}")
     if (!params.RUN_TESTS) {
         pythonArgs.add("--no-tests")
     }
@@ -304,7 +339,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_SIGN_ARTIFACTS = config.parameters.enableSigner.toString()
     env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
     env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
-    env.AQA_REF = config.refs.aqaRef ?: 'master'
+    env.AQA_REF = config.refs.aqaRef
     env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
     
     return config
@@ -413,7 +448,8 @@ pipeline {
                                     [$class: 'SparseCheckoutPaths',
                                      sparseCheckoutPaths: [
                                          [path: 'configurations/*'],
-                                         [path: 'vendor-scripts/*']
+                                         [path: 'vendor-scripts/*'],
+                                         [path: 'adoptium_pipeline_config.json']
                                      ]]
                                 ]
                             ])

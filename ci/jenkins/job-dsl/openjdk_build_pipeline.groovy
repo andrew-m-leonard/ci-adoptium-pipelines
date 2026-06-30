@@ -42,20 +42,43 @@ if (!configRepoBranch || configRepoBranch.trim().isEmpty()) {
     throw new IllegalArgumentException("CONFIG_REPO_BRANCH parameter is required")
 }
 
-// Fetch Jenkins job configuration
-def jenkinsConfig
+// Fetch configuration files
+def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
+
+// Load CI-agnostic pipeline configuration
+def pipelineConfig
 try {
-    def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
-    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json"
-    
-    println "Loading Jenkins configuration from ${configUrl}"
+    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/adoptium_pipeline_config.json"
+    println "Loading Adoptium pipeline configuration from ${configUrl}"
     def configText = new URL(configUrl).text
-    jenkinsConfig = new JsonSlurper().parseText(configText)
-    println "✓ Successfully loaded Jenkins configuration"
-    println "jenkinsConfig: ${jenkinsConfig}"
+    pipelineConfig = new JsonSlurper().parseText(configText)
+    println "✓ Successfully loaded adoptium_pipeline_config.json"
 } catch (Exception e) {
     def errorMsg = """
-ERROR: Failed to load Jenkins job configuration!
+ERROR: Failed to load adoptium_pipeline_config.json!
+
+Configuration Repository: ${configRepoUrl}
+Branch: ${configRepoBranch}
+Error: ${e.message}
+
+Ensure adoptium_pipeline_config.json exists and is accessible.
+""".stripIndent()
+    
+    println errorMsg
+    throw new RuntimeException(errorMsg)
+}
+
+// Load Jenkins-specific job configuration
+def jenkinsConfig
+try {
+    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json"
+    println "Loading Jenkins job configuration from ${configUrl}"
+    def configText = new URL(configUrl).text
+    jenkinsConfig = new JsonSlurper().parseText(configText)
+    println "✓ Successfully loaded jenkins_job_config.json"
+} catch (Exception e) {
+    def errorMsg = """
+ERROR: Failed to load jenkins_job_config.json!
 
 Configuration Repository: ${configRepoUrl}
 Branch: ${configRepoBranch}
@@ -99,7 +122,7 @@ try {
     }
     
     // Extract variant (default to 'temurin' if not specified)
-    variant = platformConfig.variant ?: jenkinsConfig?.defaultVariant ?: 'temurin'
+    variant = platformConfig.variant ?: pipelineConfig?.defaultVariant ?: 'temurin'
     
     println "✓ Platform configuration loaded:"
     println "  Platform: ${platform}"
@@ -201,10 +224,10 @@ pipelineJob(jobName) {
             'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
 
         stringParam('BUILD_REF', '',
-            'Git reference for the build scripts repository (leave empty for default branch)')
+            'Git reference for the build scripts repository (empty = use config repo default)')
 
         stringParam('AQA_REF', '',
-            'Git reference (tag/branch) for the aqa-tests repository (leave empty for default branch)')
+            'Git reference (tag/branch) for the aqa-tests repository (empty = use config repo default)')
 
         booleanParam('ENABLE_INSTALLERS',
             defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
@@ -228,18 +251,18 @@ pipelineJob(jobName) {
             scm {
                 git {
                     remote {
-                        url(jenkinsConfig.repository.url)
-                        if (jenkinsConfig.repository.credentialsId) {
-                            credentials(jenkinsConfig.repository.credentialsId)
+                        url(pipelineConfig.repository.url)
+                        if (pipelineConfig.repository.credentialsId) {
+                            credentials(pipelineConfig.repository.credentialsId)
                         }
                     }
-                    branch("*/${jenkinsConfig.repository.branch}")
+                    branch("*/${pipelineConfig.repository.branch}")
                     extensions {
                         cleanBeforeCheckout()
                     }
                 }
             }
-            scriptPath(jenkinsConfig.repository.jenkinsfilePath)
+            scriptPath(jenkinsConfig.jenkinsfilePath)
             lightweight(true)
         }
     }

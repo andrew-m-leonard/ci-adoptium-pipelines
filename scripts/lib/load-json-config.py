@@ -110,9 +110,10 @@ def load_configuration(args):
     is_release = (release_type == 'RELEASE')
     is_weekly = (release_type == 'WEEKLY')
     scm_ref = args.scm_ref
-    build_ref = args.build_ref or 'master'
-    build_repo_url = args.build_repo_url or 'https://github.com/adoptium/temurin-build.git'
-    aqa_ref = args.aqa_ref or 'master'
+    build_ref = args.build_ref
+    build_repo_url = args.build_repo_url
+    aqa_ref = args.aqa_ref
+    aqa_repo_url = args.aqa_repo_url
     enable_tests = args.enable_tests
     enable_installers = args.enable_installers
     enable_signer = args.enable_signer
@@ -191,7 +192,8 @@ def load_configuration(args):
             'scmRef': scm_ref,
             'buildRef': build_ref,
             'buildRepoUrl': build_repo_url,
-            'aqaRef': aqa_ref
+            'aqaRef': aqa_ref,
+            'aqaRepoUrl': aqa_repo_url
         }
     }
 
@@ -267,10 +269,11 @@ Examples:
     # Release type - case-insensitive (will be converted to uppercase)
     parser.add_argument('--release-type', type=str,
                         help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
-    parser.add_argument('--scm-ref', help='OpenJDK source branch/tag (default: master)')
-    parser.add_argument('--build-ref', help='temurin-build branch/tag (default: master)')
-    parser.add_argument('--build-repo-url', help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')
-    parser.add_argument('--aqa-ref', help='aqa-tests branch/tag (default: master)')
+    parser.add_argument('--scm-ref', help='OpenJDK source branch/tag (default: HEAD)')
+    parser.add_argument('--build-ref', required=True, help='temurin-build branch/tag (required, from adoptium_pipeline_config.json)')
+    parser.add_argument('--build-repo-url', required=True, help='temurin-build repository URL (required, from adoptium_pipeline_config.json)')
+    parser.add_argument('--aqa-ref', required=True, help='aqa-tests branch/tag (required, from adoptium_pipeline_config.json)')
+    parser.add_argument('--aqa-repo-url', required=True, help='aqa-tests repository URL (required, from adoptium_pipeline_config.json)')
 
     parser.add_argument('--no-tests', dest='enable_tests', action='store_false', help='Disable tests')
     parser.add_argument('--no-installers', dest='enable_installers', action='store_false', help='Disable installers')

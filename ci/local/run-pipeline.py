@@ -8,20 +8,19 @@ This script orchestrates all stages: initialize, build, sign, installer, and tes
 Usage:
     python3 run-pipeline.py \
         --jdk-version jdk21u \
-        --variant temurin \
         --target-os mac \
         --architecture aarch64 \
         --workspace ~/openjdk-build
 
 Example:
     # Full build with all stages
-    python3 run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64
+    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64
 
     # Build only (skip tests and installers)
-    python3 run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64 --no-tests --no-installers
+    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64 --no-tests --no-installers
 
     # Build with custom branch
-    python3 run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64 --build-ref develop
+    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64 --build-ref develop
 """
 
 import argparse
@@ -106,6 +105,28 @@ class PipelineRunner:
             print(f"ℹ️  StageResolver initialised (config repo: {src})")
 
         return self._resolver
+
+    def _load_adoptium_pipeline_config(self, config_repo_dir: Path) -> dict:
+        """
+        Load adoptium_pipeline_config.json from the config repo directory.
+
+        Returns the parsed dict, or {} if the file does not exist (graceful
+        fallback for repos that haven't adopted the split yet).
+        """
+        cfg_path = config_repo_dir / 'adoptium_pipeline_config.json'
+        if not cfg_path.exists():
+            print(f"ℹ️  adoptium_pipeline_config.json not found in config repo — using defaults")
+            return {}
+
+        with open(cfg_path, 'r') as f:
+            cfg = json.load(f)
+
+        print(f"✅ Loaded adoptium_pipeline_config.json")
+        print(f"   Default variant: {cfg.get('defaultVariant', 'temurin')}")
+        active = [v['version'] for v in cfg.get('activeJdkVersions', []) if v.get('enabled')]
+        if active:
+            print(f"   Active JDK versions: {', '.join(active)}")
+        return cfg
 
     def run(self):
         """Run the complete pipeline"""
@@ -192,9 +213,9 @@ class PipelineRunner:
         # Determine configuration directory
         if self.args.config_repo_url:
             # Clone external configuration repository
-            config_dir = self.workspace / 'config-repo'
-            if config_dir.exists():
-                print(f"ℹ️  Configuration repository already exists: {config_dir}")
+            config_repo_dir = self.workspace / 'config-repo'
+            if config_repo_dir.exists():
+                print(f"ℹ️  Configuration repository already exists: {config_repo_dir}")
                 print("   (Use --clean-workspace to re-clone)")
             else:
                 print(f"📥 Cloning configuration repository...")
@@ -206,19 +227,25 @@ class PipelineRunner:
                     '--branch', self.args.config_repo_branch,
                     '--depth', '1',
                     self.args.config_repo_url,
-                    str(config_dir)
+                    str(config_repo_dir)
                 ]
                 subprocess.run(clone_cmd, check=True)
                 print("✅ Configuration repository cloned")
 
-            # Use configurations subdirectory
-            config_dir = config_dir / 'configurations'
+            # Load adoptium_pipeline_config.json (CI-agnostic defaults)
+            adoptium_cfg = self._load_adoptium_pipeline_config(config_repo_dir)
+
+            # Use configFilePrefix from adoptium_pipeline_config.json to locate configs
+            config_prefix = adoptium_cfg.get('configFilePrefix', 'configurations/')
+            # Strip trailing slash for path joining
+            config_dir = config_repo_dir / config_prefix.rstrip('/')
             if not config_dir.exists():
                 raise FileNotFoundError(
                     f"Configuration directory not found: {config_dir}\n"
-                    f"Expected 'configurations/' subdirectory in repository"
+                    f"Expected '{config_prefix}' subdirectory in repository"
                 )
         else:
+            adoptium_cfg = {}
             # Use local configurations directory
             config_dir = self.script_dir / 'configurations'
             if not config_dir.exists():
@@ -229,12 +256,16 @@ class PipelineRunner:
 
         print(f"📁 Using configuration directory: {config_dir}")
 
+        # Resolve variant from adoptium_pipeline_config.json (CLI override removed)
+        variant = adoptium_cfg.get('defaultVariant', 'temurin')
+        print(f"   Variant: {variant}")
+
         # Build command for load-json-config.py
         cmd = [
             'python3',
             str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
             '--jdk-version', self.args.jdk_version,
-            '--variant', self.args.variant,
+            '--variant', variant,
             '--target-os', self.args.target_os,
             '--architecture', self.args.architecture,
             '--config-dir', str(config_dir),
@@ -254,12 +285,34 @@ class PipelineRunner:
             cmd.extend(['--release-type', release_type])
         if self.args.scm_ref:
             cmd.extend(['--scm-ref', self.args.scm_ref])
-        if self.args.build_ref:
-            cmd.extend(['--build-ref', self.args.build_ref])
-        if self.args.aqa_ref:
-            cmd.extend(['--aqa-ref', self.args.aqa_ref])
-        if self.args.build_repo_url:
-            cmd.extend(['--build-repo-url', self.args.build_repo_url])
+
+        # Resolve build/aqa refs and repo URLs from CLI override or adoptium_pipeline_config.json
+        repo_cfg = adoptium_cfg.get('repository', {})
+        build_ref = self.args.build_ref or repo_cfg.get('buildBranch')
+        aqa_ref = self.args.aqa_ref or repo_cfg.get('aqaBranch')
+        build_repo_url = self.args.build_repo_url or repo_cfg.get('buildRepoUrl')
+        aqa_repo_url = self.args.aqa_repo_url or repo_cfg.get('aqaRepoUrl')
+
+        # These must be resolved — error if missing from both CLI and config
+        missing = []
+        if not build_ref:
+            missing.append('repository.buildBranch')
+        if not aqa_ref:
+            missing.append('repository.aqaBranch')
+        if not build_repo_url:
+            missing.append('repository.buildRepoUrl')
+        if not aqa_repo_url:
+            missing.append('repository.aqaRepoUrl')
+        if missing:
+            raise ValueError(
+                f"Required fields missing from adoptium_pipeline_config.json: {', '.join(missing)}\n"
+                f"These must be defined in the config repo or overridden via CLI args."
+            )
+
+        cmd.extend(['--build-ref', build_ref])
+        cmd.extend(['--aqa-ref', aqa_ref])
+        cmd.extend(['--build-repo-url', build_repo_url])
+        cmd.extend(['--aqa-repo-url', aqa_repo_url])
         if not self.args.enable_tests:
             cmd.append('--no-tests')
         if not self.args.enable_installers:
@@ -527,17 +580,15 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full build with all stages
+  # Full build with all stages (variant from config repo)
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64
 
   # Build only (skip tests and installers)
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64 \\
       --no-tests \\
@@ -546,17 +597,15 @@ Examples:
   # Release build with custom refs
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os linux \\
       --architecture x64 \\
       --release-type RELEASE \\
       --scm-ref jdk-21.0.2+13 \\
-      --build-ref master
+      --build-ref develop
 
   # Build with custom workspace
   python3 run-pipeline.py \\
       --jdk-version jdk17u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64 \\
       --workspace ~/my-custom-workspace
@@ -564,7 +613,6 @@ Examples:
   # Resume from a specific stage (e.g., after build failure)
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64 \\
       --start-from-stage smoke-tests
@@ -572,7 +620,6 @@ Examples:
   # Re-run just the installer stage
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64 \\
       --start-from-stage installer \\
@@ -581,7 +628,6 @@ Examples:
   # Build with reproducible comparison
   python3 run-pipeline.py \\
       --jdk-version jdk21u \\
-      --variant temurin \\
       --target-os mac \\
       --architecture aarch64 \\
       --scm-ref jdk-21.0.2+13 \\
@@ -593,9 +639,6 @@ Examples:
     # Required arguments
     parser.add_argument('--jdk-version', required=True,
                         help='JDK version to build (e.g., jdk21, jdk8). Must be in format jdkNN where NN is the version number.')
-    parser.add_argument('--variant', required=True,
-                        choices=['temurin', 'openj9', 'hotspot'],
-                        help='Build variant')
     parser.add_argument('--target-os', required=True,
                         choices=['mac', 'linux', 'windows', 'aix'],
                         help='Target operating system')
@@ -615,13 +658,15 @@ Examples:
 
     # Git refs
     parser.add_argument('--scm-ref',
-                        help='OpenJDK source branch/tag (default: master)')
+                        help='OpenJDK source branch/tag (default: HEAD)')
     parser.add_argument('--build-ref',
-                        help='temurin-build branch/tag (default: master)')
+                        help='temurin-build branch/tag (overrides adoptium_pipeline_config.json)')
     parser.add_argument('--aqa-ref',
-                        help='aqa-tests branch/tag (default: master)')
+                        help='aqa-tests branch/tag (overrides adoptium_pipeline_config.json)')
     parser.add_argument('--build-repo-url',
-                        help='temurin-build repository URL (default: https://github.com/adoptium/temurin-build.git)')
+                        help='temurin-build repository URL (overrides adoptium_pipeline_config.json)')
+    parser.add_argument('--aqa-repo-url',
+                        help='aqa-tests repository URL (overrides adoptium_pipeline_config.json)')
 
     # Configuration repository
     parser.add_argument('--config-repo-url',
