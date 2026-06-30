@@ -213,10 +213,5 @@ def cleanup_stage_workspace(self, cleanup_type):
 
 ## Related Documentation
 
-- [JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md) - Jenkins cleanup refactoring
-- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) - Workspace/artifacts separation
-- [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md) - Restartable pipelines guide
-
-## Date
-
-2026-05-18
+- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — Workspace/artifacts separation
+- [ci/local/README.md](../ci/local/README.md) — Local runner full reference

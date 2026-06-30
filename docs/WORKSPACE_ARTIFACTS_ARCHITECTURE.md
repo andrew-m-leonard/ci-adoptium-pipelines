@@ -180,109 +180,32 @@ def stage_build(self):
 
 **Directory Structure**:
 ```
-${WORKSPACE}/                 # Jenkins workspace
-├── workspace/                # Ephemeral (cleaned before each stage)
-├── config-repo/             # Configuration repository
-└── pipeline-config.json     # Generated configuration
+${WORKSPACE}/                 # Jenkins workspace (cleaned by cleanWs() at start of each stage)
+├── config-repo/             # Config repo (re-cloned each stage by initializeStage)
+├── stage_input_artifacts/   # Copied in by copyArtifacts
+└── pipeline-config.json     # Copied in by copyArtifacts
 
-# Artifacts managed by Jenkins (not in workspace):
-# - archiveArtifacts: Stores artifacts in Jenkins master
-# - copyArtifacts: Retrieves artifacts from previous builds/stages
+# Artifacts managed by Jenkins artifact store:
+# - archiveArtifacts: stores outputs from TARGET_DIR
+# - copyArtifacts: retrieves previous stage outputs into stage_input_artifacts/
 ```
 
-**Stage Pattern**:
+**Stage Pattern** (via `PipelineHelper.initializeStage` + `stageRunner.run`):
 ```groovy
-stage('Build') {
-    steps {
-        script {
-            // 1. Clean workspace
-            cleanWorkspace()
+pipelineHelper.executeStageWithTracking('Build') {
+    def config = pipelineHelper.initializeStage('Build', ['Initialize'])
+    // ^ cleanWs, checkout scm, clone config-repo, copyArtifacts(pipeline-config.json)
 
-            // 2. Retrieve configuration
-            copyArtifacts(
-                projectName: env.JOB_NAME,
-                selector: specific(env.BUILD_NUMBER),
-                filter: 'pipeline-config.json',
-                target: '.'
-            )
+    env.TARGET_DIR = "${WORKSPACE}/build_output"
+    def exitCode = stageRunner.run('02-build', config)
+    if (exitCode != 0) { error("Build failed") }
 
-            // 3. Execute build
-            def config = readJSON file: 'pipeline-config.json'
-            def buildScript = load 'scripts/stages/02-build.groovy'
-            buildScript(config)
-
-            // 4. Archive artifacts
-            archiveArtifacts artifacts: 'artifacts/**/*', fingerprint: true
-
-            // 5. Optional cleanup
-            if (shouldCleanAfterStage(config)) {
-                cleanWorkspace()
-            }
-        }
+    dir(env.TARGET_DIR) {
+        archiveArtifacts artifacts: '**/*', fingerprint: true
     }
+    pipelineHelper.finalizeStage('Build')
 }
 ```
-
-## Stage Scripts
-
-All stage scripts follow this pattern:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-# Required environment variables
-require_env_var "WORKSPACE_DIR"    # Ephemeral workspace for this stage
-require_env_var "ARTIFACTS_DIR"    # Persistent artifacts directory
-
-# Create workspace
-mkdir -p "${WORKSPACE_DIR}"
-cd "${WORKSPACE_DIR}"
-
-# Retrieve artifacts from previous stages (if needed)
-if [ -f "${ARTIFACTS_DIR}/jdk/OpenJDK.tar.gz" ]; then
-    cp "${ARTIFACTS_DIR}/jdk/OpenJDK.tar.gz" .
-fi
-
-# Execute stage logic
-# ... work in ${WORKSPACE_DIR} ...
-
-# Copy outputs to artifacts
-mkdir -p "${ARTIFACTS_DIR}/signed"
-cp signed-*.tar.gz "${ARTIFACTS_DIR}/signed/"
-
-# Workspace will be cleaned by pipeline (if configured)
-```
-
-## Migration from Current Architecture
-
-### Current Issues
-
-1. **TARGET_DIR confusion**: Single directory for both workspace and artifacts
-2. **No separation**: Can't clean workspace without losing artifacts
-3. **Restartability**: Stages may find stale files from previous runs
-
-### Migration Steps
-
-1. **Update stage scripts**:
-   - Change `TARGET_DIR` to `WORKSPACE_DIR` and `ARTIFACTS_DIR`
-   - Write outputs to `ARTIFACTS_DIR`
-   - Work in `WORKSPACE_DIR`
-
-2. **Update run-pipeline.py**:
-   - Create `artifacts/` directory
-   - Pass both `WORKSPACE_DIR` and `ARTIFACTS_DIR` to stages
-   - Implement workspace cleaning before each stage
-
-3. **Update Jenkinsfile**:
-   - Clean workspace before each stage
-   - Archive from `artifacts/` directory
-   - Copy artifacts to `artifacts/` directory
-
-4. **Update configuration**:
-   - Remove `cleanWorkspace` parameter
-   - Rename `cleanWorkspaceAfter` to `cleanWorkspaceAfterStage`
-   - Default `cleanWorkspaceAfterStage` to `true`
 
 ## Benefits
 
@@ -343,10 +266,3 @@ cp signed-*.tar.gz "${ARTIFACTS_DIR}/signed/"
 **Cause**: `cleanWorkspaceAfterStage: false` and large workspaces
 
 **Solution**: Set `cleanWorkspaceAfterStage: true` or manually clean
-
-## Future Enhancements
-
-1. **Artifact Retention**: Keep last N builds
-2. **Selective Cleanup**: Clean only specific workspace subdirectories
-3. **Compression**: Compress artifacts to save space
-4. **Remote Storage**: Upload artifacts to S3/Azure/GCS

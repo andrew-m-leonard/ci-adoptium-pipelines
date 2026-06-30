@@ -251,21 +251,15 @@ The pipeline runner sets these environment variables for each stage:
 **Problem:** Configuration file not found
 
 **Solution:**
-```bash
-# Check if JSON config exists
-ls -la configurations/jdk21u_pipeline_config.json
-
-# If missing, convert from Groovy
-./tools/convert-groovy-config-to-json.sh \
-    ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations/jdk21u_pipeline_config.groovy \
-    configurations/jdk21u_pipeline_config.json
-```
+- Verify `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters point to a valid config repo
+- Ensure `jdk${version}_pipeline_config.json` exists under `configurations/` in the config repo
+- Use the conversion tools in `tools/` if migrating from legacy Groovy configs
 
 ### Pipeline fails at build stage
 
 **Problem:** Missing dependencies
 
-**Solution:** See [`REAL_BUILD_GUIDE.md`](REAL_BUILD_GUIDE.md) for required dependencies
+**Solution:** Ensure required build tools (git, make, gcc, boot JDK) are installed on the agent
 
 ### Workspace has stale files
 
@@ -294,42 +288,7 @@ ls -la configurations/jdk21u_pipeline_config.json
 
 **Solution:**
 ```bash
-chmod +x run-pipeline.py
-```
-
-## Comparison with Manual Execution
-
-### Manual (Multiple Commands)
-
-```bash
-# Step 1: Generate config
-python3 scripts/lib/load-json-config.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture aarch64 \
-    --output-dir ~/openjdk-build
-
-# Step 2: Set environment
-export WORKSPACE=~/openjdk-build
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export BUILD_NUMBER=test-1
-
-# Step 3: Run build
-./scripts/stages/02-build-corrected.sh
-
-# Step 4: Run tests
-./scripts/stages/13-smoke-tests.sh
-```
-
-### Pipeline Runner (Single Command)
-
-```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture aarch64
+chmod +x scripts/stages/*.sh
 ```
 
 ## Advanced Usage
@@ -349,13 +308,9 @@ export BUILD_NUMBER=test-1
 
 ```bash
 # Build Temurin
-./run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64
+./ci/local/run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64
 # Build HotSpot
-./run-pipeline.py --jdk-version jdk21u --variant hotspot --target-os mac --architecture aarch64
-
-
-# Build Hotspot
-./run-pipeline.py --jdk-version jdk21u --variant hotspot --target-os mac --architecture aarch64
+./ci/local/run-pipeline.py --jdk-version jdk21u --variant hotspot --target-os mac --architecture aarch64
 ```
 
 ### Parallel Builds (Different Workspaces)
@@ -368,56 +323,8 @@ export BUILD_NUMBER=test-1
 ./run-pipeline.py --jdk-version jdk17u --variant temurin --target-os mac --architecture aarch64 --workspace ~/jdk17-build
 ```
 
-## Integration with CI/CD
-
-The pipeline runner can be used in CI/CD systems:
-
-### Jenkins
-
-```groovy
-stage('Build') {
-    steps {
-        sh """
-            python3 run-pipeline.py \
-                --jdk-version ${params.JDK_VERSION} \
-                --variant ${params.VARIANT} \
-                --target-os ${params.TARGET_OS} \
-                --architecture ${params.ARCHITECTURE} \
-                --workspace ${WORKSPACE}
-        """
-    }
-}
-```
-
-### GitLab CI
-
-```yaml
-build:
-  script:
-    - python3 run-pipeline.py
-        --jdk-version $JDK_VERSION
-        --variant $VARIANT
-        --target-os $TARGET_OS
-        --architecture $ARCHITECTURE
-        --workspace $CI_PROJECT_DIR/build
-```
-
-### GitHub Actions
-
-```yaml
-- name: Build OpenJDK
-  run: |
-    python3 run-pipeline.py \
-      --jdk-version ${{ matrix.jdk-version }} \
-      --variant ${{ matrix.variant }} \
-      --target-os ${{ matrix.os }} \
-      --architecture ${{ matrix.arch }} \
-      --workspace ${{ github.workspace }}/build
-```
-
 ## See Also
 
-- [`QUICKSTART_MAC.md`](QUICKSTART_MAC.md) - Mac-specific quick start guide
-- [`CONFIGURATION_GUIDE.md`](CONFIGURATION_GUIDE.md) - JSON configuration details
-- [`REAL_BUILD_GUIDE.md`](REAL_BUILD_GUIDE.md) - Complete build documentation
-- [`CI_AGNOSTIC_ARCHITECTURE.md`](CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
+- [`CONFIGURATION_GUIDE.md`](CONFIGURATION_GUIDE.md) — JSON configuration details
+- [`CI_AGNOSTIC_ARCHITECTURE.md`](CI_AGNOSTIC_ARCHITECTURE.md) — Architecture overview
+- [`ci/local/README.md`](../ci/local/README.md) — Local runner full reference

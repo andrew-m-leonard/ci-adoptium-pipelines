@@ -116,11 +116,11 @@ env['CONFIG_FILE'] = str(self.artifacts_dir / 'pipeline-config.json')
 ```
 
 **Stages using this pattern**:
-- Validate SBOM ([`12-validate-sbom.sh`](../ci/jenkins/scripts/stages/12-validate-sbom.sh))
-- Sign ([`06-sign.sh`](../ci/jenkins/scripts/stages/06-sign.sh))
-- Installer ([`07-installer.sh`](../ci/jenkins/scripts/stages/07-installer.sh))
-- Smoke Tests ([`13-smoke-tests.sh`](../ci/jenkins/scripts/stages/13-smoke-tests.sh))
-- Reproducible Compare ([`20-reproducible-compare.sh`](../ci/jenkins/scripts/stages/20-reproducible-compare.sh))
+- Validate SBOM ([`12-validate-sbom.sh`](../scripts/stages/12-validate-sbom.sh))
+- Sign ([`06-sign.sh`](../scripts/stages/06-sign.sh))
+- Installer ([`07-installer.sh`](../scripts/stages/07-installer.sh))
+- Smoke Tests ([`13-smoke-tests.sh`](../scripts/stages/13-smoke-tests.sh))
+- Reproducible Compare ([`20-reproducible-compare.sh`](../scripts/stages/20-reproducible-compare.sh))
 
 ## Stage Script Implementation
 
@@ -184,100 +184,39 @@ JDK_ARTIFACT=$(find "$INPUT_ARTIFACTS_DIR" -name "*.tar.gz")
 cp result.txt "$TARGET_DIR/"
 ```
 
-### Jenkinsfile Changes
+### Actual Jenkinsfile Pattern
 
-**Before**:
-```groovy
-environment {
-    TARGET_DIR = "${WORKSPACE}/artifacts"
-}
-steps {
-    script {
-        initializeStage('My Stage', ['Build'])
-    }
-}
-```
+Stages set `env.TARGET_DIR` and pass `inputArtifactsDir` to `initializeStage()`:
 
-**After**:
 ```groovy
-environment {
-    INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
-    TARGET_DIR = "${WORKSPACE}/my_stage_output"
-    CONFIG_FILE = "${INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-}
-steps {
-    script {
-        initializeStage(
-            'My Stage',
-            ['Build'],
-            'pipeline-config.json,**/*.tar.gz',
-            "${INPUT_ARTIFACTS_DIR}"
-        )
+pipelineHelper.executeStageWithTracking('My Stage') {
+    def config = pipelineHelper.initializeStage(
+        'My Stage',
+        ['Build'],
+        'pipeline-config.json,**/*.tar.gz',
+        "${WORKSPACE}/stage_input_artifacts"   // → INPUT_ARTIFACTS_DIR
+    )
+    env.TARGET_DIR = "${WORKSPACE}/my_stage_output"
+
+    def exitCode = stageRunner.run('NN-my-stage', config)
+    if (exitCode != 0) { error("My Stage failed") }
+
+    dir(env.TARGET_DIR) {
+        archiveArtifacts artifacts: '**/*', allowEmptyArchive: true
     }
+    pipelineHelper.finalizeStage('My Stage')
 }
 ```
 
 ## Related Documentation
 
-- [Workspace Cleanup Architecture](WORKSPACE_CLEANUP_ARCHITECTURE.md) - Stage workspace management
-- [Migration Strategy](MIGRATION_STRATEGY.md) - Overall refactoring approach
-- [Stage Scripts](../ci/jenkins/scripts/stages/) - Individual stage implementations
-- [Local Pipeline Runner](../ci/local/run-pipeline.py) - Local execution tool
+- [`STAGE_IO_SPECIFICATION.md`](./STAGE_IO_SPECIFICATION.md) — per-stage env var and artifact contracts
+- [`UNIVERSAL_STAGE_PATTERN.md`](./UNIVERSAL_STAGE_PATTERN.md) — stage script template
+- [`ci/jenkins/lib/PipelineHelper.groovy`](../ci/jenkins/lib/PipelineHelper.groovy) — `initializeStage()` implementation
+- [`ci/local/run-pipeline.py`](../ci/local/run-pipeline.py) — local execution tool
 
 ## Examples
 
-### Complete Stage Example (Jenkins)
-
-```groovy
-stage('Sign Artifacts') {
-    environment {
-        INPUT_ARTIFACTS_DIR = "${WORKSPACE}/stage_input_artifacts"
-        TARGET_DIR = "${WORKSPACE}/sign_output"
-        CONFIG_FILE = "${INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-    }
-    steps {
-        // Pre-stage cleanup
-        cleanWs(
-            deleteDirs: true,
-            disableDeferredWipeout: true,
-            notFailBuild: true
-        )
-
-        // Checkout code
-        checkout scm
-
-        // Copy artifacts from previous stage
-        script {
-            initializeStage(
-                'Sign Artifacts',
-                ['Build'],
-                'pipeline-config.json,**/*.tar.gz,**/*.zip',
-                "${INPUT_ARTIFACTS_DIR}"
-            )
-        }
-
-        // Run stage script
-        sh 'scripts/stages/06-sign.sh'
-
-        // Archive output artifacts
-        archiveArtifacts(
-            artifacts: "${TARGET_DIR}/**/*",
-            allowEmptyArchive: true
-        )
-
-        // Post-stage cleanup (if enabled)
-        script {
-            if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                cleanWs(
-                    deleteDirs: true,
-                    disableDeferredWipeout: true,
-                    notFailBuild: true
-                )
-            }
-        }
-    }
-}
-```
 
 ### Complete Stage Example (Local)
 

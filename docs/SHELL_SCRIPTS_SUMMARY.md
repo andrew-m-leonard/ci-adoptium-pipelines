@@ -54,7 +54,9 @@ Artifact management:
 
 ## Stage Scripts
 
-### 1. Build Stage - [`scripts/stages/02-build.sh`](scripts/stages/02-build.sh)
+All stage scripts listed here are implemented and present in `scripts/stages/`.
+
+### 1. Build Stage — [`scripts/stages/02-build.sh`](../scripts/stages/02-build.sh)
 
 **Purpose**: Compile the JDK
 
@@ -85,7 +87,7 @@ export BUILD_NUMBER=123
 
 ---
 
-### 2. Sign Artifacts Stage - [`scripts/stages/06-sign.sh`](scripts/stages/06-sign.sh)
+### 2. Sign Artifacts Stage — [`scripts/stages/06-sign.sh`](../scripts/stages/06-sign.sh)
 
 **Purpose**: Sign JDK artifacts (tar.gz, zip files)
 
@@ -120,7 +122,7 @@ export BUILD_NUMBER=123
 
 ---
 
-### 3. Build Installer Stage - [`scripts/stages/07-installer.sh`](scripts/stages/07-installer.sh)
+### 3. Build Installer Stage — [`scripts/stages/07-installer.sh`](../scripts/stages/07-installer.sh)
 
 **Purpose**: Build platform-specific installers
 
@@ -160,7 +162,7 @@ export BUILD_NUMBER=123
 
 ---
 
-### 4. Smoke Test Stage - [`scripts/stages/13-smoke-tests.sh`](scripts/stages/13-smoke-tests.sh)
+### 4. Smoke Test Stage — [`scripts/stages/13-smoke-tests.sh`](../scripts/stages/13-smoke-tests.sh)
 
 **Purpose**: Run quick validation tests on built JDK
 
@@ -313,22 +315,23 @@ build:
       stage-metadata.json
 ```
 
-## Remaining Stages to Convert
+## Additional Stage Scripts
 
-The following stages still need to be converted from Groovy to shell scripts:
+The following stages are also implemented in `scripts/stages/`:
 
-- [ ] `01-initialize.sh` - Pipeline initialization
-- [ ] `03-internal-sign.sh` - JMOD signing (Windows/Mac)
-- [ ] `04-assemble.sh` - Assembly after signing
-- [ ] `08-sign-installer.sh` - Installer signing
-- [ ] `09-gpg-sign.sh` - GPG signing
-- [ ] `10-sbom-sign.sh` - SBOM signing
-- [ ] `11-verify-signing.sh` - Signature verification
-- [ ] `12-validate-sbom.sh` - SBOM validation
-- [ ] `14-aqa-tests.sh` - AQA test suite
-- [ ] `15-tck-tests.sh` - TCK tests
+- `03-internal-sign.sh` — JMOD signing (Windows/Mac, JDK ≥ 11)
+- `04-assemble.sh` — assembly after internal signing
+- `08-sign-installer.sh` — installer signing
+- `09-gpg-sign.sh` — GPG signing (Temurin)
+- `10-sbom-sign.sh` — SBOM JSF signing
+- `11-verify-signing.sh` — signature verification
+- `12-validate-sbom.sh` — SBOM validation
+- `14-aqa-tests.sh` — AQA test suite
+- `15-tck-tests.sh` — TCK tests
+- `16-publish.sh` — artifact publication
+- `20-reproducible-compare.sh` — reproducible build comparison
 
-Each should follow the same pattern as the existing scripts.
+All follow the same interface pattern documented in [`STAGE_IO_SPECIFICATION.md`](./STAGE_IO_SPECIFICATION.md).
 
 ## Benefits of Shell Script Approach
 
@@ -373,12 +376,7 @@ Each should follow the same pattern as the existing scripts.
 
 ## Summary
 
-The CI-agnostic shell script architecture provides:
-- ✅ 4 complete stage scripts (build, sign, installer, smoke-test)
-- ✅ 3 shared utility libraries (logging, config, artifacts)
-- ✅ Works on Jenkins, GitLab CI, GitHub Actions
-- ✅ Can run locally for testing
-- ✅ Consistent interface across all stages
-- ✅ Future-proof and portable
-
-This foundation makes it easy to convert the remaining stages and ensures the OpenJDK build pipeline is not locked into any specific CI/CD system.
+- 15 stage scripts in `scripts/stages/` covering the full build pipeline
+- 3 shared utility libraries in `scripts/lib/`
+- Consistent `INPUT_ARTIFACTS_DIR` / `TARGET_DIR` / `CONFIG_FILE` interface across all stages
+- Vendor overrides supported via `config-repo/vendor-scripts/` (see [`StageScriptRunner.groovy`](../ci/jenkins/lib/StageScriptRunner.groovy))

@@ -23,38 +23,23 @@ Your Jenkins instance must have:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Jenkins Instance (managed by infrastructure team)           │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ Seed Job (Freestyle)                                   │ │
-│  │ - Parameters: CONFIG_REPO_URL, CONFIG_REPO_BRANCH     │ │
-│  │ - Checks out ci-adoptium-pipelines                     │ │
-│  │ - Runs Job DSL scripts from job-dsl/ directory        │ │
-│  │ - Creates/updates all pipeline jobs                    │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                           │                                  │
-│                           ↓                                  │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ Job DSL Script (openjdk_build_pipeline.groovy)        │ │
-│  │ - Uses CONFIG_REPO_URL and CONFIG_REPO_BRANCH params  │ │
-│  │ - Fetches jenkins_job_config.json from config repo    │ │
-│  │ - Reads active JDK versions (8,11,17,21,25,26,27)     │ │
-│  │ - Creates one pipeline job per active version          │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                           │                                  │
-│                           ↓                                  │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │ Generated Pipeline Jobs                                │ │
-│  │ - openjdk-builds/jdk8-build-pipeline (LTS)            │ │
-│  │ - openjdk-builds/jdk11-build-pipeline (LTS)           │ │
-│  │ - openjdk-builds/jdk17-build-pipeline (LTS)           │ │
-│  │ - openjdk-builds/jdk21-build-pipeline (LTS)           │ │
-│  │ - openjdk-builds/jdk25-build-pipeline (LTS)           │ │
-│  │ - openjdk-builds/jdk26-build-pipeline                 │ │
-│  │ - openjdk-builds/jdk27-build-pipeline (LTS)           │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+seed-job (Freestyle)
+  → seed_job_consolidated.groovy
+       reads jenkins_job_config.json from config repo
+       creates per-JDK launch jobs and initial folder structure
+       ├─ /openjdk-builds/jdk21/jdk21-launch-build-pipelines  (Jenkinsfile.launch)
+       ├─ /openjdk-builds/jdk17/jdk17-launch-build-pipelines
+       └─ ...
+
+jdk21-launch-build-pipelines (run manually or on schedule)
+  → Jenkinsfile.launch
+       reads jdk21_pipeline_config.json from config repo
+       runs openjdk_build_pipeline.groovy via jobDsl() for each selected platform
+       creates/updates platform build jobs:
+         ├─ /openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline
+         ├─ /openjdk-builds/jdk21/jdk21-aarch64Linux-build-pipeline
+         └─ /openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline  ...
+       triggers all selected platform builds in parallel
 ```
 
 ## Setup Instructions
@@ -99,19 +84,21 @@ Your Jenkins instance must have:
 3. Click "Build"
 4. The job will:
    - Fetch `jenkins_job_config.json` from your configuration repository
-   - Create jobs for all active JDK versions
-   - Create the `openjdk-builds` folder
+   - Create launch jobs for all active JDK versions under `/openjdk-builds/jdk${version}/`
 
 ### Step 3: Verify
 
 Check that the following jobs were created:
-- `openjdk-builds/jdk8-build-pipeline`
-- `openjdk-builds/jdk11-build-pipeline`
-- `openjdk-builds/jdk17-build-pipeline`
-- `openjdk-builds/jdk21-build-pipeline`
-- `openjdk-builds/jdk25-build-pipeline`
-- `openjdk-builds/jdk26-build-pipeline`
-- `openjdk-builds/jdk27-build-pipeline`
+- `/openjdk-builds/jdk8/jdk8-launch-build-pipelines`
+- `/openjdk-builds/jdk11/jdk11-launch-build-pipelines`
+- `/openjdk-builds/jdk17/jdk17-launch-build-pipelines`
+- `/openjdk-builds/jdk21/jdk21-launch-build-pipelines`
+
+### Step 4: Create Platform Build Jobs
+
+Run a launch job (e.g. `jdk21-launch-build-pipelines`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
+- `/openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline`
+- `/openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline`
 
 ## Configuration
 
@@ -176,21 +163,21 @@ Default parameters are also defined in `jenkins_job_config.json`:
 
 Job DSL scripts are in [`ci/jenkins/job-dsl/`](../ci/jenkins/job-dsl/):
 
-- **`seed-job.groovy`**: Creates the seed job itself (self-updating)
-- **`openjdk-build-pipeline.groovy`**: Creates all pipeline jobs
+- **`seed/seed_job_consolidated.groovy`**: Creates all launch jobs from `jenkins_job_config.json`
+- **`openjdk_build_pipeline.groovy`**: Called by the launch pipeline to create one platform build job
 
 ### How It Works
 
-The `openjdk-build-pipeline.groovy` script:
+**`seed_job_consolidated.groovy`**:
+1. Fetches `jenkins_job_config.json` and `adoptium_pipeline_config.json` from the config repo
+2. For each enabled JDK version: creates a `jdk${version}-launch-build-pipelines` pipeline job
+3. Configures log rotation and parameters from `jenkins_job_config.json`
 
-1. Fetches `jenkins_job_config.json` from ci-temurin-config
-2. Parses the JSON to get active JDK versions
-3. For each enabled version:
-   - Creates a pipeline job in the `openjdk-builds` folder
-   - Configures parameters from the JSON
-   - Points to `ci/jenkins/Jenkinsfile.declarative`
-   - Sets up build discarder (log rotation)
-   - Adds LTS badge if applicable
+**`openjdk_build_pipeline.groovy`** (called by the launch pipeline via `jobDsl()`):
+1. Fetches `jdk${version}_pipeline_config.json` to extract `arch`, `os`, `variant` for the platform
+2. Creates `/openjdk-builds/jdk${version}/jdk${version}-${platform}-build-pipeline`
+3. Configures parameters (fixed: `JDK_VERSION`, `TARGET_OS`, `ARCHITECTURE`; variable: all others from `jenkins_job_config.json`)
+4. Sets `disableResume()`, `disableConcurrentBuilds()`, `CopyArtifactPermissionProperty`
 
 ### Error Handling
 
@@ -272,6 +259,6 @@ To change how jobs are created:
 
 ## Related Documentation
 
-- [BUILD_UID Integration](BUILD_UID_INTEGRATION.md) - Pipeline restart safety
-- [Jenkins Restart Behavior](JENKINS_RESTART_BEHAVIOR.md) - How restarts work
-- [Migration Guide](MIGRATION_IMPLEMENTATION_GUIDE.md) - Migrating from old pipeline
+- [BUILD_UID Integration](BUILD_UID_INTEGRATION.md) — Pipeline restart safety
+- [ci/jenkins/README.md](../ci/jenkins/README.md) — Jenkins integration overview
+- [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) — Config repo JSON reference
