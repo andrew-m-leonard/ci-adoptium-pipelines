@@ -100,15 +100,14 @@ def architecture
 def targetOs
 def variant
 try {
-    def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
-    def pipelineConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/configurations/jdk${jdkVersion}_pipeline_config.json"
+    def jdkConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/configurations/jdk${jdkVersion}_pipeline_config.json"
     
-    println "Loading platform configuration from ${pipelineConfigUrl}"
-    def pipelineConfigText = new URL(pipelineConfigUrl).text
-    def pipelineConfig = new JsonSlurper().parseText(pipelineConfigText)
+    println "Loading platform configuration from ${jdkConfigUrl}"
+    def jdkConfigText = new URL(jdkConfigUrl).text
+    def jdkConfig = new JsonSlurper().parseText(jdkConfigText)
     
     // Get platform-specific configuration
-    platformConfig = pipelineConfig.buildConfigurations[platform]
+    platformConfig = jdkConfig.buildConfigurations[platform]
     if (!platformConfig) {
         throw new IllegalArgumentException("Platform '${platform}' not found in configuration for JDK ${jdkVersion}")
     }
