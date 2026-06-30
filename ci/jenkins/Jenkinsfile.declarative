@@ -30,11 +30,11 @@ import groovy.transform.Field
 /**
  * Ensure all helper libraries are loaded. Called once per agent allocation.
  */
-def ensureLibsLoaded() {
+def ensureLibsLoaded(def dsl) {
     if (pipelineHelper == null) {
-        pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy').init(this)
-        stageRunner = load('ci/jenkins/lib/StageScriptRunner.groovy').init(this)
-        configHelper = load('ci/jenkins/lib/ConfigHelper.groovy').init(this)
+        pipelineHelper = dsl.load('ci/jenkins/lib/PipelineHelper.groovy').init(dsl)
+        stageRunner    = dsl.load('ci/jenkins/lib/StageScriptRunner.groovy').init(dsl)
+        configHelper   = dsl.load('ci/jenkins/lib/ConfigHelper.groovy').init(dsl)
     }
 }
 
@@ -71,7 +71,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Initialize') {
                         pipelineHelper.initializeStage('Initialize', [])
 
@@ -95,7 +95,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Build') {
                         def config = pipelineHelper.initializeStage('Build', ['Initialize'])
 
@@ -134,7 +134,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Internal Sign') {
                         def config = pipelineHelper.initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
@@ -163,7 +163,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Assemble') {
                         def config = pipelineHelper.initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
@@ -185,7 +185,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Sign Artifacts') {
                         def config = pipelineHelper.initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
@@ -207,7 +207,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Build Installers') {
                         def config = pipelineHelper.initializeStage('Build Installers', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
 
@@ -232,7 +232,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Sign Installers') {
                         def config = pipelineHelper.initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
@@ -260,7 +260,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('GPG Sign') {
                         def config = pipelineHelper.initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
 
@@ -294,7 +294,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Verify Signing') {
                         def config = pipelineHelper.initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
@@ -316,7 +316,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Validate SBOM') {
                         def config = pipelineHelper.initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', "${WORKSPACE}/stage_input_artifacts")
 
@@ -345,7 +345,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Smoke Tests') {
                         def config = pipelineHelper.initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
 
@@ -381,7 +381,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Reproducible Compare Build') {
                         def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
 
@@ -419,7 +419,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('AQA Tests') {
                         def config = pipelineHelper.initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
@@ -452,7 +452,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('TCK Tests') {
                         def config = pipelineHelper.initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
@@ -474,7 +474,7 @@ pipeline {
             }
             steps {
                 script {
-                    ensureLibsLoaded()
+                    ensureLibsLoaded(this)
                     pipelineHelper.executeStageWithTracking('Publish Artifacts') {
                         def config = pipelineHelper.initializeStage('Publish Artifacts', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/*.msi,**/*.pkg,**/metadata/**/*')
 
