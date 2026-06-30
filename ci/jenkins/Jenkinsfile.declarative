@@ -355,6 +355,11 @@ def runStageScript(String scriptStem, def config = null) {
 
     echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
 
+    // Ensure TARGET_DIR exists before the script runs (if set by the stage)
+    if (env.TARGET_DIR) {
+        sh "mkdir -p ${env.TARGET_DIR}"
+    }
+
     switch (found.type) {
         case 'sh':
             return sh(script: "bash ${found.path}", returnStatus: true)
