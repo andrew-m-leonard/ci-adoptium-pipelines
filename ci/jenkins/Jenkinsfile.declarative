@@ -4,21 +4,17 @@
  * IMPORTANT: This Jenkinsfile expects the ci-adoptium-pipelines repository to be
  * checked out via Jenkins SCM configuration. The repository should contain:
  *   - scripts/ directory with stage scripts
- *   - tools/ directory with helper scripts
+ *   - ci/jenkins/lib/ directory with helper libraries
  *   - Jenkinsfile.declarative (this file)
  *
  * The pipeline will separately checkout the configuration repository specified
  * by CONFIG_REPO_URL parameter, which contains the JSON configuration files.
  *
- * Key Features:
- * - JSON-based configuration (jdkNN_pipeline_config.json)
- * - Simple parameters: JDK_VERSION, VARIANT, TARGET_OS, ARCHITECTURE
- * - Stage-level restart capability
- * - Reliable artifact management (archiveArtifacts + copyArtifacts)
- * - Modular script organization
- * - Clear conditional logic with 'when' blocks
- * - Consistent behavior on first run and restart
- * - Code/Config separation (pipeline code vs vendor configs)
+ * Helper libraries (loaded after checkout):
+ *   - PipelineHelper.groovy  — initializeStage, finalizeStage, executeStageWithTracking
+ *   - StageScriptRunner.groovy — vendor-overridable stage script resolution
+ *   - ConfigHelper.groovy    — generatePipelineConfig, summarizePipelineConfig
+ *   - BuildUidHelper.groovy  — unique build tracking (loaded by PipelineHelper)
  *
  * Core Principle: Every stage archives outputs, every stage copies inputs
  */
@@ -26,409 +22,37 @@
 import groovy.json.*
 import groovy.transform.Field
 
-// BUILD_UID helper functions from external library
-// This provides unique build tracking and stage result management
-@Field def buildUidHelper
-
-// Helper function to ensure buildUidHelper is loaded
-// This is needed because when restarting from a stage, the Initialize stage is skipped
-def ensureBuildUidHelperLoaded() {
-    if (buildUidHelper == null) {
-        echo "Loading BuildUidHelper library..."
-        buildUidHelper = load 'ci/jenkins/lib/BuildUidHelper.groovy'
-    }
-    return buildUidHelper
-}
-
-// Helper function to ensure build description is set
-// This is needed because when restarting from a stage, the Initialize stage is skipped
-// and the build description would not be set
-def ensureBuildDescriptionSet(def config) {
-
-    // Validate config parameter
-    if (config == null || config.isEmpty()) {
-        error("ensureBuildDescriptionSet() requires a valid config object")
-    }
-    
-    // Build display name: #BUILD_NUMBER - JAVA_TO_BUILD VARIANT OS-ARCH @ SCM_REF [RELEASE|WEEKLY]
-    def displayName = "#${currentBuild.number} - ${config.buildConfig.JAVA_TO_BUILD} ${config.buildConfig.VARIANT} ${config.buildConfig.TARGET_OS}-${config.buildConfig.ARCHITECTURE}"
-    if (params.SCM_REF) {
-        displayName += " @ ${params.SCM_REF}"
-    }
-    if (params.RELEASE_TYPE && params.RELEASE_TYPE != 'NIGHTLY') {
-        displayName += " [${params.RELEASE_TYPE}]"
-    }
-    
-    // Build description: <Restart of #ORIG_NUMBER> | BUILD_UID: <UID>
-    def description = ""
-    
-    // Detect if this is a restart by checking if BUILD_UID exists and differs from a new one
-    // If BUILD_UID is already set and we're not in Initialize stage, this is a restart
-    def isRestart = env.BUILD_UID && env.BUILD_UID != '' && currentBuild.number > 1
-    if (isRestart) {
-        // Try to find the original build number by looking for when BUILD_UID was first created
-        def originalBuildNumber = currentBuild.number
-        def checkBuild = currentBuild.previousBuild
-        while (checkBuild != null) {
-            // If previous build exists and has same BUILD_UID, keep going back
-            try {
-                def prevBuildUid = checkBuild.getBuildVariables()?.get('BUILD_UID')
-                if (prevBuildUid == env.BUILD_UID) {
-                    originalBuildNumber = checkBuild.number
-                    checkBuild = checkBuild.previousBuild
-                } else {
-                    break
-                }
-            } catch (Exception e) {
-                echo "Error accessing previous build: ${e.getMessage()}"
-                // Can't access previous build, stop searching
-                break
-            }
-        }
-        if (originalBuildNumber != currentBuild.number) {
-            description = "Restart of #${originalBuildNumber} | "
-        }
-    }
-    
-    description += "BUILD_UID: ${env.BUILD_UID} | GROUP_UID: ${env.GROUP_UID}"
-    
-    // Always set display name and description to ensure BUILD_UID is current (important for restarts)
-    if (currentBuild.displayName != displayName) {
-        currentBuild.displayName = displayName
-        echo "Build Display Name: ${displayName}"
-    }
-    if (currentBuild.description != description) {
-        currentBuild.description = description
-        echo "Build Description: ${description}"
-    }
-    echo "Build UID: ${env.BUILD_UID}"
-}
-
-// Helper function to execute stage with automatic result tracking
-// This eliminates the need for repetitive post blocks in every stage
-// Saves ~12KB of bytecode by replacing 60 post blocks with 1 function
-def executeStageWithTracking(String stageName, Closure body) {
-    try {
-        body()
-        buildUidHelper.recordStageResult(stageName, 'SUCCESS')
-    } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) {
-        buildUidHelper.recordStageResult(stageName, 'ABORTED')
-        throw e
-    } catch (Exception e) {
-        def result = currentBuild.result ?: 'FAILURE'
-        buildUidHelper.recordStageResult(stageName, result)
-        throw e
-    }
-}
-
-// Helper function for common stage initialization pattern
-// Handles workspace cleanup, checkout, BUILD_UID setup, prerequisites, and artifact retrieval
-// Saves additional bytecode by consolidating repeated initialization code
-// Special handling for 'Initialize' stage which creates the config file
-def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json', String inputArtifactsDir = null) {
-    // Echo stage banner
-    echo "=== ${stageName} ==="
-
-    // Pre-cleanup: Always clean workspace for restartability
-    cleanWs()
-
-    // Checkout ci-adoptium-pipelines repository
-    checkout scm
-
-    // Checkout config repo (vendor-scripts, configurations, adoptium_pipeline_config.json)
-    if (params.CONFIG_REPO_URL) {
-        dir('config-repo') {
-            checkout([
-                $class: 'GitSCM',
-                branches: [[name: "*/${params.CONFIG_REPO_BRANCH}"]],
-                userRemoteConfigs: [[
-                    url: params.CONFIG_REPO_URL
-                ]],
-                extensions: [
-                    [$class: 'SparseCheckoutPaths',
-                     sparseCheckoutPaths: [
-                         [path: 'configurations/*'],
-                         [path: 'vendor-scripts/*'],
-                         [path: 'adoptium_pipeline_config.json']
-                     ]]
-                ]
-            ])
-        }
-    }
-
-    // Load BuildUidHelper after checkout (needed for stage restarts)
-    ensureBuildUidHelperLoaded()
-
-    // Initialize BUILD_UID and build context
-    buildUidHelper.initializeBuildContext(stageName)
-
-    // Validate prerequisites (skip for Initialize stage)
-    if (stageName != 'Initialize') {
-        buildUidHelper.validatePrerequisites(stageName, prerequisites)
-    }
-
-    // Retrieve artifacts if filter specified (skip for Initialize stage)
-    if (artifactFilter && stageName != 'Initialize') {
-        // Determine target directory for artifacts
-        def targetDir = inputArtifactsDir ?: '.'
-
-        // Create input artifacts directory if specified
-        if (inputArtifactsDir) {
-            sh "mkdir -p ${inputArtifactsDir}"
-        }
-
-        try {
-            copyArtifacts(
-                projectName: env.JOB_NAME,
-                selector: specific(env.BUILD_NUMBER),
-                filter: artifactFilter,
-                target: targetDir,
-                optional: false,
-                fingerprintArtifacts: true
-            )
-            echo "✅ Successfully copied artifacts to ${targetDir}: ${artifactFilter}"
-        } catch (Exception e) {
-            error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
-        }
-    }
-
-    // Return config for convenience (empty for Initialize stage)
-    if (stageName == 'Initialize') {
-        return [:]  // Return empty map for Initialize stage
-    } else {
-        // Set standard common environment variables available to all stage scripts.
-        // INPUT_ARTIFACTS_DIR is the directory where copied artifacts land (or workspace
-        // root when no dedicated dir is used). CONFIG_FILE always points to the
-        // pipeline-config.json inside that directory.
-        env.WORKSPACE        = "${WORKSPACE}"
-        env.BUILD_NUMBER     = "${BUILD_NUMBER}"
-        env.INPUT_ARTIFACTS_DIR = inputArtifactsDir ?: "${WORKSPACE}"
-        env.CONFIG_FILE      = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
-
-        // Read config from the resolved CONFIG_FILE location
-        def config = readJSON(file: env.CONFIG_FILE)
-        ensureBuildDescriptionSet(config)
-        return config
-    }
-}
-
-// Helper function for common stage finalization pattern
-// Handles post-cleanup and completion messages
-// Saves additional bytecode by consolidating repeated finalization code
-def finalizeStage(String stageName) {
-    // Post-cleanup: Clean workspace if requested
-    if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-        cleanWs()
-    }
-    
-    // Echo completion message
-    echo "=== ${stageName} Complete ==="
-    echo "BUILD_UID: ${env.BUILD_UID}"
-}
-
-// Helper function to summarize pipeline configuration
-// Displays key configuration values in a consistent format
-def summarizePipelineConfig(config) {
-    echo "Build Configuration:"
-    echo "  JDK Version: ${config.buildConfig.JAVA_TO_BUILD}"
-    echo "  Variant: ${config.buildConfig.VARIANT}"
-    echo "  OS: ${config.buildConfig.TARGET_OS}"
-    echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
-    echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
-    echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
-    echo "  Tests: ${config.buildConfig.TEST_LIST}"
-}
-
-// Helper function to generate pipeline configuration from parameters
-// Builds Python command arguments and executes load-json-config.py
-// Sets environment variables for use in when{} blocks
-// Returns the generated config object
-def generatePipelineConfig(String configDir = './configurations') {
-    
-    // Validate parameters
-    if (params.RUN_REPRODUCIBLE_COMPARE && (!params.SCM_REF || params.SCM_REF.trim().isEmpty())) {
-        def errorMsg = "RUN_REPRODUCIBLE_COMPARE requires SCM_REF to be specified. Please provide a valid SCM reference (e.g., jdk-21.0.12+6_adopt)"
-        echo "ERROR: ${errorMsg}"
-        error(errorMsg)
-    }
-
-    // Load adoptium_pipeline_config.json for vendor defaults
-    def adoptiumConfig = [:]
-    def adoptiumConfigFile = './config-repo/adoptium_pipeline_config.json'
-    if (fileExists(adoptiumConfigFile)) {
-        adoptiumConfig = readJSON file: adoptiumConfigFile
-        echo "✓ Loaded adoptium_pipeline_config.json"
-    } else {
-        error("adoptium_pipeline_config.json not found in config repo — this file is required")
-    }
-    def repoDefaults = adoptiumConfig.repository ?: [:]
-
-    // Resolve BUILD_REF and AQA_REF: use job param if non-empty, otherwise config repo default
-    def buildRef = params.BUILD_REF?.trim() ?: repoDefaults.buildBranch
-    def aqaRef = params.AQA_REF?.trim() ?: repoDefaults.aqaBranch
-    def buildRepoUrl = repoDefaults.buildRepoUrl
-    def aqaRepoUrl = repoDefaults.aqaRepoUrl
-
-    // Validate — these must be resolved from one source or the other
-    if (!buildRef) {
-        error("BUILD_REF is empty and repository.buildBranch is missing from adoptium_pipeline_config.json")
-    }
-    if (!aqaRef) {
-        error("AQA_REF is empty and repository.aqaBranch is missing from adoptium_pipeline_config.json")
-    }
-    if (!buildRepoUrl) {
-        error("repository.buildRepoUrl is missing from adoptium_pipeline_config.json")
-    }
-    if (!aqaRepoUrl) {
-        error("repository.aqaRepoUrl is missing from adoptium_pipeline_config.json")
-    }
-
-    echo "  Build Ref     : ${buildRef}"
-    echo "  AQA Ref       : ${aqaRef}"
-    echo "  Build Repo URL: ${buildRepoUrl}"
-    echo "  AQA Repo URL  : ${aqaRepoUrl}"
-    
-    // Build Python command arguments
-    // Prepend "jdk" to version number for config file lookup
-    def pythonArgs = [
-        "--jdk-version jdk${params.JDK_VERSION}",
-        "--variant ${params.VARIANT}",
-        "--target-os ${params.TARGET_OS}",
-        "--architecture ${params.ARCHITECTURE}",
-        "--config-dir ${configDir}",
-        "--output-dir ."
-    ]
-
-    // Add optional parameters
-    if (params.RELEASE_TYPE) {
-        // Convert to uppercase for case-insensitive handling
-        def releaseType = params.RELEASE_TYPE.toUpperCase()
-        
-        // Validate RELEASE_TYPE parameter
-        def validReleaseTypes = ['NIGHTLY', 'WEEKLY', 'RELEASE']
-        if (!validReleaseTypes.contains(releaseType)) {
-            error("Invalid RELEASE_TYPE: '${params.RELEASE_TYPE}'. Must be one of: ${validReleaseTypes.join(', ')} (case-insensitive)")
-        }
-        pythonArgs.add("--release-type")
-        pythonArgs.add(releaseType)
-    }
-    if (params.SCM_REF) {
-        pythonArgs.add("--scm-ref ${params.SCM_REF}")
-    }
-    // Always pass resolved refs and repo URLs (required by load-json-config.py)
-    pythonArgs.add("--build-ref ${buildRef}")
-    pythonArgs.add("--aqa-ref ${aqaRef}")
-    pythonArgs.add("--build-repo-url ${buildRepoUrl}")
-    pythonArgs.add("--aqa-repo-url ${aqaRepoUrl}")
-    if (!params.RUN_TESTS) {
-        pythonArgs.add("--no-tests")
-    }
-    if (!params.ENABLE_INSTALLERS) {
-        pythonArgs.add("--no-installers")
-    }
-    if (!params.SIGN_ARTIFACTS) {
-        pythonArgs.add("--no-signer")
-    }
-    if (params.RELEASE_TYPE?.toUpperCase() == 'WEEKLY') {
-        pythonArgs.add("--ea-beta-build")
-    }
-
-    // Execute Python script to generate configuration
-    sh """
-        python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}
-    """
-
-    // Read and return the generated configuration
-    def config = readJSON file: 'pipeline-config.json'
-    
-    // Set TCK enablement from parameter
-    config.parameters.enableTCK = params.ENABLE_TCK
-    
-    // Update pipeline-config.json with TCK setting
-    writeJSON file: 'pipeline-config.json', json: config, pretty: 4
-    
-    // Set environment variables for use in when{} blocks
-    // This eliminates repeated readJSON calls and saves bytecode
-    env.CONFIG_VARIANT = config.buildConfig.VARIANT
-    env.CONFIG_TARGET_OS = config.buildConfig.TARGET_OS
-    env.CONFIG_ARCHITECTURE = config.buildConfig.ARCHITECTURE
-    env.CONFIG_JAVA_TO_BUILD = config.buildConfig.JAVA_TO_BUILD
-    env.CONFIG_NODE_LABEL = config.buildConfig.NODE_LABEL ?: 'worker'
-    env.CONFIG_BUILD_ARGS = config.buildConfig.BUILD_ARGS ?: ''
-    env.CONFIG_RUN_TESTS = config.parameters.enableTests.toString()
-    env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
-    env.CONFIG_SIGN_ARTIFACTS = config.parameters.enableSigner.toString()
-    env.CONFIG_ENABLE_TCK = config.parameters.enableTCK.toString()
-    env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
-    env.AQA_REF = config.refs.aqaRef
-    env.SMOKE_TESTS_PASSED = 'false'  // Will be updated by Smoke Tests stage
-    
-    return config
-}
-
-// ============================================================================
+// Library instances — initialised lazily after first checkout
+@Field def pipelineHelper
+@Field def stageRunner
+@Field def configHelper
 
 /**
- * Resolve and execute a stage script, returning an exit code.
- * Searches config-repo/vendor-scripts/ first, then scripts/stages/ (this repo).
- * Supports .sh, .groovy, and .py implementations.
- *
- * Resolution order:
- *   1. config-repo/vendor-scripts/<stem>.sh
- *   2. config-repo/vendor-scripts/<stem>.groovy
- *   3. config-repo/vendor-scripts/<stem>.py
- *   4. scripts/stages/<stem>.sh
- *   5. scripts/stages/<stem>.groovy
- *   6. scripts/stages/<stem>.py
- *   7. built-in no-op (returns 0 — does not fail the build)
- *
- * Script contracts:
- *   .sh     — signals failure via exit code
- *   .py     — signals failure via exit code
- *   .groovy — call(Map config) must return an int exit code (0 = success)
- *
- * Returns: int exit code — 0 = success, non-zero = failure.
- *          Caller decides whether to error() or mark UNSTABLE.
- *
- * @param scriptStem  Script stem e.g. '03-internal-sign'
- * @param config      Pipeline config map — forwarded to .groovy scripts as the call() argument.
- *                    .sh and .py scripts receive config indirectly via environment variables
- *                    set by initializeStage(): WORKSPACE, BUILD_NUMBER, INPUT_ARTIFACTS_DIR,
- *                    and CONFIG_FILE (path to pipeline-config.json, readable with jq/python json).
+ * Ensure all helper libraries are loaded. Called once per agent allocation.
  */
-def runStageScript(String scriptStem, def config = null) {
-    def candidates = [
-        [path: "config-repo/vendor-scripts/${scriptStem}.sh",     type: 'sh'],
-        [path: "config-repo/vendor-scripts/${scriptStem}.groovy", type: 'groovy'],
-        [path: "config-repo/vendor-scripts/${scriptStem}.py",     type: 'py'],
-        [path: "scripts/stages/${scriptStem}.sh",                 type: 'sh'],
-        [path: "scripts/stages/${scriptStem}.groovy",             type: 'groovy'],
-        [path: "scripts/stages/${scriptStem}.py",                 type: 'py'],
-    ]
-
-    def found = candidates.find { fileExists(it.path) }
-
-    if (!found) {
-        echo "ℹ️  No script found for '${scriptStem}' — stage is a no-op"
-        return 0
+def ensureLibsLoaded() {
+    if (pipelineHelper == null) {
+        pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy').init(this)
+        stageRunner = load('ci/jenkins/lib/StageScriptRunner.groovy').init(this)
+        configHelper = load('ci/jenkins/lib/ConfigHelper.groovy').init(this)
     }
+}
 
-    echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
-
-    // Ensure TARGET_DIR exists before the script runs (if set by the stage)
-    if (env.TARGET_DIR) {
-        sh "mkdir -p ${env.TARGET_DIR}"
+/**
+ * Get the appropriate node label for the build.
+ */
+def getNodeLabel() {
+    if (env.CONFIG_NODE_LABEL) {
+        return env.CONFIG_NODE_LABEL
     }
+    return 'worker'
+}
 
-    switch (found.type) {
-        case 'sh':
-            return sh(script: "bash ${found.path}", returnStatus: true)
-        case 'groovy':
-            def script = load found.path
-            return script(config) ?: 0
-        case 'py':
-            return sh(script: "python3 ${found.path}", returnStatus: true)
-    }
+/**
+ * Update GitHub commit status for PR tester.
+ */
+def updateGithubCommitStatus(String state, String description) {
+    echo "GitHub Status: ${state} - ${description}"
 }
 
 // ============================================================================
@@ -436,13 +60,8 @@ def runStageScript(String scriptStem, def config = null) {
 pipeline {
     agent none
 
-    // NOTE: Parameters and options are defined by the Job DSL script (openjdk_build_pipeline.groovy), not here.
-    // Defining them in the Jenkinsfile would override the Job DSL's settings on every pipeline run.
-    // All configuration comes from jenkins_job_config.json via the Job DSL.
-
     options {
         timestamps()
-        // NOTE: timeout, buildDiscarder, and disableConcurrentBuilds are set by Job DSL
     }
 
     stages {
@@ -452,25 +71,19 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Initialize') {
-                        initializeStage('Initialize', [])
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Initialize') {
+                        pipelineHelper.initializeStage('Initialize', [])
 
-                        // Generate pipeline configuration from parameters
-                        // config-repo/ already checked out by initializeStage()
-                        def config = generatePipelineConfig('./config-repo/configurations')
+                        def config = configHelper.generatePipelineConfig('./config-repo/configurations')
 
-                        // Archive configuration
                         archiveArtifacts artifacts: 'pipeline-config.json',
                                        fingerprint: true,
                                        allowEmptyArchive: false
 
-                        // Display configuration summary
-                        summarizePipelineConfig(config)
-
-                        // Set build description now that config exists
-                        ensureBuildDescriptionSet(config)
-
-                        finalizeStage('Initialize')
+                        configHelper.summarizePipelineConfig(config)
+                        pipelineHelper.ensureBuildDescriptionSet(config)
+                        pipelineHelper.finalizeStage('Initialize')
                     }
                 }
             }
@@ -482,26 +95,24 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Build') {
-                        def config = initializeStage('Build', ['Initialize'])
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Build') {
+                        def config = pipelineHelper.initializeStage('Build', ['Initialize'])
 
-                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/build_output"
 
-                        // Execute build stage script (vendor-overridable)
-                        def buildExitCode = runStageScript('02-build', config)
+                        def buildExitCode = stageRunner.run('02-build', config)
                         if (buildExitCode != 0) {
                             error("Build failed with exit code: ${buildExitCode}")
                         }
 
-                        // Archive build artifacts (use relative path from TARGET_DIR)
                         dir(env.TARGET_DIR) {
                             archiveArtifacts artifacts: "**/*",
                                            fingerprint: true,
                                            allowEmptyArchive: false
                         }
 
-                        finalizeStage('Build')
+                        pipelineHelper.finalizeStage('Build')
                     }
                 }
             }
@@ -523,14 +134,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Internal Sign') {
-                        def config = initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Internal Sign') {
+                        def config = pipelineHelper.initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
-                        // Execute internal sign script (vendor-overridable)
-                        def signExitCode = runStageScript('03-internal-sign', config)
+                        def signExitCode = stageRunner.run('03-internal-sign', config)
                         if (signExitCode != 0) { error("Internal Sign failed with exit code: ${signExitCode}") }
 
-                        finalizeStage('Internal Sign')
+                        pipelineHelper.finalizeStage('Internal Sign')
                     }
                 }
             }
@@ -552,14 +163,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Assemble') {
-                        def config = initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Assemble') {
+                        def config = pipelineHelper.initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
-                        // Execute assemble script (vendor-overridable)
-                        def assembleExitCode = runStageScript('04-assemble', config)
+                        def assembleExitCode = stageRunner.run('04-assemble', config)
                         if (assembleExitCode != 0) { error("Assemble failed with exit code: ${assembleExitCode}") }
 
-                        finalizeStage('Assemble')
+                        pipelineHelper.finalizeStage('Assemble')
                     }
                 }
             }
@@ -574,14 +185,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Sign Artifacts') {
-                        def config = initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Sign Artifacts') {
+                        def config = pipelineHelper.initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
-                        // Execute sign artifacts script (vendor-overridable)
-                        def signExitCode = runStageScript('06-sign', config)
+                        def signExitCode = stageRunner.run('06-sign', config)
                         if (signExitCode != 0) { error("Sign Artifacts failed with exit code: ${signExitCode}") }
 
-                        finalizeStage('Sign Artifacts')
+                        pipelineHelper.finalizeStage('Sign Artifacts')
                     }
                 }
             }
@@ -596,14 +207,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Build Installers') {
-                        def config = initializeStage('Build Installers', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Build Installers') {
+                        def config = pipelineHelper.initializeStage('Build Installers', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
 
-                        // Execute installer build script (vendor-overridable)
-                        def installerExitCode = runStageScript('07-installer', config)
+                        def installerExitCode = stageRunner.run('07-installer', config)
                         if (installerExitCode != 0) { error("Build Installers failed with exit code: ${installerExitCode}") }
 
-                        finalizeStage('Build Installers')
+                        pipelineHelper.finalizeStage('Build Installers')
                     }
                 }
             }
@@ -621,14 +232,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Sign Installers') {
-                        def config = initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Sign Installers') {
+                        def config = pipelineHelper.initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
-                        // Execute sign installers script (vendor-overridable)
-                        def signInstExitCode = runStageScript('08-sign-installer', config)
+                        def signInstExitCode = stageRunner.run('08-sign-installer', config)
                         if (signInstExitCode != 0) { error("Sign Installers failed with exit code: ${signInstExitCode}") }
 
-                        finalizeStage('Sign Installers')
+                        pipelineHelper.finalizeStage('Sign Installers')
                     }
                 }
             }
@@ -649,21 +260,20 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('GPG Sign') {
-                        def config = initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('GPG Sign') {
+                        def config = pipelineHelper.initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
 
-                        // Execute GPG sign script (vendor-overridable)
-                        def gpgExitCode = runStageScript('09-gpg-sign', config)
+                        def gpgExitCode = stageRunner.run('09-gpg-sign', config)
                         if (gpgExitCode != 0) { error("GPG Sign failed with exit code: ${gpgExitCode}") }
 
-                        // SBOM signing if applicable (vendor-overridable)
                         if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
                             echo "=== SBOM JSF Signing ==="
-                            def sbomExitCode = runStageScript('10-sbom-sign', config)
+                            def sbomExitCode = stageRunner.run('10-sbom-sign', config)
                             if (sbomExitCode != 0) { error("SBOM Sign failed with exit code: ${sbomExitCode}") }
                         }
 
-                        finalizeStage('GPG Sign')
+                        pipelineHelper.finalizeStage('GPG Sign')
                     }
                 }
             }
@@ -684,14 +294,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Verify Signing') {
-                        def config = initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Verify Signing') {
+                        def config = pipelineHelper.initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
-                        // Execute verify signing script (vendor-overridable)
-                        def verifyExitCode = runStageScript('11-verify-signing', config)
+                        def verifyExitCode = stageRunner.run('11-verify-signing', config)
                         if (verifyExitCode != 0) { error("Verify Signing failed with exit code: ${verifyExitCode}") }
 
-                        finalizeStage('Verify Signing')
+                        pipelineHelper.finalizeStage('Verify Signing')
                     }
                 }
             }
@@ -706,17 +316,16 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Validate SBOM') {
-                        def config = initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', "${WORKSPACE}/stage_input_artifacts")
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Validate SBOM') {
+                        def config = pipelineHelper.initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', "${WORKSPACE}/stage_input_artifacts")
 
-                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/sbom_validation_output"
 
-                        // Execute SBOM validation script (vendor-overridable)
-                        def sbomValExitCode = runStageScript('12-validate-sbom', config)
+                        def sbomValExitCode = stageRunner.run('12-validate-sbom', config)
                         if (sbomValExitCode != 0) { error("Validate SBOM failed with exit code: ${sbomValExitCode}") }
 
-                        finalizeStage('Validate SBOM')
+                        pipelineHelper.finalizeStage('Validate SBOM')
                     }
                 }
             }
@@ -736,16 +345,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Smoke Tests') {
-                        def config = initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Smoke Tests') {
+                        def config = pipelineHelper.initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
 
-                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/smoke_test_output"
 
-                        // Execute smoke test script (vendor-overridable)
-                        def smokeTestExitCode = runStageScript('13-smoke-tests', config)
+                        def smokeTestExitCode = stageRunner.run('13-smoke-tests', config)
 
-                        // Set environment variable for downstream stages
                         env.SMOKE_TESTS_PASSED = (smokeTestExitCode == 0).toString()
 
                         if (smokeTestExitCode != 0) {
@@ -753,7 +360,7 @@ pipeline {
                             echo "WARNING: Smoke tests failed - marking build as UNSTABLE"
                         }
 
-                        finalizeStage('Smoke Tests')
+                        pipelineHelper.finalizeStage('Smoke Tests')
                     }
                 }
             }
@@ -774,30 +381,27 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Reproducible Compare Build') {
-                        def config = initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Reproducible Compare Build') {
+                        def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
 
-                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"
                         env.SCM_REF    = params.SCM_REF
                         env.RELEASE    = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
 
-                        // Execute reproducible compare script (vendor-overridable)
-                        def comparisonExitCode = runStageScript('20-reproducible-compare', config)
+                        def comparisonExitCode = stageRunner.run('20-reproducible-compare', config)
 
-                        // Archive comparison results from TARGET_DIR (contents only, no directory wrapper)
                         dir(env.TARGET_DIR) {
                             archiveArtifacts artifacts: '**/*',
                                            fingerprint: true,
                                            allowEmptyArchive: true
                         }
 
-                        // Set build result if comparison failed
                         if (comparisonExitCode != 0) {
                             currentBuild.result = 'UNSTABLE'
                         }
 
-                        finalizeStage('Reproducible Compare Build') 
+                        pipelineHelper.finalizeStage('Reproducible Compare Build')
                     }
                 }
             }
@@ -815,14 +419,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('AQA Tests') {
-                        def config = initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('AQA Tests') {
+                        def config = pipelineHelper.initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                        // Execute AQA test script (vendor-overridable)
-                        def aqaExitCode = runStageScript('14-aqa-tests', config)
+                        def aqaExitCode = stageRunner.run('14-aqa-tests', config)
                         if (aqaExitCode != 0) { error("AQA Tests failed with exit code: ${aqaExitCode}") }
 
-                        finalizeStage('AQA Tests')
+                        pipelineHelper.finalizeStage('AQA Tests')
                     }
                 }
             }
@@ -848,14 +452,14 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('TCK Tests') {
-                        def config = initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('TCK Tests') {
+                        def config = pipelineHelper.initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
-                        // Execute TCK test script (vendor-overridable)
-                        def tckExitCode = runStageScript('15-tck-tests', config)
+                        def tckExitCode = stageRunner.run('15-tck-tests', config)
                         if (tckExitCode != 0) { error("TCK Tests failed with exit code: ${tckExitCode}") }
 
-                        finalizeStage('TCK Tests')
+                        pipelineHelper.finalizeStage('TCK Tests')
                     }
                 }
             }
@@ -870,17 +474,16 @@ pipeline {
             }
             steps {
                 script {
-                    executeStageWithTracking('Publish Artifacts') {
-                        def config = initializeStage('Publish Artifacts', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/*.msi,**/*.pkg,**/metadata/**/*')
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('Publish Artifacts') {
+                        def config = pipelineHelper.initializeStage('Publish Artifacts', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/*.msi,**/*.pkg,**/metadata/**/*')
 
-                        // Stage-specific env vars
                         env.TARGET_DIR = "${WORKSPACE}/publish_output"
 
-                        // Execute publish artifacts script (vendor-overridable)
-                        def publishExitCode = runStageScript('16-publish', config)
+                        def publishExitCode = stageRunner.run('16-publish', config)
                         if (publishExitCode != 0) { error("Publish Artifacts failed with exit code: ${publishExitCode}") }
 
-                        finalizeStage('Publish Artifacts')
+                        pipelineHelper.finalizeStage('Publish Artifacts')
                     }
                 }
             }
@@ -892,22 +495,13 @@ pipeline {
             script {
                 echo "=== Pipeline Cleanup ==="
 
-                // Detect user error: Rebuild of a Restarted build.
-                // In that scenario the Initialize stage is skipped (its when{} guard passes only
-                // on a true first run), so BUILD_UID is never set and every subsequent stage
-                // also skips.  All stages appear green but nothing actually ran — mark the
-                // build FAILURE so the operator knows the rebuild was invalid.
                 if (env.BUILD_UID == null) {
                     currentBuild.result = 'FAILURE'
                     echo "❌ ERROR: BUILD_UID is not set — no stages executed. " +
                          "This is most likely caused by performing a Rebuild on a build that was " +
-                         "itself a Restart (e.g. 'Restart from Stage: Validate SBOM'). " +
-                         "Rebuilding a Restarted build is not supported because the pipeline " +
-                         "environment cannot be reconstructed. Please trigger a new build instead."
+                         "itself a Restart. Please trigger a new build instead."
                 }
 
-                // Final cleanup: Clean entire workspace if CLEAN_WORKSPACE_AFTER_STAGE=true
-                // Note: Individual stages already perform their own post-cleanup
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
                     try {
                         node(getNodeLabel()) {
@@ -946,29 +540,3 @@ pipeline {
         }
     }
 }
-
-/**
- * Get the appropriate node label for the build
- */
-def getNodeLabel() {
-    // Use environment variable set by Initialize stage
-    // This avoids readJSON call outside of node context
-    if (env.CONFIG_NODE_LABEL) {
-        echo "Using node label from environment: ${env.CONFIG_NODE_LABEL}"
-        return env.CONFIG_NODE_LABEL
-    }
-    
-    // Final fallback
-    echo "No node label found in environment, using default: worker"
-    return 'worker'
-}
-
-/**
- * Update GitHub commit status for PR tester
- */
-def updateGithubCommitStatus(String state, String description) {
-    echo "GitHub Status: ${state} - ${description}"
-    // Actual implementation would use GitHub API
-}
-
-// Made with Bob
