@@ -1,21 +1,26 @@
 /**
  * StageScriptRunner — vendor-overridable stage script resolution and execution.
  *
- * Resolution order:
- *   1. config-repo/vendor-scripts/<stem>.sh
- *   2. config-repo/vendor-scripts/<stem>.groovy
- *   3. config-repo/vendor-scripts/<stem>.py
- *   4. scripts/stages/<stem>.sh
- *   5. scripts/stages/<stem>.groovy
- *   6. scripts/stages/<stem>.py
- *   7. built-in no-op (returns 0)
- *
- * Usage in Jenkinsfile:
+ * Loaded with:
  *   def stageRunner = load('ci/jenkins/lib/StageScriptRunner.groovy')
- *   def exitCode = stageRunner.run('13-smoke-tests', config)
  *
- * Note: This file is a CpsScript itself — pipeline steps (echo, sh, env, load,
- * fileExists, etc.) are called directly without any delegation wrapper.
+ * This file is a CpsScript. All pipeline steps (echo, sh, env, load, fileExists,
+ * etc.) are called directly — no 'steps.' prefix, no init(this) delegation.
+ *
+ * Resolution order for run(stem):
+ *   1. config-repo/vendor-scripts/<stem>.sh     ← vendor override (shell)
+ *   2. config-repo/vendor-scripts/<stem>.groovy ← vendor override (Groovy)
+ *   3. config-repo/vendor-scripts/<stem>.py     ← vendor override (Python)
+ *   4. scripts/stages/<stem>.sh                 ← default (shell)
+ *   5. scripts/stages/<stem>.groovy             ← default (Groovy)
+ *   6. scripts/stages/<stem>.py                 ← default (Python)
+ *   7. no-op → returns 0
+ *
+ * .groovy scripts receive the config Map as their call() argument.
+ * .sh and .py scripts receive config via environment variables set by initializeStage().
+ *
+ * Public API:
+ *   run(scriptStem, config=null) → int exit code (0 = success)
  */
 
 /**

@@ -1,15 +1,26 @@
 /**
- * PipelineHelper — shared stage lifecycle functions for the Jenkinsfile.
+ * PipelineHelper — stage lifecycle functions for Jenkinsfile.declarative.
  *
- * Provides: initializeStage(), finalizeStage(), executeStageWithTracking(),
- *           ensureBuildDescriptionSet()
- *
- * Usage in Jenkinsfile:
+ * Loaded with:
  *   def pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy')
- *   pipelineHelper.executeStageWithTracking('Build') { ... }
  *
- * Note: This file is a CpsScript itself — pipeline steps (echo, sh, env, params,
- * currentBuild, load, etc.) are called directly without any delegation wrapper.
+ * This file is a CpsScript. All pipeline steps (echo, sh, cleanWs, checkout,
+ * copyArtifacts, env, params, currentBuild, load, etc.) are called directly —
+ * no 'steps.' prefix, no init(this) delegation.
+ *
+ * Public API:
+ *   initializeStage(stageName, prerequisites=[], artifactFilter='pipeline-config.json', inputArtifactsDir=null)
+ *     → cleans workspace, checks out repos, initialises BUILD_UID, validates
+ *       prerequisites, copies artifacts; returns parsed config Map (or [:] for Initialize)
+ *
+ *   finalizeStage(stageName)
+ *     → optional cleanWs + completion log
+ *
+ *   executeStageWithTracking(stageName, body)
+ *     → runs body closure; records SUCCESS/FAILURE/ABORTED in BUILD_STAGE_RESULTS
+ *
+ *   ensureBuildDescriptionSet(config)
+ *     → sets currentBuild.displayName and .description from config + BUILD_UID
  */
 
 buildUidHelper = null // Lazy-loaded by initializeStage(); explicit null initialises the Binding entry

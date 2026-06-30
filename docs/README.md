@@ -1,153 +1,91 @@
-# CI Adoptium Pipelines Documentation
+# CI Adoptium Pipelines — Documentation
 
-Welcome to the CI Adoptium Pipelines documentation. This directory contains comprehensive guides for understanding, using, and contributing to the pipeline infrastructure.
+This directory contains reference documentation for the Adoptium CI pipeline infrastructure.
 
-## 📚 Table of Contents
-
-### Getting Started
-
-- **[LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md)** - ⭐ **NEW** Local runner workspace and artifacts architecture
-
-### Architecture & Design
-
-- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** - Overview of the CI-agnostic architecture design with before/after comparison ⭐
-- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** - Separation of pipeline code and configuration
-- **[STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)** - Input/output specifications for pipeline stages
-- **[UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)** - Universal pattern for stage implementation
-
-### Configuration
-
-- **[CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md)** - Complete guide to pipeline configuration
-- **[JENKINS_ENVIRONMENT_VARIABLES.md](./JENKINS_ENVIRONMENT_VARIABLES.md)** - Jenkins environment variables reference
-
-### Pipeline Features
-
-- **[RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md)** - Guide to restartable pipelines
-- **[JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md)** - Jenkins-specific restart behavior
-- **[REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md)** - Reproducible build comparison integration
-- **[REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md)** - Reproducible build comparison details
-- **[REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md)** - ⭐ **NEW** Automatic path padding for reproducible builds
-- **[PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md)** - ⭐ **NEW** Quick reference for path padding implementation
-
-### Workspace Management
-
-- **[WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)** - Workspace and artifacts separation architecture
-- **[WORKSPACE_CLEANUP.md](./WORKSPACE_CLEANUP.md)** - Workspace cleanup strategies
-- **[WORKSPACE_VALIDATION_PATTERN.md](./WORKSPACE_VALIDATION_PATTERN.md)** - Workspace validation patterns
-- **[JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md)** - ⭐ **NEW** Jenkins cleanup refactoring using native cleanWs()
-
-### Implementation Details
-
-- **[SHELL_SCRIPTS_SUMMARY.md](./SHELL_SCRIPTS_SUMMARY.md)** - Summary of shell scripts used in the pipeline
-- **[STAGE_INPUT_STRATEGY.md](./STAGE_INPUT_STRATEGY.md)** - Strategy for stage input handling
-- **[TARGET_DIR_REFACTORING.md](./TARGET_DIR_REFACTORING.md)** - Target directory refactoring details
-- **[PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md)** - Guide to the pipeline runner
-
-### Migration & Planning
-
-- **[MIGRATION_PLAN.md](./MIGRATION_PLAN.md)** - Migration plan for adopting the new pipeline
-- **[MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md)** - Visual guide for migration
-- **[GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md)** - GitHub epics and issues tracking
-
-### Tools & Utilities
-
-- **[Tools Documentation](../tools/README.md)** - ⭐ **NEW** Configuration conversion and workspace management tools
-  - Groovy-to-JSON conversion tools
-  - Batch conversion utilities
-  - Workspace cleanup utilities
-
-### Testing
-
-- **[TEST_BUILD_UID_GUIDE.md](./TEST_BUILD_UID_GUIDE.md)** - Guide for testing with build UIDs
-
-## 🎯 Quick Navigation by Use Case
+## Quick Navigation
 
 ### I want to...
 
-#### Run a Local Build
-1. Understand the workspace architecture in [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) ⭐
-2. Configure your build using [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md)
-3. Use [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) for detailed runner usage
-
-#### Understand the Architecture
-1. Read [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) for the overall design and before/after comparison
-2. Review [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) for configuration approach
-
-#### Work with Restartable Pipelines
-1. Start with [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md)
-2. Understand [JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md)
-3. Learn about workspace management in [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)
-4. See the latest cleanup approach in [JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md) ⭐
-
-#### Work with Reproducible Builds
-1. Read [REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md) for path padding feature ⭐
-2. Use [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md) for quick reference ⭐
-3. Review [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md) for comparison integration
-4. Check [REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md) for comparison details
-
-#### Implement a New Stage
-1. Follow the [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)
-2. Review [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)
-3. Check [STAGE_INPUT_STRATEGY.md](./STAGE_INPUT_STRATEGY.md)
-
-#### Convert Legacy Configurations
-1. Read [Tools Documentation](../tools/README.md) for conversion tools
-2. Use `convert-groovy-config-to-json.sh` for single file conversion
-3. Use `convert-all-legacy-groovy-configs.py` for batch conversion
-4. Validate converted JSON with pipeline runner
-
-#### Migrate from Old Pipeline
-1. Start with [MIGRATION_PLAN.md](./MIGRATION_PLAN.md)
-2. Use [MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md) for visual reference
-3. Track progress with [GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md)
-
-## 📝 Recent Updates
-
-### 2026-06-17
-- ⭐ **NEW**: [REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md) - Automatic workspace path padding for reproducible builds
-  - Solves LC_UUID mismatch on macOS by matching upstream workspace path lengths
-  - Automatic SBOM download and BUILD_WORKSPACE_DIRECTORY extraction
-  - Cross-platform support (macOS, Linux, Windows, AIX)
-  - Graceful error handling with detailed logging
-- ⭐ **NEW**: [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md) - Quick reference guide
-  - Implementation overview and flow diagram
-  - Configuration examples and testing procedures
-  - Key features and limitations
-- **UPDATED**: [`scripts/stages/02-build.sh`](../scripts/stages/02-build.sh) - Added path padding logic
-  - New `compareBuild` parameter support
-  - Three new helper functions for path resolution and padding
-  - Integrated SBOM download before build execution
-
-### 2026-05-19
-- ⭐ **NEW**: [Tools Documentation](../tools/README.md) - Comprehensive documentation for pipeline tools
-  - Configuration conversion tools (Groovy to JSON)
-  - Batch conversion utilities
-  - Workspace management tools
-  - Migration workflow guide
-
-### 2026-05-18
-- ⭐ **NEW**: [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) - Local runner workspace/artifacts separation
-  - Two-directory architecture: `stage_workspace/` (ephemeral) + `artifacts/` (persistent)
-  - Strict workspace validation rules
-  - Automatic pre/post cleanup
-  - Restartability support
-- ⭐ **NEW**: [JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md) - Simplified workspace cleanup using Jenkins native `cleanWs()` utility
-  - Removed custom cleanup helper function
-  - Updated all 12 pipeline stages
-  - Improved restartability and reliability
-- **UPDATED**: Multiple documentation files to reflect current architecture
-  - Repository separation (ci-adoptium-pipelines vs ci-temurin-config)
-  - Current directory structure
-  - Two-directory workspace architecture
-
-## 🤝 Contributing
-
-See [../CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
-
-## 📖 Main README
-
-For project overview and quick links, see [../README.md](../README.md).
+| Goal | Start here |
+|---|---|
+| Set up Jenkins from scratch | [JOB_DSL_AUTOMATION.md](./JOB_DSL_AUTOMATION.md) |
+| Understand the overall design | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) |
+| Configure a build | [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) |
+| Restart a failed stage | [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md) |
+| Run the pipeline locally | [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) |
+| Add or modify a stage script | [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) + [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) |
+| Understand BUILD_UID tracking | [BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md) |
+| Work with reproducible builds | [REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md) |
+| Convert legacy Groovy configs | [`tools/README.md`](../tools/README.md) |
 
 ---
 
-**Note**: All documentation is organized by topic. If you can't find what you're looking for, try using your editor's search functionality across all markdown files in this directory.
+## Architecture & Design
+
+- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** — 3-layer design (Configuration / Shell Scripts / CI Orchestration), before/after comparison, portability rationale
+- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Why pipeline code and vendor configuration live in separate repositories
+- **[PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md)** — Launch pipeline → build pipeline → stage script flow
+- **[STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)** — Per-stage input/output contracts (environment variables, artifacts in/out)
+- **[UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)** — How to write a new stage script following the standard pattern
+
+## Configuration
+
+- **[CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md)** — Full reference for `pipeline-config.json`, `adoptium_pipeline_config.json`, and `jenkins_job_config.json`
+- **[JENKINS_ENVIRONMENT_VARIABLES.md](./JENKINS_ENVIRONMENT_VARIABLES.md)** — All `CONFIG_*` and pipeline env vars set by `ConfigHelper` and `BuildUidHelper`
+- **[PARAMETER_CONSOLIDATION.md](./PARAMETER_CONSOLIDATION.md)** — How job parameters are defined and flow into the pipeline
+
+## Jenkins Integration
+
+- **[JOB_DSL_AUTOMATION.md](./JOB_DSL_AUTOMATION.md)** — Complete seed job and Job DSL setup guide; how launch jobs and platform build jobs are created
+- **[BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md)** — `BUILD_UID` and `GROUP_UID` lifecycle; `BUILD_STAGE_RESULTS` serialisation; prerequisite validation
+- **[JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md)** — What happens when "Restart from Stage" is used; `BUILD_STAGE_RESULTS` across restarts; Rebuild vs Restart distinction
+- **[RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md)** — How every stage is designed to be independently restartable
+- **[JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md)** — Use of native `cleanWs()` per stage; pre/post cleanup strategy
+
+## Workspace Management
+
+- **[WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)** — Jenkins workspace layout; how artifacts flow between stages via `copyArtifacts` + `archiveArtifacts`
+- **[WORKSPACE_CLEANUP.md](./WORKSPACE_CLEANUP.md)** — Cleanup strategy, `CLEAN_WORKSPACE_AFTER_STAGE` parameter
+- **[WORKSPACE_VALIDATION_PATTERN.md](./WORKSPACE_VALIDATION_PATTERN.md)** — BUILD_UID-based workspace integrity checks
+- **[LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md)** — Local runner two-directory layout (`stage_workspace/` + `artifacts/`)
+
+## Stage Implementation Details
+
+- **[SHELL_SCRIPTS_SUMMARY.md](./SHELL_SCRIPTS_SUMMARY.md)** — Index of all `scripts/stages/` and `scripts/lib/` files with purpose and key variables
+- **[STAGE_INPUT_STRATEGY.md](./STAGE_INPUT_STRATEGY.md)** — How `StageScriptRunner` resolves vendor-override scripts vs default implementations
+- **[TARGET_DIR_ARTIFACT_CONSISTENCY.md](./TARGET_DIR_ARTIFACT_CONSISTENCY.md)** — `TARGET_DIR` convention across stages
+- **[ARTIFACT_DIRECTORY_PATTERN.md](./ARTIFACT_DIRECTORY_PATTERN.md)** — Artifact naming and directory structure conventions
+
+## Pipeline Features
+
+- **[REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md)** — Stage 20 reproducible build comparison: what it does, when it runs, how to interpret results
+- **[REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md)** — Integration details: `REPRODUCIBLE_COMPARE_BUILD` parameter, `SCM_REF` requirement, `TARGET_DIR` outputs
+- **[REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md)** — Automatic workspace path padding to match upstream build paths (macOS LC_UUID issue)
+- **[PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md)** — Quick reference for path padding: when it triggers, how it works
+- **[BUILD_MONITORING_TRACEABILITY.md](./BUILD_MONITORING_TRACEABILITY.md)** — `BUILD_UID` / `GROUP_UID` in build display names and descriptions; linking platform builds to a launch run
+
+## Local Execution
+
+- **[PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md)** — `ci/local/run-pipeline.py` full reference: arguments, stage names, workspace layout, examples
+- **[TEST_BUILD_UID_GUIDE.md](./TEST_BUILD_UID_GUIDE.md)** — How to test BUILD_UID and prerequisite validation logic locally and in Jenkins
+
+## Tools
+
+- **[Tools README](../tools/README.md)** — Legacy Groovy-to-JSON configuration conversion tools: `convert-groovy-to-json.py`, `convert-all-legacy-groovy-configs.py`
+
+## Migration & Planning (Historical)
+
+These documents capture decisions and plans made during the original pipeline refactoring. They are retained for historical context.
+
+- [MIGRATION_PLAN.md](./MIGRATION_PLAN.md) — Original phased migration strategy
+- [MIGRATION_STRATEGY.md](./MIGRATION_STRATEGY.md) — Design choices and trade-offs
+- [MIGRATION_IMPLEMENTATION_GUIDE.md](./MIGRATION_IMPLEMENTATION_GUIDE.md) — Step-by-step migration instructions
+- [MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md) — Timeline and flow diagrams
+- [GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md) — Original GitHub epics and issue tracking
+- [PARAMETER_CONSISTENCY_UPDATE.md](./PARAMETER_CONSISTENCY_UPDATE.md) — Parameter naming standardisation history
+- [RELEASE_TYPE_PARAMETER_MIGRATION.md](./RELEASE_TYPE_PARAMETER_MIGRATION.md) — `RELEASE_TYPE` parameter history
+- [TARGET_DIR_REFACTORING.md](./TARGET_DIR_REFACTORING.md) — `TARGET_DIR` refactoring history
+
+---
+
+See [`../README.md`](../README.md) for the project overview and quick-start.

@@ -1,86 +1,92 @@
 # CI Integration Directory
 
-This directory contains CI-specific integration files for different continuous integration platforms.
+This directory contains CI-platform-specific orchestration files. All build _logic_ lives in `../scripts/` as portable shell scripts; the files here are thin wrappers that call those scripts from a given CI platform.
 
 ## Directory Structure
 
 ```
 ci/
-├── jenkins/          # Jenkins-specific files
-│   └── Jenkinsfile.declarative
-├── local/            # Local execution tools
-│   └── run-pipeline.py
-└── README.md         # This file
+├── jenkins/
+│   ├── Jenkinsfile.declarative          # Single-platform build pipeline
+│   ├── Jenkinsfile.launch               # Multi-platform launch pipeline
+│   ├── lib/
+│   │   ├── BuildUidHelper.groovy
+│   │   ├── ConfigHelper.groovy
+│   │   ├── PipelineHelper.groovy
+│   │   └── StageScriptRunner.groovy
+│   └── job-dsl/
+│       ├── openjdk_build_pipeline.groovy
+│       └── seed/
+│           └── seed_job_consolidated.groovy
+├── local/
+│   ├── run-pipeline.py
+│   ├── stage_resolver.py
+│   └── workspace_manager.py
+└── README.md  (this file)
 ```
 
-## Purpose
+## jenkins/
 
-The `ci/` directory separates CI-specific orchestration code from the CI-agnostic pipeline logic in `scripts/` and `tools/`. This separation provides:
+Jenkins-specific pipeline definitions and job automation.
 
-- **Clear Boundaries**: CI-specific code is isolated from portable shell scripts
-- **Multiple CI Support**: Easy to add support for other CI platforms (GitLab, GitHub Actions, etc.)
-- **Local Testing**: Local execution tools for development and testing
-- **Maintainability**: Changes to CI integration don't affect core pipeline logic
+### Jenkinsfile.declarative
 
-## Subdirectories
+Single-platform build pipeline. Loaded by every `jdk${version}-${platform}-build-pipeline` job created by the seed job. Orchestrates all pipeline stages from Initialize through Publish, loading shared helpers from `lib/` after the initial SCM checkout.
 
-### jenkins/
-Contains Jenkins-specific pipeline definitions and configuration.
+**Script path** (in Jenkins job config): `ci/jenkins/Jenkinsfile.declarative`
 
-**Files:**
-- `Jenkinsfile.declarative` - Declarative pipeline for Jenkins with stage-level restart capability
+### Jenkinsfile.launch
 
-**Usage:**
-Configure Jenkins job to use this Jenkinsfile via SCM:
-- Repository: `https://github.com/adoptium/ci-adoptium-pipelines.git`
-- Script Path: `ci/jenkins/Jenkinsfile.declarative`
+Multi-platform launch pipeline. Loaded by `jdk${version}-launch-build-pipelines` jobs. Reads the config repo, determines which platforms to build, optionally regenerates platform build jobs via Job DSL, then triggers all selected platform builds in parallel.
 
-### local/
-Contains tools for running the pipeline locally without a CI server.
+**Script path**: `ci/jenkins/Jenkinsfile.launch`
 
-**Files:**
-- `run-pipeline.py` - Python script for local pipeline execution
+### lib/
 
-**Usage:**
+Shared Groovy helpers loaded at runtime with `load()`. Each file is a plain CPS script — pipeline steps (`echo`, `sh`, `env`, `params`, `currentBuild`, etc.) are called directly without any delegation wrapper.
+
+| File | Role |
+|---|---|
+| `BuildUidHelper.groovy` | `BUILD_UID` / `GROUP_UID` generation and reuse; `BUILD_STAGE_RESULTS` serialisation; prerequisite validation |
+| `PipelineHelper.groovy` | `initializeStage()`, `finalizeStage()`, `executeStageWithTracking()`, `ensureBuildDescriptionSet()` |
+| `ConfigHelper.groovy` | Generates `pipeline-config.json` by calling `load-json-config.py`; sets `CONFIG_*` env vars |
+| `StageScriptRunner.groovy` | Resolves and executes per-stage scripts with vendor-override support |
+
+### job-dsl/
+
+Job DSL scripts that create and maintain all Jenkins jobs from code.
+
+| File | Role |
+|---|---|
+| `seed/seed_job_consolidated.groovy` | Bootstrap — run once to create all launch and platform jobs |
+| `openjdk_build_pipeline.groovy` | Called by the launch pipeline to create/update one platform build job |
+
+See [docs/JOB_DSL_AUTOMATION.md](../docs/JOB_DSL_AUTOMATION.md) for setup instructions.
+
+## local/
+
+Python-based tools for running the pipeline locally without a CI server.
+
 ```bash
 python3 ci/local/run-pipeline.py \
   --jdk-version jdk21u \
   --variant temurin \
-  --target-os mac \
-  --architecture aarch64
+  --target-os linux \
+  --architecture x64
 ```
 
-## Design Philosophy
+See [`local/README.md`](local/README.md) for full usage.
 
-**90/10 Rule:**
-- 90% of pipeline logic is in CI-agnostic shell scripts (`scripts/` and `tools/`)
-- 10% is CI-specific orchestration code (this directory)
+## Adding a New CI Platform
 
-This ensures:
-- Maximum code reuse across CI platforms
-- Easy local testing and debugging
-- Reduced vendor lock-in
-- Simpler maintenance
-
-## Adding New CI Platforms
-
-To add support for a new CI platform:
-
-1. Create a new subdirectory: `ci/[platform-name]/`
-2. Add platform-specific pipeline definition
-3. Ensure it calls the same CI-agnostic scripts in `scripts/`
-4. Update this README with usage instructions
-
-Example for GitLab CI:
-```
-ci/
-├── gitlab/
-│   └── .gitlab-ci.yml
-```
+1. Create `ci/<platform-name>/`
+2. Add a pipeline definition that calls the same `scripts/stages/` shell scripts
+3. Pass the same environment variables documented in [docs/STAGE_IO_SPECIFICATION.md](../docs/STAGE_IO_SPECIFICATION.md)
+4. Update this README
 
 ## Related Documentation
 
-- [CI_AGNOSTIC_ARCHITECTURE.md](../CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
-- [CODE_CONFIG_SEPARATION.md](../CODE_CONFIG_SEPARATION.md) - Code/config separation pattern
-- [LOCAL_TESTING_GUIDE.md](../LOCAL_TESTING_GUIDE.md) - Local testing instructions
-- [PIPELINE_RUNNER_GUIDE.md](../PIPELINE_RUNNER_GUIDE.md) - Pipeline runner documentation
+- [docs/CI_AGNOSTIC_ARCHITECTURE.md](../docs/CI_AGNOSTIC_ARCHITECTURE.md) — 3-layer architecture overview
+- [docs/JOB_DSL_AUTOMATION.md](../docs/JOB_DSL_AUTOMATION.md) — Jenkins job creation guide
+- [docs/BUILD_UID_INTEGRATION.md](../docs/BUILD_UID_INTEGRATION.md) — BUILD_UID tracking
+- [docs/STAGE_IO_SPECIFICATION.md](../docs/STAGE_IO_SPECIFICATION.md) — Stage input/output contracts

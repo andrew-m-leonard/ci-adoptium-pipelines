@@ -1,363 +1,230 @@
 # Adoptium CI Pipelines
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![CI Status](https://img.shields.io/badge/CI-In%20Development-yellow.svg)]()
-[![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen.svg)](./docs/CI_AGNOSTIC_ARCHITECTURE.md)
 
-Modern, modular, and CI-agnostic build pipeline architecture for Eclipse Adoptium OpenJDK builds.
+A modular, CI-agnostic build pipeline for Eclipse Adoptium OpenJDK builds.
 
-## 🎯 Overview
+## Overview
 
-This repository contains a comprehensive refactoring of the Adoptium OpenJDK build pipeline, transforming a monolithic Jenkins-specific scripted pipeline into a modern, modular, **CI-agnostic** architecture that supports:
+This repository contains the pipeline code for building, signing, testing, and publishing Eclipse Adoptium OpenJDK binaries. The architecture separates pipeline _code_ (this repo) from vendor _configuration_ (a separate config repo such as [ci-temurin-config](https://github.com/adoptium/ci-temurin-config)), so the same scripts can drive builds across multiple CI platforms and vendor configurations without modification.
 
-- ✅ **Stage-level restartability** - Restart from any failed stage without rebuilding
-- ✅ **CI portability** - 90% of code works on any CI platform (Jenkins, GitLab, GitHub Actions)
-- ✅ **Local testing** - Test complete pipelines without CI infrastructure
-- ✅ **Maintainability** - Modular shell scripts instead of 2000+ line monolith
-- ✅ **Clear separation** - Configuration (JSON) / Logic (Shell) / Orchestration (CI-specific)
+Key properties:
 
-## 📚 Quick Links
+- **Stage-level restartability** — restart from any failed stage; no costly full rebuilds
+- **CI-agnostic stage scripts** — `scripts/` contains plain shell scripts that run identically on Jenkins, locally, or any other CI platform
+- **Declarative Jenkins pipeline** with shared Groovy library helpers in `ci/jenkins/lib/`
+- **Two-pipeline Jenkins model** — a _launch_ pipeline fans out to parallel platform _build_ pipelines
+- **Job DSL automation** — all Jenkins jobs are created and updated from code; no manual job configuration
 
-### Getting Started
-- **[Quick Start Guide](QUICKSTART_MAC.md)** - Get running in 5 minutes
-- **[Local Testing Guide](LOCAL_TESTING_GUIDE.md)** - Test pipelines locally
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
-
-### Jenkins Setup
-- **[Job DSL Automation](docs/JOB_DSL_AUTOMATION.md)** - Automate Jenkins job creation ⭐
-- **[Jenkins Integration](ci/jenkins/README.md)** - Jenkins-specific setup and configuration
-
-### Architecture & Design
-- **[CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md)** - 3-layer design with before/after comparison ⭐
-- **[Migration Plan](docs/MIGRATION_PLAN.md)** - 10-14 week migration strategy
-
-### Implementation Guides
-- **[Configuration Guide](CONFIGURATION_GUIDE.md)** - JSON configuration system
-- **[Pipeline Runner Guide](PIPELINE_RUNNER_GUIDE.md)** - Using `run-pipeline.py`
-- **[Restartability Guide](RESTARTABILITY_GUIDE.md)** - Stage restart patterns
-- **[BUILD_UID Integration](docs/BUILD_UID_INTEGRATION.md)** - Unique build tracking and stage result management
-
-## 🚀 Why Refactor?
-
-The current Jenkins-specific scripted pipeline has served well but faces significant limitations. This refactoring delivers:
-
-### Operational Excellence
-- **Restartability**: Restart from any stage - no more costly full rebuilds
-- **Faster Debugging**: Test locally in seconds instead of waiting for CI
-- **Reduced Lock-in**: 90% portable code enables easy CI platform migration
-
-### Maintainability & Quality
-- **Clear Separation**: Config (JSON) / Logic (Shell) / Orchestration (CI)
-- **Easier Testing**: Unit test stages independently with `run-pipeline.py`
-- **Better Reviews**: Small focused files vs 2000+ line monolith
-
-### Team Productivity
-- **Lower Barrier**: Shell scripts vs Jenkins/Groovy expertise
-- **Parallel Development**: Multiple developers, fewer merge conflicts
-- **Reusable Components**: Stage scripts become building blocks
-
-See [CI_AGNOSTIC_ARCHITECTURE.md](docs/CI_AGNOSTIC_ARCHITECTURE.md) for detailed architecture overview and visual comparison.
-
-## 📊 Architecture Overview
-
-### 3-Layer Design
+## Repository Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER 1: Configuration (JSON)                                   │
-│  • Pure data, no logic                                           │
-│  • Version controlled                                            │
-│  • Easy validation                                               │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER 2: Build Logic (Shell Scripts - 90% CI-Agnostic)         │
-│  • Portable across all CI platforms                             │
-│  • Testable locally                                              │
-│  • Clear input/output contracts                                  │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│  LAYER 3: Orchestration (CI-Specific - 10%)                     │
-│  • Jenkins: ci/jenkins/Jenkinsfile.declarative                  │
-│  • Local: ci/local/run-pipeline.py                              │
-│  • Future: ci/gitlab/, ci/github-actions/                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Directory Structure
-
-**Pipeline Code Repository** (`ci-adoptium-pipelines/`):
-```
-ci-adoptium-pipelines/           # Pipeline implementation (vendor-agnostic)
-├── ci/                          # Layer 3: CI Integration
-│   ├── jenkins/                 # Jenkins-specific orchestration
-│   │   └── Jenkinsfile.declarative
-│   └── local/                   # Local execution tools
-│       ├── run-pipeline.py      # Local pipeline runner
-│       └── workspace_manager.py # Workspace validation/cleanup
+ci-adoptium-pipelines/
 │
-├── scripts/                     # Layer 2: Build Logic (CI-Agnostic)
-│   ├── lib/                     # Shared utilities
-│   │   ├── config-utils.sh      # Configuration helpers
-│   │   ├── logging-utils.sh     # Logging utilities
-│   │   ├── artifact-utils.sh    # Artifact management
-│   │   └── load-json-config.py  # JSON config loader
+├── ci/
+│   ├── jenkins/
+│   │   ├── Jenkinsfile.declarative        # Platform build pipeline
+│   │   ├── Jenkinsfile.launch             # Multi-platform launch pipeline
+│   │   ├── lib/
+│   │   │   ├── BuildUidHelper.groovy      # BUILD_UID tracking & stage results
+│   │   │   ├── ConfigHelper.groovy        # pipeline-config.json generation
+│   │   │   ├── PipelineHelper.groovy      # Stage lifecycle (init/finalize/tracking)
+│   │   │   └── StageScriptRunner.groovy   # Vendor-overridable script resolution
+│   │   └── job-dsl/
+│   │       ├── openjdk_build_pipeline.groovy   # Job DSL: per-platform build job
+│   │       └── seed/
+│   │           └── seed_job_consolidated.groovy # Job DSL: bootstrap seed job
 │   │
-│   └── stages/                  # Stage implementations
-│       ├── 01-initialize.sh     # Workspace setup
-│       ├── 02-build.sh          # JDK compilation
-│       ├── 06-sign.sh           # Artifact signing
-│       ├── 07-installer.sh      # Installer creation
-│       ├── 13-smoke-tests.sh    # Smoke testing
-│       └── ...                  # Other stages
+│   └── local/
+│       ├── run-pipeline.py          # Local pipeline runner
+│       ├── stage_resolver.py        # Stage name/script resolution
+│       └── workspace_manager.py     # Local workspace lifecycle
 │
-├── tools/                       # Development utilities
-│   └── workspace-cleanup.sh     # Workspace cleanup utility
+├── scripts/
+│   ├── lib/
+│   │   ├── config-utils.sh          # JSON config helpers
+│   │   ├── logging-utils.sh         # Logging utilities
+│   │   ├── artifact-utils.sh        # Artifact management helpers
+│   │   ├── load-json-config.py      # Generates pipeline-config.json
+│   │   └── load-adoptium-pipeline-config-json.py
+│   └── stages/
+│       ├── 02-build.sh              # JDK compilation
+│       ├── 03-internal-sign.sh      # JMOD signing (Windows/Mac JDK 11+)
+│       ├── 04-assemble.sh           # Assembly after internal signing
+│       ├── 06-sign.sh               # External artifact signing
+│       ├── 07-installer.sh          # Platform installers
+│       ├── 08-sign-installer.sh     # Installer signing
+│       ├── 09-gpg-sign.sh           # GPG signing (Temurin)
+│       ├── 10-sbom-sign.sh          # SBOM JSF signing
+│       ├── 11-verify-signing.sh     # Signature verification
+│       ├── 12-validate-sbom.sh      # SBOM validation
+│       ├── 13-smoke-tests.sh        # Smoke tests
+│       ├── 14-aqa-tests.sh          # AQA test suite
+│       ├── 15-tck-tests.sh          # TCK tests
+│       ├── 16-publish.sh            # Artifact publication
+│       └── 20-reproducible-compare.sh # Reproducible build comparison
 │
-└── docs/                        # Documentation
-    ├── CI_AGNOSTIC_ARCHITECTURE.md
-    ├── MIGRATION_PLAN.md
+├── tests/
+│   ├── test_determine_filename.sh
+│   └── test_release_type_validation.sh
+│
+├── tools/
+│   ├── convert-groovy-to-json.py
+│   ├── convert-all-legacy-groovy-configs.py
+│   └── convert-legacy-configs-to-new-architecture.py
+│
+└── docs/                            # Extended documentation
+```
+
+## Jenkins Pipeline Architecture
+
+### Two-Pipeline Model
+
+```
+seed-job (Freestyle)
+  └─ seed_job_consolidated.groovy  ← creates/updates all jobs
+       ├─ jdk21-launch-build-pipelines  (Jenkinsfile.launch)
+       │    └─ fans out in parallel to:
+       │         ├─ jdk21-x64Linux-build-pipeline   (Jenkinsfile.declarative)
+       │         ├─ jdk21-aarch64Linux-build-pipeline
+       │         └─ jdk21-aarch64Mac-build-pipeline  ...
+       ├─ jdk17-launch-build-pipelines
+       └─ ...
+```
+
+**Launch pipeline** (`Jenkinsfile.launch`) — fetches the config repo, determines which platforms to build, optionally regenerates platform jobs via Job DSL, then triggers all selected platform builds in parallel.
+
+**Build pipeline** (`Jenkinsfile.declarative`) — runs the full single-platform pipeline from Initialize through Publish. Loads shared Groovy helpers from `ci/jenkins/lib/` after checkout. Supports "Restart from Stage" natively.
+
+### Shared Groovy Libraries (`ci/jenkins/lib/`)
+
+Each lib file is a plain CPS script loaded with `load()` — it calls pipeline steps (`echo`, `sh`, `env`, `params`, etc.) directly without any delegation wrapper. No Jenkins Shared Library plugin is required.
+
+| File | Responsibility |
+|---|---|
+| [`BuildUidHelper.groovy`](ci/jenkins/lib/BuildUidHelper.groovy) | Generates/reuses `BUILD_UID` and `GROUP_UID`; serialises per-stage results into `BUILD_STAGE_RESULTS` for prerequisite validation across restarts |
+| [`PipelineHelper.groovy`](ci/jenkins/lib/PipelineHelper.groovy) | `initializeStage()` (cleanWs, checkout, config-repo clone, BUILD_UID init, copyArtifacts); `finalizeStage()`; `executeStageWithTracking()` |
+| [`ConfigHelper.groovy`](ci/jenkins/lib/ConfigHelper.groovy) | Calls `load-json-config.py` to produce `pipeline-config.json`; sets `CONFIG_*` env vars used by `when {}` blocks |
+| [`StageScriptRunner.groovy`](ci/jenkins/lib/StageScriptRunner.groovy) | Resolves and runs a stage script with vendor-override support (tries `config-repo/vendor-scripts/` before `scripts/stages/`) |
+
+### Vendor Script Override
+
+For each stage stem (e.g. `02-build`), `StageScriptRunner` searches in order:
+
+1. `config-repo/vendor-scripts/02-build.sh`
+2. `config-repo/vendor-scripts/02-build.groovy`
+3. `config-repo/vendor-scripts/02-build.py`
+4. `scripts/stages/02-build.sh` ← default implementation
+5. `scripts/stages/02-build.groovy`
+6. `scripts/stages/02-build.py`
+7. No-op (stage skipped)
+
+## Pipeline Stages
+
+| # | Stage | Script | Condition |
+|---|---|---|---|
+| — | Initialize | _(ConfigHelper)_ | Always |
+| 02 | Build | `02-build.sh` | Always |
+| 03 | Internal Sign | `03-internal-sign.sh` | macOS/Windows + JDK ≥ 11, signing enabled |
+| 04 | Assemble | `04-assemble.sh` | macOS/Windows + JDK ≥ 11, signing enabled |
+| 06 | Sign Artifacts | `06-sign.sh` | Signing enabled |
+| 07 | Build Installers | `07-installer.sh` | Installers enabled |
+| 08 | Sign Installers | `08-sign-installer.sh` | Installers + signing enabled |
+| 09 | GPG Sign | `09-gpg-sign.sh` | Temurin variant, signing enabled, non-PR |
+| 10 | SBOM JSF Sign | `10-sbom-sign.sh` | `--create-sbom` in build args (inline in GPG Sign stage) |
+| 11 | Verify Signing | `11-verify-signing.sh` | Temurin, signing enabled, non-PR |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | `--create-sbom` in build args |
+| 13 | Smoke Tests | `13-smoke-tests.sh` | Tests enabled |
+| 14 | AQA Tests | `14-aqa-tests.sh` | Tests enabled, smoke tests passed |
+| 15 | TCK Tests | `15-tck-tests.sh` | Temurin, TCK enabled, smoke tests passed |
+| 16 | Publish Artifacts | `16-publish.sh` | Publish enabled |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `REPRODUCIBLE_COMPARE_BUILD=true` + `SCM_REF` set |
+
+Each stage calls `initializeStage()` which: cleans the workspace, checks out this repo, clones the config repo (sparse), initialises/reuses `BUILD_UID`, validates prerequisites, and copies required artifacts from the current build.
+
+## Configuration Repository
+
+The pipeline reads build configuration from a separately maintained config repo supplied via `CONFIG_REPO_URL`. The config repo must contain:
+
+```
+<config-repo>/
+├── adoptium_pipeline_config.json      # Pipeline-level defaults (repo URLs, branches)
+├── jenkins_job_config.json            # Job DSL settings (log rotation, default params)
+└── configurations/
+    ├── jdk21_pipeline_config.json     # Per-version platform matrix
+    ├── jdk17_pipeline_config.json
     └── ...
 ```
 
-**Configuration Repository** (`ci-temurin-config/` or vendor-specific):
-```
-ci-temurin-config/               # Vendor-specific configuration (separate repo)
-└── configurations/              # Layer 1: Configuration (JSON)
-    ├── jdk8u_pipeline_config.json
-    ├── jdk11u_pipeline_config.json
-    ├── jdk17u_pipeline_config.json
-    ├── jdk21u_pipeline_config.json
-    └── ...
-```
+At runtime, `ConfigHelper` calls `scripts/lib/load-json-config.py` which merges the platform-level JSON with job parameters to produce `pipeline-config.json` — the single source of truth for all subsequent stages.
 
-**Key Separation**: Pipeline code and vendor configurations are maintained in separate repositories, enabling vendor independence and code reusability.
+## Jenkins Setup
 
-## 🎯 Key Features
+### Seed Job Bootstrap
 
-### 1. Stage Restartability
+1. Create a Jenkins **Freestyle** job named `seed-job`
+2. Add parameters: `CONFIG_REPO_URL` (String), `CONFIG_REPO_BRANCH` (String)
+3. SCM: Git → this repository
+4. Build step: **Process Job DSLs** → `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+5. Run the seed job with your config repo URL and branch
+
+The seed job creates all launch and platform build jobs automatically.
+
+### Required Jenkins Plugins
+
+- Pipeline
+- Git
+- Job DSL
+- Copy Artifact
+- Workspace Cleanup (`cleanWs`)
+- Timestamper
+
+## Local Execution
 
 ```bash
-# Jenkins: Click "Restart from Stage" button
-# Local: Use --start-from-stage option
-python3 run-pipeline.py \
-  --config configurations/jdk21u_pipeline_config.json \
-  --platform x64Mac \
+# Full build locally
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
   --variant temurin \
-  --start-from-stage sign
+  --target-os linux \
+  --architecture x64
+
+# Resume from a specific stage
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os linux \
+  --architecture x64 \
+  --start-from-stage smoke-tests
+
+# Use a custom config repo
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21u \
+  --variant temurin \
+  --target-os mac \
+  --architecture aarch64 \
+  --config-repo-url https://github.com/myorg/my-jdk-configs.git
 ```
 
-### 2. Local Testing
+See [`ci/local/README.md`](ci/local/README.md) for full options.
 
-```bash
-# Test complete pipeline locally
-python3 run-pipeline.py \
-  --config configurations/jdk21u_pipeline_config.json \
-  --platform x64Mac \
-  --variant temurin
+## Documentation
 
-# Test single stage
-./scripts/stages/01-initialize.sh
-```
+| Document | Topic |
+|---|---|
+| [`docs/CI_AGNOSTIC_ARCHITECTURE.md`](docs/CI_AGNOSTIC_ARCHITECTURE.md) | 3-layer design, before/after comparison |
+| [`docs/CODE_CONFIG_SEPARATION.md`](docs/CODE_CONFIG_SEPARATION.md) | Pipeline code vs config repo separation |
+| [`docs/CONFIGURATION_GUIDE.md`](docs/CONFIGURATION_GUIDE.md) | JSON configuration reference |
+| [`docs/RESTARTABILITY_GUIDE.md`](docs/RESTARTABILITY_GUIDE.md) | Stage restart patterns |
+| [`docs/JENKINS_RESTART_BEHAVIOR.md`](docs/JENKINS_RESTART_BEHAVIOR.md) | BUILD_UID and restart mechanics |
+| [`docs/BUILD_UID_INTEGRATION.md`](docs/BUILD_UID_INTEGRATION.md) | BUILD_UID tracking detail |
+| [`docs/STAGE_IO_SPECIFICATION.md`](docs/STAGE_IO_SPECIFICATION.md) | Stage input/output contracts |
+| [`docs/JOB_DSL_AUTOMATION.md`](docs/JOB_DSL_AUTOMATION.md) | Job DSL setup guide |
+| [`docs/PIPELINE_RUNNER_GUIDE.md`](docs/PIPELINE_RUNNER_GUIDE.md) | Local runner reference |
+| [`docs/REPRODUCIBLE_COMPARE.md`](docs/REPRODUCIBLE_COMPARE.md) | Reproducible build comparison |
+| [`docs/JENKINS_ENVIRONMENT_VARIABLES.md`](docs/JENKINS_ENVIRONMENT_VARIABLES.md) | Environment variable reference |
+| [`tools/README.md`](tools/README.md) | Legacy config conversion tools |
 
-### 3. CI Portability
+## License
 
-Same shell scripts work on:
-- ✅ Jenkins (Jenkinsfile.declarative)
-- ✅ GitLab CI (.gitlab-ci.yml)
-- ✅ GitHub Actions (.github/workflows/build.yml)
-- ✅ Local machine (run-pipeline.py)
-
-### 4. Workspace Validation
-
-```bash
-# Each stage validates workspace integrity
-validate_workspace() {
-  if [[ "${BUILD_UID}" != "$(cat ${TARGET_DIR}/build-uid.txt)" ]]; then
-    echo "ERROR: Workspace contamination detected"
-    exit 1
-  fi
-}
-```
-
-## 📋 Pipeline Stages
-
-The pipeline consists of 13 stages:
-
-1. **Initialize** - Workspace setup and configuration
-2. **Build** - Core JDK compilation
-3. **Internal Sign** - JMOD signing (Windows/Mac JDK11+)
-4. **Assemble** - Final assembly after signing
-5. **Sign Artifacts** - External signing of tar/zip
-6. **Build Installers** - Create platform installers
-7. **Sign Installers** - Sign installers
-8. **GPG Sign** - GPG signing (Temurin only)
-9. **SBOM JSF Sign** - SBOM signing
-10. **Verify Signing** - Signature verification
-11. **Validate SBOM** - SBOM validation
-12. **Smoke Tests** - Quick validation
-13. **AQA Tests** - Full test suite
-
-Each stage is independently restartable.
-
-## 🧪 Testing Strategy
-
-### Multi-Level Testing
-
-```
-Level 1: Syntax & Linting (seconds)
-  └─ shellcheck, bash -n
-
-Level 2: Unit Tests (seconds)
-  └─ BATS tests for utilities
-
-Level 3: Stage Tests (minutes)
-  └─ Test individual stages
-
-Level 4: Local Pipeline (30-60 minutes)
-  └─ Full pipeline with run-pipeline.py
-
-Level 5: CI Validation (2-4 hours)
-  └─ Parallel validation in Jenkins
-```
-
-See [LOCAL_TESTING_GUIDE.md](LOCAL_TESTING_GUIDE.md) for details.
-
-## 📈 Migration Status
-
-**Timeline**: 10-14 weeks (2.5-3.5 months)
-
-### Phase 1: Foundation (Week 1) ✅
-- Infrastructure setup
-- Tooling integration
-- Parallel execution configuration
-
-### Phase 2: Pilot (Weeks 2-3) 🔄
-- Linux x64 JDK21u pilot
-- Parallel validation builds
-- Edge case documentation
-
-### Phase 3: Rollout (Weeks 4-9) 📅
-- Tier 1: Linux x64 all versions
-- Tier 2: Mac + Windows primary
-- Tier 3: Remaining platforms
-
-### Phase 4: Completion (Weeks 10-14) 📅
-- Final migrations
-- Old pipeline decommission
-- Team training
-
-See [MIGRATION_PLAN.md](MIGRATION_PLAN.md) for detailed timeline.
-
-## 🔧 Quick Start
-
-### Prerequisites
-
-- Bash 4.0+
-- Python 3.8+
-- Git 2.20+
-- jq (for JSON parsing)
-
-### Local Testing
-
-```bash
-# Clone repository
-git clone https://github.com/adoptium/ci-adoptium-pipelines.git
-cd ci-adoptium-pipelines
-
-# Make scripts executable
-chmod +x scripts/**/*.sh
-chmod +x run-pipeline.py
-
-# Run pipeline locally
-python3 run-pipeline.py \
-  --config configurations/jdk21u_pipeline_config.json \
-  --platform x64Mac \
-  --variant temurin
-```
-
-See [QUICKSTART_MAC.md](QUICKSTART_MAC.md) for platform-specific setup.
-
-## 📖 Documentation
-
-### Essential Reading
-- **[CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md)** - Architecture overview with before/after comparison ⭐
-- **[Migration Plan](docs/MIGRATION_PLAN.md)** - Implementation timeline
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute
-
-### Implementation Guides
-- [Configuration Guide](docs/CONFIGURATION_GUIDE.md) - JSON configuration
-- [Pipeline Runner Guide](docs/PIPELINE_RUNNER_GUIDE.md) - Local testing
-- [Restartability Guide](docs/RESTARTABILITY_GUIDE.md) - Stage restart patterns
-- [Local Testing Guide](docs/LOCAL_TESTING_GUIDE.md) - Testing strategies
-
-### Technical Details
-- [CI-Agnostic Architecture](docs/CI_AGNOSTIC_ARCHITECTURE.md) - Design principles
-- [Stage I/O Specification](docs/STAGE_IO_SPECIFICATION.md) - Stage contracts
-- [Workspace Validation](docs/WORKSPACE_VALIDATION_PATTERN.md) - BUILD_UID pattern
-- [Jenkins Environment Variables](docs/JENKINS_ENVIRONMENT_VARIABLES.md) - Variable persistence
-
-### Migration Resources
-- [GitHub EPICs and Issues](docs/GITHUB_EPICS_AND_ISSUES.md) - Implementation tasks
-- [Migration Visual Guide](docs/MIGRATION_VISUAL_GUIDE.md) - Timeline diagrams
-- [Repro Compare Integration](docs/REPRO_COMPARE_INTEGRATION.md) - Build verification
-- [Tools Documentation](tools/README.md) - Configuration conversion and workspace tools ⭐
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-
-- Development workflow
-- Testing guidelines
-- Commit conventions
-- Pull request process
-- Architecture guidelines
-
-### Quick Contribution Guide
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes following architecture guidelines
-4. Test locally with `run-pipeline.py`
-5. Submit pull request
-
-## 📊 Key Metrics
-
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Largest File** | 2000+ lines | 280 lines | 86% reduction |
-| **CI Coupling** | 100% | 10% | 90% portable |
-| **Local Testing** | No | Yes | ∞ improvement |
-| **Restart Capability** | No | Yes | ∞ improvement |
-| **Test Feedback** | Hours | Seconds | 99%+ faster |
-
-## 🔗 Related Projects
-
-- [Adoptium](https://adoptium.net/) - Eclipse Adoptium project
-- [Temurin](https://adoptium.net/temurin/) - Adoptium OpenJDK distribution
-- [ci-jenkins-pipelines](https://github.com/adoptium/ci-jenkins-pipelines) - Current Jenkins pipelines
-- [openjdk-build](https://github.com/adoptium/openjdk-build) - Build scripts
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/adoptium/ci-adoptium-pipelines/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/adoptium/ci-adoptium-pipelines/discussions)
-- **Slack**: [Adoptium Slack](https://adoptium.net/slack)
-- **Mailing List**: [adoptium-dev](https://mail.openjdk.org/mailman/listinfo/adoptium-dev)
-
-## 📄 License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Eclipse Adoptium community
-- Jenkins declarative pipeline team
-- All contributors to the original pipeline
-
----
-
-**Built with ❤️ by the Adoptium community**
-
-*Making OpenJDK builds more reliable, maintainable, and portable.*
+Apache License 2.0 — see [LICENSE](LICENSE).

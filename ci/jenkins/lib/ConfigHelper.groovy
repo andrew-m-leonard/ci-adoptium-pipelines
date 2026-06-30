@@ -1,14 +1,22 @@
 /**
  * ConfigHelper — pipeline configuration generation and display.
  *
- * Provides: generatePipelineConfig(), summarizePipelineConfig()
- *
- * Usage in Jenkinsfile:
+ * Loaded with:
  *   def configHelper = load('ci/jenkins/lib/ConfigHelper.groovy')
- *   def config = configHelper.generatePipelineConfig('./config-repo/configurations')
  *
- * Note: This file is a CpsScript itself — pipeline steps (echo, sh, env, params,
- * readJSON, writeJSON, fileExists, etc.) are called directly without any delegation wrapper.
+ * This file is a CpsScript. All pipeline steps (echo, sh, env, params, readJSON,
+ * writeJSON, fileExists, error, etc.) are called directly — no 'steps.' prefix.
+ *
+ * Public API:
+ *   generatePipelineConfig(configDir='./configurations')
+ *     → calls scripts/lib/load-json-config.py to produce pipeline-config.json;
+ *       sets CONFIG_VARIANT, CONFIG_TARGET_OS, CONFIG_ARCHITECTURE, CONFIG_JAVA_TO_BUILD,
+ *       CONFIG_NODE_LABEL, CONFIG_BUILD_ARGS, CONFIG_RUN_TESTS, CONFIG_ENABLE_INSTALLERS,
+ *       CONFIG_SIGN_ARTIFACTS, CONFIG_ENABLE_TCK, CONFIG_PUBLISH_ARTIFACTS, AQA_REF,
+ *       SMOKE_TESTS_PASSED env vars; returns the parsed config Map
+ *
+ *   summarizePipelineConfig(config)
+ *     → logs key build configuration values
  */
 
 /**

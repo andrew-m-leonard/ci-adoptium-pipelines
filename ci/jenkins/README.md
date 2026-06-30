@@ -1,207 +1,176 @@
 # Jenkins Integration
 
-This directory contains Jenkins-specific pipeline definitions and Job DSL automation for the Adoptium build infrastructure.
+This directory contains Jenkins-specific pipeline definitions, shared Groovy libraries, and Job DSL automation for the Adoptium build infrastructure.
 
-## Files
+## Files and Directories
 
 ### Jenkinsfile.declarative
 
-Declarative Jenkins pipeline with the following features:
+Single-platform build pipeline. Every `jdk${version}-${platform}-build-pipeline` job points at this file. It:
 
-- **Stage-Level Restart**: Failed stages can be restarted individually
-- **Code/Config Separation**: Pipeline code separated from vendor configurations
-- **JSON Configuration**: Uses JSON config files from external repository
-- **Modular Design**: Each stage calls CI-agnostic shell scripts
-- **BUILD_UID Tracking**: Unique build identification across restarts
+1. Loads shared helpers from `lib/` after checkout
+2. Runs all applicable pipeline stages in sequence
+3. Calls the appropriate `scripts/stages/` shell script for each stage via `StageScriptRunner`
+4. Tracks stage results in `BUILD_STAGE_RESULTS` to support "Restart from Stage"
 
-### job-dsl/
+**Script path in Jenkins job config**: `ci/jenkins/Jenkinsfile.declarative`
 
-Job DSL scripts that automate Jenkins job creation:
+### Jenkinsfile.launch
 
-- **`seed_job.groovy`**: Creates the seed job (self-updating) with mandatory parameters
-- **`openjdk_build_pipeline.groovy`**: Creates all pipeline jobs dynamically
+Multi-platform launch pipeline. Jobs named `jdk${version}-launch-build-pipelines` use this file. It:
 
-These scripts read configuration from a vendor-specific configuration repository (specified via parameters) to determine which JDK versions are active.
+1. Reads `jdk${version}_pipeline_config.json` from the config repo to discover available platforms
+2. Determines which platforms to build (all, or a subset from the `PLATFORMS` parameter)
+3. Optionally regenerates platform build jobs via Job DSL (on first run or when `REGENERATE_JOBS=true`)
+4. Triggers all selected platform build jobs in parallel, passing a shared `GROUP_UID`
 
 ### lib/
 
-Shared Groovy libraries:
+Shared Groovy helpers loaded with `load()` at the start of each stage. These are plain CPS scripts — they call pipeline steps (`echo`, `sh`, `env`, `params`, `currentBuild`, `cleanWs`, `copyArtifacts`, etc.) directly without any delegation wrapper.
 
-- **`BuildUidHelper.groovy`**: Helper functions for BUILD_UID tracking and stage result management
+#### BuildUidHelper.groovy
 
-## Job DSL Automation
+- Generates a unique `BUILD_UID` (timestamp + UUID fragment) on first stage execution; reuses it on restarts
+- Manages `GROUP_UID` to link all platform builds from the same launch run
+- Serialises per-stage pass/fail results into `BUILD_STAGE_RESULTS` (format: `Stage1==SUCCESS||Stage2==FAILURE`)
+- `validatePrerequisites()` reads `BUILD_STAGE_RESULTS` and fails with a clear message if required stages haven't passed
 
-All Jenkins jobs are created automatically using Job DSL scripts. See [Job DSL Automation Guide](../../docs/JOB_DSL_AUTOMATION.md) for complete setup instructions.
+#### PipelineHelper.groovy
 
-### Quick Setup
+- `initializeStage(stageName, prerequisites, artifactFilter, inputArtifactsDir)` — cleans workspace, checks out this repo, sparse-clones the config repo, calls `BuildUidHelper.initializeBuildContext()`, validates prerequisites, copies required artifacts from the current build
+- `finalizeStage(stageName)` — optional post-stage workspace cleanup, logs completion
+- `executeStageWithTracking(stageName, body)` — wraps a stage body closure; records SUCCESS/FAILURE/ABORTED in `BUILD_STAGE_RESULTS`
+- `ensureBuildDescriptionSet(config)` — sets build display name and description from config + `BUILD_UID`
 
-1. **Prerequisites**: Ensure your Jenkins instance has:
-   - Job DSL Plugin
-   - Pipeline Plugin
-   - Git Plugin
-   - Script Security configured
+#### ConfigHelper.groovy
 
-2. **Create Seed Job**:
-   - New Freestyle project named `seed-job`
-   - Add parameters:
-     - `CONFIG_REPO_URL` (String, no default)
-     - `CONFIG_REPO_BRANCH` (String, no default)
-   - SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`
-   - Build Step: Process Job DSLs → `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+- `generatePipelineConfig(configDir)` — invokes `scripts/lib/load-json-config.py` with parameters resolved from job params and `adoptium_pipeline_config.json`; writes `pipeline-config.json`; sets all `CONFIG_*` env vars used by `when {}` blocks
+- `summarizePipelineConfig(config)` — logs the key build configuration values
 
-3. **Run Seed Job**:
-   - Click "Build with Parameters"
-   - Provide:
-     - `CONFIG_REPO_URL`: Your configuration repository URL
-     - `CONFIG_REPO_BRANCH`: Your configuration branch
-   - Jobs will be created for all active JDK versions
+#### StageScriptRunner.groovy
 
-### Configuration
+- `run(scriptStem, config)` — resolves the script to execute for a given stage stem using the vendor-override search order:
+  1. `config-repo/vendor-scripts/<stem>.sh` / `.groovy` / `.py`
+  2. `scripts/stages/<stem>.sh` / `.groovy` / `.py`
+  3. No-op (stage skipped)
+- `.groovy` scripts receive the `config` map as their `call()` argument; `.sh` and `.py` scripts receive config via environment variables
 
-Active JDK versions and job parameters are defined in your vendor-specific configuration repository's `jenkins_job_config.json` file.
+### job-dsl/
 
-**Example**: Adoptium uses `https://github.com/adoptium/ci-temurin-config.git` with `jenkins_job_config.json` at the root.
+Job DSL scripts that create and maintain all Jenkins jobs from code — no manual job configuration required.
 
-To add/remove versions:
-1. Edit `jenkins_job_config.json` in your configuration repository
-2. Run the seed job with your repository parameters
+#### seed/seed_job_consolidated.groovy
 
-## Jenkins Job Configuration
+Bootstrap script. Run once from a Freestyle "seed job" to create all other jobs:
+- Creates `jdk${version}-launch-build-pipelines` jobs for each active JDK version defined in `jenkins_job_config.json`
+- Reads the config repo to discover active JDK versions and their platform lists
+- Configures log rotation, parameters, and SCM from the config repo's `jenkins_job_config.json`
 
-### SCM Setup
+#### openjdk_build_pipeline.groovy
 
-The seed job checks out this repository and runs the Job DSL scripts. The generated pipeline jobs are configured to:
+Called by the launch pipeline (via `jobDsl()` step) to create or update a single platform build job:
+- Fetches `jdk${version}_pipeline_config.json` from the config repo to extract `arch`, `os`, and `variant` for the platform
+- Creates `jdk${version}-${platform}-build-pipeline` under `/openjdk-builds/jdk${version}/`
+- Configures all pipeline parameters with defaults from `jenkins_job_config.json`
+- Sets `disableResume()`, `disableConcurrentBuilds()`, and `CopyArtifactPermissionProperty`
 
-```groovy
-Pipeline script from SCM
-  SCM: Git
-    Repository URL: https://github.com/adoptium/ci-adoptium-pipelines.git
-    Branch: main
-    Script Path: ci/jenkins/Jenkinsfile.declarative
-```
+## Jenkins Setup
 
-### Parameters
+### Prerequisites
 
-The pipeline accepts these parameters (configured via Job DSL):
+- Pipeline plugin
+- Git plugin
+- Job DSL plugin
+- Copy Artifact plugin
+- Workspace Cleanup plugin (`cleanWs`)
+- Timestamper plugin
 
-**Build Configuration:**
-- `JDK_VERSION`: JDK version to build (8, 11, 17, 21, 25, 26, 27)
-- `PLATFORM`: Target platform (linux-x64, linux-aarch64, windows-x64, mac-x64, mac-aarch64, etc.)
-- `BUILD_VARIANT`: Build variant (temurin, openj9, hotspot)
+### Seed Job Bootstrap
 
-**Configuration Repository:**
-- `CONFIG_REPO_URL`: Git repository URL containing JSON configurations
-  - Default: `https://github.com/adoptium/ci-temurin-config.git`
-- `CONFIG_REPO_BRANCH`: Branch to checkout from configuration repository
-  - Default: `main`
+1. Create a **Freestyle** job named `seed-job`
+2. Add string parameters: `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH`
+3. SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`, branch `main`
+4. Build step: **Process Job DSLs** → script path `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+5. Run the seed job with your configuration repository URL and branch
 
-**Feature Toggles:**
-- `CLEAN_WORKSPACE_AFTER_STAGE`: Clean workspace after each stage
-- `RUN_TESTS`: Run test stages
-- `SIGN_ARTIFACTS`: Sign artifacts
-- `PUBLISH_ARTIFACTS`: Publish to release repository
-- `RUN_REPRODUCIBLE_COMPARE`: Run reproducible build comparison
+The seed job creates all launch jobs. Running a launch job creates the platform build jobs.
 
-## Pipeline Stages
+See [docs/JOB_DSL_AUTOMATION.md](../../docs/JOB_DSL_AUTOMATION.md) for a complete walkthrough.
 
-The declarative pipeline orchestrates these stages:
+## Pipeline Parameters
 
-1. **Initialize**: Generate pipeline configuration from JSON
-2. **Build**: Compile OpenJDK from source
-3. **Internal Sign**: Sign JMODs (if enabled)
-4. **Assemble**: Create final JDK image
-5. **Sign Artifacts**: Sign build artifacts (if enabled)
-6. **Build Installers**: Create platform installers (if enabled)
-7. **Sign Installers**: Sign installers (if enabled)
-8. **GPG Sign**: GPG sign artifacts (if enabled)
-9. **Verify Signing**: Verify all signatures
-10. **Validate SBOM**: Validate Software Bill of Materials
-11. **Smoke Tests**: Run basic validation tests
-12. **Reproducible Compare**: Compare with previous build (if enabled)
-13. **AQA Tests**: Run Adoptium Quality Assurance tests (if enabled)
-14. **TCK Tests**: Run Technology Compatibility Kit tests (if enabled)
+Parameters are defined by the Job DSL seed job (from `jenkins_job_config.json`) and must not be redefined in the Jenkinsfile. Key parameters:
 
-Each stage calls CI-agnostic shell scripts from the `scripts/stages/` directory.
+| Parameter | Type | Description |
+|---|---|---|
+| `JDK_VERSION` | String | JDK version number (e.g. `21`) |
+| `TARGET_OS` | String | Target OS (`linux`, `mac`, `windows`, `aix`) |
+| `ARCHITECTURE` | String | CPU architecture (`x64`, `aarch64`, `ppc64le`, `s390x`) |
+| `VARIANT` | String | Build variant (`temurin`, `dragonwell`, etc.) |
+| `CONFIG_REPO_URL` | String | Configuration repository URL |
+| `CONFIG_REPO_BRANCH` | String | Configuration repository branch |
+| `RELEASE_TYPE` | Choice | `NIGHTLY` / `WEEKLY` / `RELEASE` |
+| `SCM_REF` | String | OpenJDK source tag/branch (required for reproducible compare) |
+| `BUILD_REF` | String | temurin-build branch (empty = use config repo default) |
+| `AQA_REF` | String | aqa-tests branch (empty = use config repo default) |
+| `GROUP_UID` | String | Shared identifier linking all platforms from one launch run |
+| `RUN_TESTS` | Boolean | Enable smoke/AQA/TCK test stages |
+| `SIGN_ARTIFACTS` | Boolean | Enable signing stages |
+| `ENABLE_INSTALLERS` | Boolean | Enable installer build/sign stages |
+| `ENABLE_TCK` | Boolean | Enable TCK test stage (Temurin only) |
+| `PUBLISH_ARTIFACTS` | Boolean | Enable publish stage |
+| `REPRODUCIBLE_COMPARE_BUILD` | Boolean | Enable reproducible compare stage |
+| `CLEAN_WORKSPACE_AFTER_STAGE` | Boolean | Clean workspace after each stage |
+
+## Stage Restart Behaviour
+
+Each stage:
+1. Calls `cleanWs()` to start clean
+2. Checks out this repo and the config repo
+3. Calls `BuildUidHelper.initializeBuildContext()` — generates or **reuses** `BUILD_UID` from the previous run
+4. Calls `validatePrerequisites()` — verifies required earlier stages passed (via `BUILD_STAGE_RESULTS` env var)
+5. Calls `copyArtifacts` to pull in artifacts from earlier stages of the **same build number**
+
+On "Restart from Stage", Jenkins preserves all env vars from the previous run including `BUILD_UID` and `BUILD_STAGE_RESULTS`.
+
+> **Important**: "Rebuild" (not "Restart from Stage") does **not** preserve `BUILD_STAGE_RESULTS`. The pipeline detects this and fails with a clear user error.
 
 ## Configuration Repository
 
-The pipeline fetches build configurations from an external repository specified by `CONFIG_REPO_URL`. This allows:
-
-- **Vendor Independence**: Different vendors can maintain their own configurations
-- **Version Control**: Configuration changes are tracked separately from code
-- **Easy Updates**: Configuration updates don't require pipeline code changes
-
-### Expected Repository Structure
+Expected structure of the config repo (e.g. `ci-temurin-config`):
 
 ```
-ci-temurin-config/
-├── jenkins_job_config.json          # Job DSL configuration
+<config-repo>/
+├── adoptium_pipeline_config.json      # Pipeline defaults (repo URLs, branches, variant)
+├── jenkins_job_config.json            # Job DSL settings (log rotation, default params, active JDKs)
 └── configurations/
-    ├── jdk8u_pipeline_config.json
-    ├── jdk11u_pipeline_config.json
-    ├── jdk17u_pipeline_config.json
-    ├── jdk21u_pipeline_config.json
-    ├── jdk25u_pipeline_config.json
-    ├── jdk26u_pipeline_config.json
-    └── jdk27_pipeline_config.json
+    ├── jdk21_pipeline_config.json     # Platform matrix for JDK 21
+    ├── jdk17_pipeline_config.json
+    └── ...
 ```
 
-## Restart Capability
-
-The declarative pipeline supports stage-level restart:
-
-1. Navigate to the failed build in Jenkins
-2. Click "Restart from Stage"
-3. Select the stage to restart from
-4. The pipeline resumes from that stage using BUILD_UID tracking
-
-This saves hours of rebuild time when builds fail late in the pipeline.
-
-## Local Testing
-
-Before committing changes, test locally using:
-
-```bash
-cd /path/to/ci-adoptium-pipelines
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64
+Optionally, vendor-specific stage overrides:
 ```
-
-See [Local Testing Guide](../local/README.md) for details.
+<config-repo>/
+└── vendor-scripts/
+    ├── 02-build.sh       # Replaces scripts/stages/02-build.sh for this vendor
+    └── 09-gpg-sign.sh
+```
 
 ## Troubleshooting
 
-### Pipeline Fails to Checkout Configuration Repository
-
-**Problem**: Pipeline fails with "Configuration directory not found"
-
-**Solution**: Verify CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters are correct
-
-### Stage Restart Fails
-
-**Problem**: Restart fails with "Artifact not found"
-
-**Solution**: Ensure previous stages completed successfully and archived artifacts
-
-### Scripts Not Found
-
-**Problem**: Pipeline fails with "scripts/stages/XX-stage.sh: not found"
-
-**Solution**: Verify ci-adoptium-pipelines repository is checked out correctly via SCM
-
-### Seed Job Fails
-
-**Problem**: Seed job fails with "Configuration not found"
-
-**Solution**: Ensure `jenkins_job_config.json` exists in ci-temurin-config repository
+| Symptom | Cause | Fix |
+|---|---|---|
+| `MissingPropertyException: No such property: buildUidHelper` | Binding entry not initialised | Ensure `buildUidHelper = null` (no `def`) at top of PipelineHelper |
+| `ClassCastException: WorkflowScript cannot be cast to DSL` | `init(this)` pattern used — `this` inside a free function is `WorkflowScript`, not the DSL | Lib files must call steps directly (no `steps.` prefix, no `init()`) |
+| `BUILD_STAGE_RESULTS is empty` on non-Initialize stage | Triggered via "Rebuild" instead of "Restart from Stage" | Use "Restart from Stage", or trigger a fresh build |
+| `Configuration file not found` | `CONFIG_REPO_URL` or `CONFIG_REPO_BRANCH` wrong | Verify parameters; check config repo structure |
+| `Artifact not found` on stage restart | Prerequisite stage artifacts not archived | Ensure prerequisite stages ran and `archiveArtifacts` succeeded |
 
 ## Related Documentation
 
-- [Job DSL Automation Guide](../../docs/JOB_DSL_AUTOMATION.md) - Complete Job DSL setup
-- [BUILD_UID Integration](../../docs/BUILD_UID_INTEGRATION.md) - Pipeline restart safety
-- [Jenkins Restart Behavior](../../docs/JENKINS_RESTART_BEHAVIOR.md) - Restart behavior details
-- [Migration Guide](../../docs/MIGRATION_IMPLEMENTATION_GUIDE.md) - Migrating from old pipeline
-- [CI Agnostic Architecture](../../docs/CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
+- [docs/JOB_DSL_AUTOMATION.md](../../docs/JOB_DSL_AUTOMATION.md) — Full Job DSL setup guide
+- [docs/BUILD_UID_INTEGRATION.md](../../docs/BUILD_UID_INTEGRATION.md) — BUILD_UID lifecycle detail
+- [docs/JENKINS_RESTART_BEHAVIOR.md](../../docs/JENKINS_RESTART_BEHAVIOR.md) — Restart vs Rebuild
+- [docs/CONFIGURATION_GUIDE.md](../../docs/CONFIGURATION_GUIDE.md) — Config JSON reference
+- [docs/STAGE_IO_SPECIFICATION.md](../../docs/STAGE_IO_SPECIFICATION.md) — Stage input/output contracts
