@@ -268,144 +268,93 @@ with two simplifications:
 2. **No Jenkins artifacts** — stages communicate via the filesystem
    (`INPUT_ARTIFACTS_DIR`, `TARGET_DIR`) rather than `archiveArtifacts`.
 
-### `local-run-pipeline-config.json`
+### Stage Enablement via `pipeline-config.json`
 
-A new optional file in the config repo provides vendor-specific local-run
-configuration. It is separate from `jdkNN_pipeline_config.json` (which is the
-CI-agnostic build configuration) so that local-run concerns don't pollute the
-CI config schema.
+The `StageResolver` reads the `parameters` section of `pipeline-config.json`
+(the same `CONFIG_FILE` used by stage scripts) to decide whether a stage should
+run.  This is the single source of truth — the same file that
+`load-json-config.py` writes and that stage scripts read at runtime.
 
-**Location in config repo:**
+**Parameter-to-stage mapping:**
 
-```
-config-repo/
-  configurations/
-    jdk21_pipeline_config.json      ← CI-agnostic build config (unchanged)
-  local-run-pipeline-config.json    ← NEW: local runner config
-  vendor-scripts/
-    03-internal-sign.sh
-```
+| Stage stem                | Parameter key             | Default |
+|---------------------------|---------------------------|---------|
+| `06-sign`                 | `parameters.enableSigner`     | `true`  |
+| `07-installer`            | `parameters.enableInstallers` | `true`  |
+| `13-smoke-tests`          | `parameters.enableTests`      | `true`  |
+| `20-reproducible-compare` | `parameters.compareBuild`     | `false` |
 
-**Schema:**
+Stages without an entry in this table are always enabled (e.g. `02-build`,
+`12-validate-sbom`).
 
-```json
-{
-  "stages": {
-    "02-build": {
-      "enabled": true
-    },
-    "03-internal-sign": {
-      "enabled": false,
-      "reason": "Internal signing requires Eclipse CBI network access — not available locally"
-    },
-    "06-sign": {
-      "enabled": true,
-      "script": "vendor-scripts/06-sign-local.sh"
-    },
-    "13-smoke-tests": {
-      "enabled": true
-    }
-  }
-}
-```
-
-| Field     | Type    | Default  | Description                                                    |
-|-----------|---------|----------|----------------------------------------------------------------|
-| `enabled` | boolean | `true`   | Whether this stage runs locally at all                         |
-| `reason`  | string  | —        | Human-readable explanation shown when a stage is skipped       |
-| `script`  | string  | —        | Path relative to config-repo root; overrides default resolution|
-
-If `local-run-pipeline-config.json` is absent the runner behaves exactly as it
-does today — all stages run with their default scripts.
+When a stage is disabled, `StageResolver.run()` prints a message indicating
+which parameter caused the skip and returns exit code 0 without executing any
+script.
 
 ### Resolution Order (Local)
 
 For each stage, `run-pipeline.py` resolves the script to run in this order:
 
 ```
-1. config-repo/<script>            ← explicit path from local-run-pipeline-config.json
-2. config-repo/vendor-scripts/<stem>.sh   ← vendor override (sh)
-3. config-repo/vendor-scripts/<stem>.py   ← vendor override (python)
-4. scripts/stages/<stem>.sh               ← default (sh)
-5. scripts/stages/<stem>.py               ← default (python)
-6. built-in no-op                         ← logs and continues
+1. config-repo/vendor-scripts/<stem>.sh   ← vendor override (sh)
+2. config-repo/vendor-scripts/<stem>.py   ← vendor override (python)
+3. scripts/stages/<stem>.sh               ← default (sh)
+4. scripts/stages/<stem>.py               ← default (python)
+5. built-in no-op                         ← logs and continues
 ```
 
-Step 1 only applies when the `script` field is set in the config.
-Steps 2–5 mirror the Jenkins resolution order, minus Groovy.
+Steps 1–4 mirror the Jenkins resolution order, minus Groovy.
 
 ### The `StageResolver` Helper Class
 
-A new `StageResolver` class in `run-pipeline.py` (or extracted to
-`ci/local/stage_resolver.py`) encapsulates this logic, replacing the
-hard-coded paths in each `stage_*()` method:
+`ci/local/stage_resolver.py` encapsulates script resolution and
+parameter-based gating, replacing hard-coded paths in each `stage_*()`
+method:
 
 ```python
 class StageResolver:
     """
     Resolves which script to run for a given stage stem.
+    Reads parameters from pipeline-config.json to gate stages.
     Searches vendor-scripts/ (config-repo) before scripts/stages/ (this repo).
     Supports .sh and .py implementations.
     """
 
     EXTENSIONS = ['.sh', '.py']
 
-    def __init__(self, pipeline_root: Path, config_repo_root: Path,
-                 local_config: dict):
+    def __init__(self, pipeline_root: Path, config_repo_root: Path | None,
+                 config_file: Path | None = None):
         self.pipeline_root = pipeline_root
         self.config_repo_root = config_repo_root
-        self.local_config = local_config  # parsed local-run-pipeline-config.json
+        self._config_file = config_file  # pipeline-config.json
 
     def is_enabled(self, stem: str) -> tuple[bool, str]:
         """
-        Returns (enabled, reason). If no config entry exists, defaults to True.
+        Returns (enabled, reason).
+        Reads parameters from pipeline-config.json.
+        If no gate exists for this stem, defaults to (True, '').
         """
-        stage_cfg = self.local_config.get('stages', {}).get(stem, {})
-        enabled = stage_cfg.get('enabled', True)
-        reason  = stage_cfg.get('reason', '')
-        return enabled, reason
+        ...
 
     def resolve(self, stem: str) -> Path | None:
         """
         Resolve the script path for the given stem.
         Returns None if no script is found (no-op).
         """
-        stage_cfg = self.local_config.get('stages', {}).get(stem, {})
-
-        # 1. Explicit override path from local-run-pipeline-config.json
-        if 'script' in stage_cfg:
-            explicit = self.config_repo_root / stage_cfg['script']
-            if explicit.exists():
-                return explicit
-            raise FileNotFoundError(
-                f"Stage '{stem}': configured script not found: {explicit}"
-            )
-
-        # 2-3. Vendor override in config-repo/vendor-scripts/
-        for ext in self.EXTENSIONS:
-            p = self.config_repo_root / 'vendor-scripts' / f'{stem}{ext}'
-            if p.exists():
-                return p
-
-        # 4-5. Default in scripts/stages/
-        for ext in self.EXTENSIONS:
-            p = self.pipeline_root / 'scripts' / 'stages' / f'{stem}{ext}'
-            if p.exists():
-                return p
-
+        # 1-2. Vendor override in config-repo/vendor-scripts/
+        ...
+        # 3-4. Default in scripts/stages/
+        ...
         return None  # no-op
 
     def run(self, stem: str, env: dict) -> int:
         """
-        Resolve and execute the stage script.
+        Check enablement, resolve, and execute the stage script.
         Returns the exit code (0 = success).
         """
         enabled, reason = self.is_enabled(stem)
         if not enabled:
-            msg = f"ℹ️  Stage '{stem}' disabled locally"
-            if reason:
-                msg += f": {reason}"
-            print(msg)
+            print(f"ℹ️  Stage '{stem}' disabled: {reason}")
             return 0
 
         script = self.resolve(stem)
@@ -413,16 +362,7 @@ class StageResolver:
             print(f"ℹ️  No script found for '{stem}' — stage is a no-op")
             return 0
 
-        ext = script.suffix
-        print(f"▶ Running {ext.lstrip('.')} stage script: {script}")
-
-        if ext == '.sh':
-            cmd = ['bash', str(script)]
-        elif ext == '.py':
-            cmd = ['python3', str(script)]
-        else:
-            raise ValueError(f"Unsupported script type: {ext}")
-
+        ...
         result = subprocess.run(cmd, env=env)
         return result.returncode
 ```
@@ -439,36 +379,41 @@ subprocess.run(cmd, env=env, check=True)
 After (uniform resolver call):
 
 ```python
-exit_code = self.resolver.run('02-build', env)
+exit_code = self._make_resolver().run('02-build', env)
 if exit_code != 0:
     raise subprocess.CalledProcessError(exit_code, '02-build')
 ```
 
 The `stage_*()` methods shrink to just building the `env` dict and
-calling `self.resolver.run()`. Stage enablement checks that currently
-live in `PipelineRunner.run()` (e.g. `if self.args.enable_signer`) are
-preserved — the resolver's `enabled` flag adds a *second*, config-driven
-gate on top for vendor-specific local decisions.
+calling `self._make_resolver().run()`. Stage enablement that was previously
+checked in `PipelineRunner.run()` via CLI args (e.g. `if self.args.enable_signer`)
+is now driven by the `parameters` section of `pipeline-config.json` — the same
+file that `load-json-config.py` generates from the CLI args.
 
 ### Initialising the Resolver
 
-In `PipelineRunner.__init__()`, after the config repo is available:
+The resolver is created lazily by `_make_resolver()`. It receives the
+`config_file` path (pointing to `pipeline-config.json`) so it can read
+parameters for stage gating:
 
 ```python
-# Load optional local-run config from config repo
-local_cfg_path = self.workspace / 'config-repo' / 'local-run-pipeline-config.json'
-local_config = {}
-if local_cfg_path.exists():
-    with open(local_cfg_path) as f:
-        local_config = json.load(f)
+def _make_resolver(self) -> StageResolver:
+    config_repo_root = None
+    if self.args.config_repo_url:
+        candidate = self.workspace / 'config-repo'
+        if candidate.exists():
+            config_repo_root = candidate
 
-config_repo_root = self.workspace / 'config-repo'
-self.resolver = StageResolver(self.script_dir, config_repo_root, local_config)
+    if self._resolver is None or ...:
+        self._resolver = StageResolver(
+            self.script_dir, config_repo_root, self.config_file
+        )
+    return self._resolver
 ```
 
 Because the config repo is cloned during `stage_initialize()`, the resolver
-must be (re-)created after that stage completes — or initialised lazily on
-first use.
+is (re-)created after that stage completes when the config repo becomes
+available.
 
 ### Config Repo Layout (combined view)
 
@@ -476,18 +421,17 @@ first use.
 config-repo/
   configurations/
     jdk21_pipeline_config.json        ← CI-agnostic build config (unchanged)
-  local-run-pipeline-config.json      ← optional local-run config
   vendor-scripts/
     03-internal-sign.sh               ← vendor override (Jenkins + local)
-    06-sign-local.sh                  ← local-only sign variant
+    06-sign.sh                        ← vendor sign impl
     13-smoke-tests.py                 ← vendor smoke tests (Python)
 ```
 
 ### Implementation Checklist (Local)
 
-- [ ] Extract `StageResolver` class (new file `ci/local/stage_resolver.py`)
-- [ ] Update `PipelineRunner.__init__()` to load `local-run-pipeline-config.json`
-      and instantiate `StageResolver` after config repo is available
-- [ ] Replace hard-coded `cmd = [str(self.script_dir / 'scripts' / 'stages' / ...)]`
-      in each `stage_*()` method with `self.resolver.run(stem, env)`
-- [ ] Document `local-run-pipeline-config.json` schema (this file serves as that doc)
+- [x] Extract `StageResolver` class (new file `ci/local/stage_resolver.py`)
+- [x] `StageResolver` reads `pipeline-config.json` parameters to gate stages
+- [x] Replace hard-coded `cmd = [str(self.script_dir / 'scripts' / 'stages' / ...)]`
+      in each `stage_*()` method with `self._make_resolver().run(stem, env)`
+- [x] Remove CLI-arg-based gating from `PipelineRunner.run()` — delegated to resolver
+- [ ] Document `pipeline-config.json` parameters schema (this file serves as that doc)

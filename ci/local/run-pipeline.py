@@ -32,6 +32,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 from workspace_manager import WorkspaceManager
+from stage_resolver import StageResolver
 
 
 class PipelineRunner:
@@ -55,6 +56,11 @@ class PipelineRunner:
         self.config_file = self.workspace_mgr.config_file
         self.build_number = args.build_number or f"local-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
+        # StageResolver is initialised lazily after stage_initialize() has
+        # cloned the config repo.  _make_resolver() is called at the start
+        # of each stage_*() method to ensure it is always up-to-date.
+        self._resolver: StageResolver | None = None
+
         # Validate reproducible compare parameters
         if args.compare_build:
             if not args.scm_ref:
@@ -74,6 +80,32 @@ class PipelineRunner:
             print(f"   Will run: {', '.join(self.stages_to_run)}")
         else:
             self.stages_to_run = self.STAGES.copy()
+
+    def _make_resolver(self) -> StageResolver:
+        """
+        Return a StageResolver, (re-)creating it if the config repo has
+        been cloned since the last call (i.e. after stage_initialize()).
+
+        The resolver reads parameters from pipeline-config.json (CONFIG_FILE)
+        to gate stages (enableTests, enableSigner, etc.).
+        """
+        config_repo_root = None
+        if self.args.config_repo_url:
+            candidate = self.workspace / 'config-repo'
+            if candidate.exists():
+                config_repo_root = candidate
+
+        if self._resolver is None or (
+            config_repo_root is not None
+            and self._resolver.config_repo_root != config_repo_root
+        ):
+            self._resolver = StageResolver(
+                self.script_dir, config_repo_root, self.config_file
+            )
+            src = str(config_repo_root) if config_repo_root else 'defaults only'
+            print(f"ℹ️  StageResolver initialised (config repo: {src})")
+
+        return self._resolver
 
     def run(self):
         """Run the complete pipeline"""
@@ -104,20 +136,20 @@ class PipelineRunner:
             if 'validate-sbom' in self.stages_to_run and not self.args.skip_build:
                 self.stage_validate_sbom()
 
-            # Stage 4: Sign (if enabled and applicable)
-            if 'sign' in self.stages_to_run and self.args.enable_signer and not self.args.skip_build:
+            # Stage 4: Sign (enablement gated by pipeline-config.json parameters.enableSigner)
+            if 'sign' in self.stages_to_run and not self.args.skip_build:
                 self.stage_sign()
 
-            # Stage 5: Build Installers (if enabled)
-            if 'installer' in self.stages_to_run and self.args.enable_installers and not self.args.skip_build:
+            # Stage 5: Build Installers (enablement gated by pipeline-config.json parameters.enableInstallers)
+            if 'installer' in self.stages_to_run and not self.args.skip_build:
                 self.stage_installer()
 
-            # Stage 6: Smoke Tests (if enabled)
-            if 'smoke-tests' in self.stages_to_run and self.args.enable_tests and not self.args.skip_build:
+            # Stage 6: Smoke Tests (enablement gated by pipeline-config.json parameters.enableTests)
+            if 'smoke-tests' in self.stages_to_run and not self.args.skip_build:
                 self.stage_smoke_tests()
 
-            # Stage 7: Reproducible Compare (if enabled)
-            if 'reproducible-compare' in self.stages_to_run and self.args.compare_build and not self.args.skip_build:
+            # Stage 7: Reproducible Compare (enablement gated by pipeline-config.json parameters.compareBuild)
+            if 'reproducible-compare' in self.stages_to_run and not self.args.skip_build:
                 self.stage_reproducible_compare()
 
             print()
@@ -276,16 +308,9 @@ class PipelineRunner:
         env['TARGET_DIR'] = str(self.artifacts_dir)
         # Build stage doesn't need INPUT_ARTIFACTS_DIR (first stage)
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '02-build.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
-        print(f"  BUILD_NUMBER={env['BUILD_NUMBER']}")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-
-        subprocess.run(cmd, env=env, check=True)
+        exit_code = self._make_resolver().run('02-build', env)
+        if exit_code != 0:
+            raise subprocess.CalledProcessError(exit_code, '02-build')
         print("\n✅ Build stage complete")
         print(f"   Artifacts in: {self.artifacts_dir}")
 
@@ -321,21 +346,11 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '12-validate-sbom.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  CONFIG_FILE={env['CONFIG_FILE']}")
-        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-
-        try:
-            subprocess.run(cmd, env=env, check=True)
-            print("\n✅ SBOM validation stage complete")
-        except subprocess.CalledProcessError as e:
-            print(f"\n❌ SBOM validation failed with exit code {e.returncode}")
-            raise
+        exit_code = self._make_resolver().run('12-validate-sbom', env)
+        if exit_code != 0:
+            print(f"\n❌ SBOM validation failed with exit code {exit_code}")
+            raise subprocess.CalledProcessError(exit_code, '12-validate-sbom')
+        print("\n✅ SBOM validation stage complete")
 
         # Post-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('post')
@@ -356,15 +371,9 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '06-sign.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-
-        subprocess.run(cmd, env=env, check=True)
+        exit_code = self._make_resolver().run('06-sign', env)
+        if exit_code != 0:
+            raise subprocess.CalledProcessError(exit_code, '06-sign')
         print("\n✅ Sign stage complete")
 
         # Post-stage cleanup
@@ -386,15 +395,9 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '07-installer.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-
-        subprocess.run(cmd, env=env, check=True)
+        exit_code = self._make_resolver().run('07-installer', env)
+        if exit_code != 0:
+            raise subprocess.CalledProcessError(exit_code, '07-installer')
         print("\n✅ Installer stage complete")
 
         # Post-stage cleanup
@@ -416,15 +419,9 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
         env['TARGET_DIR'] = str(self.artifacts_dir)
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '13-smoke-tests.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-
-        subprocess.run(cmd, env=env, check=True)
+        exit_code = self._make_resolver().run('13-smoke-tests', env)
+        if exit_code != 0:
+            raise subprocess.CalledProcessError(exit_code, '13-smoke-tests')
         print("\n✅ Smoke tests complete")
 
         # Post-stage cleanup
@@ -456,20 +453,10 @@ class PipelineRunner:
         if self.args.build_ref:
             env['BUILD_REF'] = self.args.build_ref
 
-        cmd = [str(self.script_dir / 'scripts' / 'stages' / '20-reproducible-compare.sh')]
-
-        print(f"Running: {' '.join(cmd)}")
-        print(f"Environment:")
-        print(f"  WORKSPACE={env['WORKSPACE']} (stage_workspace)")
-        print(f"  INPUT_ARTIFACTS_DIR={env['INPUT_ARTIFACTS_DIR']} (input)")
-        print(f"  TARGET_DIR={env['TARGET_DIR']} (output)")
-        print(f"  SCM_REF={env['SCM_REF']}")
-        print(f"  RELEASE={env['RELEASE']}")
         print(f"  Note: Compares locally built JDK against production Adoptium binary")
 
-        # Run comparison script and capture exit code
-        result = subprocess.run(cmd, env=env, capture_output=False)
-        comparison_exit_code = result.returncode
+        # Capture exit code without raising — result drives UNSTABLE-equivalent behaviour
+        comparison_exit_code = self._make_resolver().run('20-reproducible-compare', env)
 
         # Check for comparison results in stage_workspace
         comparison_report = self.stage_workspace / 'reproducible-compare' / 'comparison-report.txt'
