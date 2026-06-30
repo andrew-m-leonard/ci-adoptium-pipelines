@@ -171,13 +171,13 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     // Load platform configuration to get available platforms
     def platforms = []
     try {
-        def pipelineConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
+        def jdkConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
         
-        println "    Loading platforms from ${pipelineConfigUrl}"
-        def pipelineConfigText = new URL(pipelineConfigUrl).text
-        def pipelineConfig = new groovy.json.JsonSlurper().parseText(pipelineConfigText)
+        println "    Loading platforms from ${jdkConfigUrl}"
+        def jdkConfigText = new URL(jdkConfigUrl).text
+        def jdkConfig = new groovy.json.JsonSlurper().parseText(jdkConfigText)
         
-        platforms = pipelineConfig.buildConfigurations.keySet() as List
+        platforms = jdkConfig.buildConfigurations.keySet() as List
         platforms.sort()  // Sort alphabetically
         println "    Available platforms: ${platforms.join(', ')}"
     } catch (Exception e) {
