@@ -709,7 +709,7 @@ The 20-week timeline provides adequate time for thorough validation at each phas
 
 **Related Documentation:**
 - [Migration Implementation Guide](./MIGRATION_IMPLEMENTATION_GUIDE.md) - Detailed implementation with code examples
-- [CI-Agnostic Architecture](./CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
+- [CI-Agnostic Architecture](../CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
 - [Pipeline Orchestration Architecture](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) - Pipeline organization
 - [Restartability Guide](./RESTARTABILITY_GUIDE.md) - Stage restart implementation
 - [Configuration Guide](./CONFIGURATION_GUIDE.md) - Pipeline configuration

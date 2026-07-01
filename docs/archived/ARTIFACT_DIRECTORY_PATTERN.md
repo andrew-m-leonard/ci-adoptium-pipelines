@@ -1,6 +1,6 @@
 # Artifact Directory Pattern: INPUT_ARTIFACTS_DIR vs TARGET_DIR
 
-> **This document is historical.** The `INPUT_ARTIFACTS_DIR` / `TARGET_DIR` contract is now documented in [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md). The "Local Pipeline Execution" section of this document describes the old shared `artifacts/` model which has been superseded by the `build_artifacts/` archive/restore architecture.
+> **This document is historical.** The `INPUT_ARTIFACTS_DIR` / `TARGET_DIR` contract is now documented in [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](../WORKSPACE_ARTIFACTS_ARCHITECTURE.md). The "Local Pipeline Execution" section of this document describes the old shared `artifacts/` model which has been superseded by the `build_artifacts/` archive/restore architecture.
 
 ## Overview
 
@@ -212,8 +212,8 @@ pipelineHelper.executeStageWithTracking('My Stage') {
 
 ## Related Documentation
 
-- [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — current documentation (supersedes this document)
-- [`UNIVERSAL_STAGE_PATTERN.md`](./UNIVERSAL_STAGE_PATTERN.md) — stage script template
+- [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](../WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — current documentation (supersedes this document)
+- [`UNIVERSAL_STAGE_PATTERN.md`](../UNIVERSAL_STAGE_PATTERN.md) — stage script template
 - [`ci/jenkins/lib/PipelineHelper.groovy`](../ci/jenkins/lib/PipelineHelper.groovy) — `initializeStage()` implementation
 - [`ci/local/run-pipeline.py`](../ci/local/run-pipeline.py) — local execution tool
 

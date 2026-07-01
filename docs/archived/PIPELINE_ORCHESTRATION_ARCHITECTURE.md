@@ -691,6 +691,6 @@ This architecture change is essential for achieving the operational excellence, 
 ---
 
 **Related Documentation:**
-- [CI-Agnostic Architecture](./CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
+- [CI-Agnostic Architecture](../CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
 - [Restartability Guide](./RESTARTABILITY_GUIDE.md) - Stage restart implementation
-- [Workspace Architecture](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) - Artifact management
+- [Workspace Architecture](../WORKSPACE_ARTIFACTS_ARCHITECTURE.md) - Artifact management

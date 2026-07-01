@@ -1431,7 +1431,7 @@ By following this plan, the migration can be completed with minimal risk and max
 ---
 
 **Related Documentation:**
-- [CI-Agnostic Architecture](./CI_AGNOSTIC_ARCHITECTURE.md)
+- [CI-Agnostic Architecture](../CI_AGNOSTIC_ARCHITECTURE.md)
 - [Pipeline Orchestration Architecture](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md)
 - [Restartability Guide](./RESTARTABILITY_GUIDE.md)
 - [Configuration Guide](./CONFIGURATION_GUIDE.md)

@@ -275,4 +275,4 @@ All stage scripts must:
 4. Write outputs to `${TARGET_DIR}`
 5. Exit 0 on success, non-zero on failure
 
-See [`UNIVERSAL_STAGE_PATTERN.md`](./UNIVERSAL_STAGE_PATTERN.md) for the full template.
+See [`UNIVERSAL_STAGE_PATTERN.md`](../UNIVERSAL_STAGE_PATTERN.md) for the full template.

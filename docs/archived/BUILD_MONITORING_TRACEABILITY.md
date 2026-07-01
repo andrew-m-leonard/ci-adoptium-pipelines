@@ -1056,5 +1056,5 @@ This solution transforms release monitoring from a painful manual process into a
 
 **Related Documentation:**
 - [Pipeline Orchestration Architecture](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) - Independent build and test pipelines
-- [CI-Agnostic Architecture](./CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
+- [CI-Agnostic Architecture](../CI_AGNOSTIC_ARCHITECTURE.md) - Overall architecture design
 - [Restartability Guide](./RESTARTABILITY_GUIDE.md) - Stage restart implementation

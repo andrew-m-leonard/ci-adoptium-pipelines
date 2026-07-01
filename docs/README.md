@@ -56,35 +56,36 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 ## Historical
 
-These documents capture decisions, refactoring work, and intermediate designs from the original pipeline implementation. Retained for reference.
+These documents capture decisions, refactoring work, and intermediate designs from the original pipeline implementation. Retained for reference in [`docs/archived/`](./archived/).
 
-- [ARTIFACT_DIRECTORY_PATTERN.md](./ARTIFACT_DIRECTORY_PATTERN.md) — `INPUT_ARTIFACTS_DIR` vs `TARGET_DIR` pattern (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
-- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) — Local runner workspace architecture (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
-- [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — Launch pipeline → build pipeline → stage script flow
-- [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) — Configuration system guide (superseded by [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md))
-- [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) — Per-stage input/output contracts (superseded by [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) Standard Interface Contract section)
-- [JENKINS_ENVIRONMENT_VARIABLES.md](./JENKINS_ENVIRONMENT_VARIABLES.md) — `CONFIG_*` and pipeline env vars (superseded by [`ci/jenkins/README.md`](../ci/jenkins/README.md) parameters table)
-- [PARAMETER_CONSOLIDATION.md](./PARAMETER_CONSOLIDATION.md) — How job parameters were consolidated
-- [JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md) — Restart from Stage mechanics (superseded by [`BUILD_UID_INTEGRATION.md`](./BUILD_UID_INTEGRATION.md))
-- [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md) — Stage restartability design (superseded by [`BUILD_UID_INTEGRATION.md`](./BUILD_UID_INTEGRATION.md))
-- [JENKINS_CLEANUP_REFACTORING.md](./JENKINS_CLEANUP_REFACTORING.md) — Refactoring to native `cleanWs()`
-- [WORKSPACE_CLEANUP.md](./WORKSPACE_CLEANUP.md) — Earlier workspace cleanup strategy
-- [WORKSPACE_VALIDATION_PATTERN.md](./WORKSPACE_VALIDATION_PATTERN.md) — BUILD_UID workspace integrity check design
-- [STAGE_INPUT_STRATEGY.md](./STAGE_INPUT_STRATEGY.md) — Earlier vendor-override resolution design
-- [TARGET_DIR_ARTIFACT_CONSISTENCY.md](./TARGET_DIR_ARTIFACT_CONSISTENCY.md) — `TARGET_DIR` consistency work
-- [REPRODUCIBLE_COMPARE.md](./REPRODUCIBLE_COMPARE.md) — Earlier reproducible compare notes
-- [REPRODUCIBLE_BUILD_PATH_PADDING.md](./REPRODUCIBLE_BUILD_PATH_PADDING.md) — Path padding for macOS LC_UUID
-- [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./PATH_PADDING_IMPLEMENTATION_SUMMARY.md) — Path padding quick reference
-- [BUILD_MONITORING_TRACEABILITY.md](./BUILD_MONITORING_TRACEABILITY.md) — BUILD_UID / GROUP_UID traceability design
-- [TEST_BUILD_UID_GUIDE.md](./TEST_BUILD_UID_GUIDE.md) — Testing BUILD_UID logic
-- [MIGRATION_PLAN.md](./MIGRATION_PLAN.md) — Original phased migration strategy
-- [MIGRATION_STRATEGY.md](./MIGRATION_STRATEGY.md) — Design choices and trade-offs
-- [MIGRATION_IMPLEMENTATION_GUIDE.md](./MIGRATION_IMPLEMENTATION_GUIDE.md) — Step-by-step migration instructions
-- [MIGRATION_VISUAL_GUIDE.md](./MIGRATION_VISUAL_GUIDE.md) — Timeline and flow diagrams
-- [GITHUB_EPICS_AND_ISSUES.md](./GITHUB_EPICS_AND_ISSUES.md) — Original GitHub epics and issue tracking
-- [PARAMETER_CONSISTENCY_UPDATE.md](./PARAMETER_CONSISTENCY_UPDATE.md) — Parameter naming standardisation history
-- [RELEASE_TYPE_PARAMETER_MIGRATION.md](./RELEASE_TYPE_PARAMETER_MIGRATION.md) — `RELEASE_TYPE` parameter history
-- [TARGET_DIR_REFACTORING.md](./TARGET_DIR_REFACTORING.md) — `TARGET_DIR` refactoring history
+- [ARTIFACT_DIRECTORY_PATTERN.md](./archived/ARTIFACT_DIRECTORY_PATTERN.md) — `INPUT_ARTIFACTS_DIR` vs `TARGET_DIR` pattern (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
+- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./archived/LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) — Local runner workspace architecture (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
+- [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./archived/PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — Launch pipeline → build pipeline → stage script flow
+- [CONFIGURATION_GUIDE.md](./archived/CONFIGURATION_GUIDE.md) — Configuration system guide (superseded by [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md))
+- [STAGE_IO_SPECIFICATION.md](./archived/STAGE_IO_SPECIFICATION.md) — Per-stage input/output contracts (superseded by [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) Standard Interface Contract section)
+- [JENKINS_ENVIRONMENT_VARIABLES.md](./archived/JENKINS_ENVIRONMENT_VARIABLES.md) — `CONFIG_*` and pipeline env vars (superseded by [`ci/jenkins/README.md`](../ci/jenkins/README.md) parameters table)
+- [PARAMETER_CONSOLIDATION.md](./archived/PARAMETER_CONSOLIDATION.md) — How job parameters were consolidated
+- [JENKINS_RESTART_BEHAVIOR.md](./archived/JENKINS_RESTART_BEHAVIOR.md) — Restart from Stage mechanics (superseded by [`BUILD_UID_INTEGRATION.md`](./BUILD_UID_INTEGRATION.md))
+- [RESTARTABILITY_GUIDE.md](./archived/RESTARTABILITY_GUIDE.md) — Stage restartability design (superseded by [`BUILD_UID_INTEGRATION.md`](./BUILD_UID_INTEGRATION.md))
+- [JENKINS_CLEANUP_REFACTORING.md](./archived/JENKINS_CLEANUP_REFACTORING.md) — Refactoring to native `cleanWs()`
+- [WORKSPACE_CLEANUP.md](./archived/WORKSPACE_CLEANUP.md) — Earlier workspace cleanup strategy
+- [WORKSPACE_VALIDATION_PATTERN.md](./archived/WORKSPACE_VALIDATION_PATTERN.md) — BUILD_UID workspace integrity check design
+- [STAGE_INPUT_STRATEGY.md](./archived/STAGE_INPUT_STRATEGY.md) — Earlier vendor-override resolution design
+- [TARGET_DIR_ARTIFACT_CONSISTENCY.md](./archived/TARGET_DIR_ARTIFACT_CONSISTENCY.md) — `TARGET_DIR` consistency work
+- [REPRODUCIBLE_COMPARE.md](./archived/REPRODUCIBLE_COMPARE.md) — Earlier reproducible compare notes
+- [REPRODUCIBLE_BUILD_PATH_PADDING.md](./archived/REPRODUCIBLE_BUILD_PATH_PADDING.md) — Path padding for macOS LC_UUID
+- [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./archived/PATH_PADDING_IMPLEMENTATION_SUMMARY.md) — Path padding quick reference
+- [BUILD_MONITORING_TRACEABILITY.md](./archived/BUILD_MONITORING_TRACEABILITY.md) — BUILD_UID / GROUP_UID traceability design
+- [TEST_BUILD_UID_GUIDE.md](./archived/TEST_BUILD_UID_GUIDE.md) — Testing BUILD_UID logic
+- [MIGRATION_PLAN.md](./archived/MIGRATION_PLAN.md) — Original phased migration strategy
+- [MIGRATION_STRATEGY.md](./archived/MIGRATION_STRATEGY.md) — Design choices and trade-offs
+- [MIGRATION_IMPLEMENTATION_GUIDE.md](./archived/MIGRATION_IMPLEMENTATION_GUIDE.md) — Step-by-step migration instructions
+- [MIGRATION_VISUAL_GUIDE.md](./archived/MIGRATION_VISUAL_GUIDE.md) — Timeline and flow diagrams
+- [GITHUB_EPICS_AND_ISSUES.md](./archived/GITHUB_EPICS_AND_ISSUES.md) — Original GitHub epics and issue tracking
+- [PARAMETER_CONSISTENCY_UPDATE.md](./archived/PARAMETER_CONSISTENCY_UPDATE.md) — Parameter naming standardisation history
+- [RELEASE_TYPE_PARAMETER_MIGRATION.md](./archived/RELEASE_TYPE_PARAMETER_MIGRATION.md) — `RELEASE_TYPE` parameter history
+- [TARGET_DIR_REFACTORING.md](./archived/TARGET_DIR_REFACTORING.md) — `TARGET_DIR` refactoring history
+- [STAGE_SCRIPTS.md](./archived/STAGE_SCRIPTS.md) — Pluggable stage script design specification (implemented; superseded by [`SHELL_SCRIPTS_SUMMARY.md`](./SHELL_SCRIPTS_SUMMARY.md) and [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md))
 
 ---
 

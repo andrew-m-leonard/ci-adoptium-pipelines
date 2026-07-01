@@ -196,7 +196,7 @@ The `load-json-config.py` script already uses the correct parameter name:
 ## Related Documentation
 
 - [RESTARTABILITY_GUIDE.md](./RESTARTABILITY_GUIDE.md) - Guide to restartable pipelines
-- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) - Workspace and artifacts separation architecture
+- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](../WORKSPACE_ARTIFACTS_ARCHITECTURE.md) - Workspace and artifacts separation architecture
 
 ## Implementation Date
 
