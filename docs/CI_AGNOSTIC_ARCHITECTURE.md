@@ -2,592 +2,339 @@
 
 ## Problem Statement
 
-The original `openjdk_build_pipeline.groovy` implementation was a monolithic Jenkins Groovy script that tightly coupled all build logic to Jenkins. This created several critical challenges:
+The original `openjdk_build_pipeline.groovy` was a monolithic Jenkins Groovy script that tightly coupled all build logic to Jenkins:
 
-**Business Impact:**
-- **Vendor Lock-in**: Complete dependency on Jenkins infrastructure and Groovy DSL
-- **Migration Risk**: Moving to alternative CI systems (GitLab CI, GitHub Actions, etc.) would require a complete rewrite
-- **Development Velocity**: Changes required Jenkins expertise and could only be tested in Jenkins environment
-- **Operational Overhead**: No ability to run or debug pipeline stages locally
+- **Vendor lock-in**: Complete dependency on Jenkins infrastructure and Groovy DSL
+- **No local testing**: Impossible to run or debug pipeline stages outside Jenkins
+- **Maintenance burden**: ~2000+ line monolithic script with mixed orchestration and business logic
+- **Migration barrier**: Moving to another CI system would require a complete rewrite
 
-**Technical Debt:**
-- Mixed concerns: orchestration logic intertwined with business logic
-- Difficult to test: stage implementation logic embedded within Jenkins-specific Groovy code prevents unit testing, requires full Jenkins environment for any testing, and makes it impossible to validate stage logic independently or locally
-- Poor maintainability: large monolithic script (~2000+ lines) with complex dependencies, no modularization of stages, making it difficult to understand, modify, or debug individual pipeline stages without affecting others
-- Limited reusability: logic cannot be shared across different CI platforms
-
-To address these issues and future-proof the build infrastructure, we need a **CI-agnostic architecture** that separates orchestration from implementation.
+The solution is a **CI-agnostic architecture** that separates orchestration from implementation.
 
 ## Old Architecture (Before Refactoring)
 
-The original `openjdk_build_pipeline.groovy` was a monolithic Jenkins Groovy script with all logic embedded:
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ openjdk_build_pipeline.groovy (Monolithic Groovy Script)   │
+│ openjdk_build_pipeline.groovy (Monolithic Groovy Script)    │
 │                                                             │
-│ ┌─────────────────────────────────────────────────────┐   │
-│ │ Pipeline Definition + Stage Logic (All in Groovy)   │   │
-│ │                                                       │   │
-│ │ • Stage: Build                                       │   │
-│ │   └─> Groovy code calls make-adopt-build-farm.sh    │   │
-│ │                                                       │   │
-│ │ • Stage: Internal Sign                               │   │
-│ │   └─> Groovy code calls downstream job               │   │
-│ │                                                       │   │
-│ │ • Stage: Sign                                        │   │
-│ │   └─> Groovy code calls downstream job               │   │
-│ │                                                       │   │
-│ │ • Stage: Installer                                   │   │
-│ │   └─> Groovy code calls downstream job               │   │
-│ │                                                       │   │
-│ │ • Stage: Smoke Tests                                 │   │
-│ │   └─> Groovy code calls test scripts                │   │
-│ │                                                       │   │
-│ │ • Stage: AQA Tests                                   │   │
-│ │   └─> Groovy code calls downstream job               │   │
-│ └─────────────────────────────────────────────────────┘   │
+│  Stage: Build         → Groovy calls make-adopt-build-farm  │
+│  Stage: Internal Sign → Groovy calls downstream job         │
+│  Stage: Sign          → Groovy calls downstream job         │
+│  Stage: Installer     → Groovy calls downstream job         │
+│  Stage: Smoke Tests   → Groovy calls test scripts           │
+│  Stage: AQA Tests     → Groovy calls downstream job         │
 │                                                             │
-│ ⚠️  Problems:                                               │
-│ • Tightly coupled to Jenkins                               │
-│ • Cannot run locally without Jenkins                       │
-│ • Cannot migrate to other CI systems                       │
-│ • Difficult to test individual stages                      │
-│ • Mixed concerns (orchestration + logic)                   │
+│  ⚠ Tightly coupled to Jenkins — cannot run locally         │
+│  ⚠ Cannot migrate to other CI systems                      │
+│  ⚠ Cannot test individual stages independently             │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-**Key Issues:**
-- **CI Lock-in**: All logic written in Jenkins Groovy DSL
-- **No Local Testing**: Cannot run pipeline stages outside Jenkins
-- **Maintenance Burden**: Changes require Jenkins expertise
-- **Migration Barrier**: Moving to GitLab/GitHub Actions requires complete rewrite
-- **Testing Difficulty**: Cannot unit test stage logic independently
 
 ## Solution: Separation of Concerns
 
 ### Layer 1: CI Orchestration (CI-Specific)
-- **Purpose**: Pipeline definition, stage sequencing, artifact management
-- **Language**: CI-specific DSL (Jenkinsfile, .gitlab-ci.yml, .github/workflows/*.yml) or portable scripts (shell/Python)
-- **Responsibility**:
-  - Define stages and their order
-  - Manage artifacts (archive/retrieve)
-  - Handle conditional execution
-  - Provide environment variables
-- **Implementation Options**:
-  - CI-native DSL for platform-specific features (Jenkins Groovy, GitLab CI YAML, GitHub Actions YAML)
-  - Portable shell/Python scripts for maximum portability
 
-### Layer 2: Stage Implementation (CI-Agnostic)
-- **Purpose**: Actual build/test/sign logic
-- **Language**: **Platform-agnostic Bash scripts** (portable across Linux, macOS, Windows/MSYS2)
-- **Responsibility**:
-  - Execute the actual work
-  - Read inputs from standard locations
-  - Write outputs to standard locations
-  - Return exit codes for success/failure
-- **Key Benefit**: Same scripts run identically on any CI platform or locally
+- **Purpose**: Pipeline definition, stage sequencing, artifact management
+- **Current implementation**: Jenkins declarative pipeline (`Jenkinsfile.declarative`) + shared Groovy libs in `ci/jenkins/lib/`
+- **Responsibility**: define stages and order, manage artifacts (archive/retrieve), conditional execution, provide environment variables to stage scripts
+- **Local equivalent**: `ci/local/run-pipeline.py`
+
+### Layer 2: Stage Scripts (CI-Agnostic)
+
+- **Purpose**: Actual build / sign / test logic
+- **Language**: Portable Bash scripts (`scripts/stages/`)
+- **Key property**: same scripts run identically in Jenkins, locally, or any other CI platform
+- **Vendor override**: the config repo can supply `vendor-scripts/<stem>.sh` to replace any default stage script — the orchestration layer tries the vendor script first before falling back to `scripts/stages/`
 
 ### Layer 3: Build Tools (Already CI-Agnostic)
+
 - **Purpose**: Core build functionality
-- **Examples**: make-adopt-build-farm.sh, sign scripts, test runners
-- **Already portable** - no changes needed
+- **Examples**: `make-adopt-build-farm.sh`, signing tools, test runners
+- No changes needed — already portable
 
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 1: CI Orchestration (CI-Specific or Portable)        │
-│ ┌─────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│ │ Jenkinsfile │  │ .gitlab-ci   │  │ GitHub       │       │
-│ │ (Groovy)    │  │ .yml         │  │ Actions YAML │       │
-│ │             │  │              │  │              │       │
-│ │ OR          │  │ OR           │  │ OR           │       │
-│ │ Shell/Python│  │ Shell/Python │  │ Shell/Python │       │
-│ └──────┬──────┘  └──────┬───────┘  └──────┬───────┘       │
-└────────┼─────────────────┼──────────────────┼──────────────┘
-         │                 │                  │
-         │ All call same   │ All call same    │ All call same
-         │ bash scripts    │ bash scripts     │ bash scripts
-         ▼                 ▼                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 2: Stage Scripts (PLATFORM-AGNOSTIC BASH)            │
-│ ┌──────────────────────────────────────────────────────┐   │
-│ │ scripts/stages/ (Portable Bash - Same Everywhere)   │   │
-│ │ ├── 02-build.sh          ✓ Linux                    │   │
-│ │ ├── 03-internal-sign.sh  ✓ macOS                    │   │
-│ │ ├── 06-sign.sh           ✓ Windows/MSYS2            │   │
-│ │ ├── 07-installer.sh      ✓ Any CI Platform          │   │
-│ │ └── 13-smoke-tests.sh    ✓ Local Development        │   │
-│ └──────────────────────────────────────────────────────┘   │
-└────────┬────────────────────────────────────────────────────┘
-         │ Calls existing
-         │ build tools
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Layer 3: Build Tools (Already CI-Agnostic)                 │
-│ ┌──────────────────────────────────────────────────────┐   │
-│ │ - make-adopt-build-farm.sh                           │   │
-│ │ - sign-artifacts.sh                                  │   │
-│ │ - build-installers.sh                                │   │
-│ │ - run-tests.sh                                       │   │
-│ └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 1: CI Orchestration                                    │
+│                                                              │
+│  Jenkins                          Local                      │
+│  ┌─────────────────────────────┐  ┌──────────────────────┐  │
+│  │ Jenkinsfile.declarative     │  │ run-pipeline.py      │  │
+│  │ + ci/jenkins/lib/           │  │ + workspace_manager  │  │
+│  │   PipelineHelper.groovy     │  └──────────────────────┘  │
+│  │   ConfigHelper.groovy       │                            │
+│  │   StageScriptRunner.groovy  │  Future: GitLab, GHA, ...  │
+│  │   BuildUidHelper.groovy     │                            │
+│  └─────────────────────────────┘                            │
+└──────────────────┬───────────────────────────────────────────┘
+                   │ calls (via StageScriptRunner / subprocess)
+                   │ checks vendor-scripts/ first, then default
+                   ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 2: Stage Scripts (CI-Agnostic Bash)                   │
+│                                                              │
+│  config-repo/vendor-scripts/   scripts/stages/              │
+│  ├── 02-build.sh  (optional)   ├── 02-build.sh  (default)   │
+│  ├── 09-gpg-sign.sh            ├── 03-internal-sign.sh      │
+│  └── ...                       ├── 06-sign.sh               │
+│                                ├── 07-installer.sh           │
+│  Vendor overrides take         ├── 09-gpg-sign.sh           │
+│  priority over defaults        ├── 13-smoke-tests.sh        │
+│                                ├── 14-aqa-tests.sh          │
+│                                ├── 20-reproducible-compare  │
+│                                └── ...                      │
+│                                                              │
+│  scripts/lib/  (shared utilities)                           │
+│  ├── logging-utils.sh                                       │
+│  ├── config-utils.sh                                        │
+│  └── artifact-utils.sh                                      │
+└──────────────────┬───────────────────────────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Layer 3: Build Tools (Already CI-Agnostic)                  │
+│  make-adopt-build-farm.sh, signing tools, test runners ...   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Standard Interface Contract
 
-### Input Contract
-Each stage script expects:
-1. **Configuration file**: `pipeline-config.json` in current directory
-2. **Input artifacts**: In standard locations (e.g., `workspace/target/`)
-3. **Environment variables**: Standard set defined below
+Every stage script communicates with the orchestration layer through:
 
-### Output Contract
-Each stage script produces:
-1. **Exit code**: 0 = success, non-zero = failure
-2. **Output artifacts**: In standard locations
-3. **Metadata file**: `stage-metadata.json` with stage results
-4. **Logs**: Written to stdout/stderr
+### Inputs
 
-### Standard Environment Variables
+| Channel | Description |
+|---|---|
+| `CONFIG_FILE` | Path to `pipeline-config.json` (generated by Initialize stage) |
+| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages (set by orchestration) |
+| `TARGET_DIR` | Directory where this stage writes its output artifacts (set by orchestration) |
+| `WORKSPACE` | Stage working directory |
+| `BUILD_NUMBER` | Build identifier (optional, defaults to `local`) |
 
-```bash
-# Build identification
-BUILD_NUMBER=123
-BUILD_TAG=jenkins-build-123
-JOB_NAME=jdk21u-linux-x64-temurin
+### Outputs
 
-# Workspace paths
-WORKSPACE=/path/to/workspace
-ARTIFACT_DIR=${WORKSPACE}/artifacts
-INPUT_DIR=${WORKSPACE}/inputs
-OUTPUT_DIR=${WORKSPACE}/outputs
-
-# Configuration
-CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-```
+| Channel | Description |
+|---|---|
+| Exit code 0 | Success |
+| Exit code non-zero | Failure |
+| Files in `${TARGET_DIR}` | Artifacts archived by the orchestration layer |
+| `stage-metadata.json` | Stage execution metadata (optional) |
+| stdout / stderr | Logs captured by the CI system |
 
 ## Example: Build Stage
 
-### Jenkins Implementation (Layer 1)
+### Jenkins (Layer 1) — actual current pattern
+
 ```groovy
 stage('Build') {
     agent { label getNodeLabel() }
     steps {
         script {
-            // Retrieve configuration
-            copyArtifacts(filter: 'pipeline-config.json')
+            ensureLibsLoaded()
+            pipelineHelper.executeStageWithTracking('Build') {
+                // cleanWs, checkout scm, config-repo clone, copyArtifacts
+                def config = pipelineHelper.initializeStage('Build', ['Initialize'])
 
-            // Set up environment
-            env.WORKSPACE = pwd()
-            env.CONFIG_FILE = "${env.WORKSPACE}/pipeline-config.json"
+                env.TARGET_DIR = "${WORKSPACE}/build_output"
 
-            // Execute CI-agnostic script
-            sh './scripts/stages/02-build.sh'
+                // StageScriptRunner: tries config-repo/vendor-scripts/02-build.sh first,
+                // then scripts/stages/02-build.sh
+                def exitCode = stageRunner.run('02-build', config)
+                if (exitCode != 0) { error("Build failed with exit code: ${exitCode}") }
 
-            // Archive outputs (CI-specific)
-            archiveArtifacts artifacts: 'outputs/**/*,stage-metadata.json'
+                dir(env.TARGET_DIR) {
+                    archiveArtifacts artifacts: '**/*', fingerprint: true
+                }
+                pipelineHelper.finalizeStage('Build')
+            }
         }
     }
 }
 ```
 
-### GitLab CI Implementation (Layer 1)
-```yaml
-build:
-  stage: build
-  script:
-    # Set up environment
-    - export WORKSPACE=$CI_PROJECT_DIR
-    - export CONFIG_FILE=$WORKSPACE/pipeline-config.json
+### Shell Script (Layer 2) — actual current pattern
 
-    # Execute CI-agnostic script
-    - ./scripts/stages/02-build.sh
-
-  artifacts:
-    paths:
-      - outputs/
-      - stage-metadata.json
-```
-
-### GitHub Actions Implementation (Layer 1)
-```yaml
-- name: Build
-  env:
-    WORKSPACE: ${{ github.workspace }}
-    CONFIG_FILE: ${{ github.workspace }}/pipeline-config.json
-  run: |
-    ./scripts/stages/02-build.sh
-
-- name: Archive artifacts
-  uses: actions/upload-artifact@v3
-  with:
-    name: build-outputs
-    path: |
-      outputs/
-      stage-metadata.json
-```
-
-### Shell Script Implementation (Layer 2 - CI-Agnostic)
 ```bash
 #!/bin/bash
 # scripts/stages/02-build.sh
-# CI-agnostic build stage implementation
-
 set -euo pipefail
 
-echo "=== Build Stage ==="
-
-# Load configuration
-if [[ ! -f "${CONFIG_FILE}" ]]; then
-    echo "ERROR: Configuration file not found: ${CONFIG_FILE}"
-    exit 1
-fi
-
-# Parse configuration using jq
-JAVA_TO_BUILD=$(jq -r '.buildConfig.JAVA_TO_BUILD' "${CONFIG_FILE}")
-TARGET_OS=$(jq -r '.buildConfig.TARGET_OS' "${CONFIG_FILE}")
-ARCHITECTURE=$(jq -r '.buildConfig.ARCHITECTURE' "${CONFIG_FILE}")
-VARIANT=$(jq -r '.buildConfig.VARIANT' "${CONFIG_FILE}")
-
-echo "Building: ${JAVA_TO_BUILD} ${ARCHITECTURE} ${TARGET_OS} ${VARIANT}"
-
-# Create output directory
-mkdir -p "${OUTPUT_DIR}"
-
-# Execute build (calls existing build tools)
-bash ./make-adopt-build-farm.sh
-
-# Copy outputs to standard location
-cp -r workspace/target/* "${OUTPUT_DIR}/"
-
-# Create stage metadata
-cat > stage-metadata.json <<EOF
-{
-  "stage": "build",
-  "status": "success",
-  "timestamp": $(date +%s),
-  "version": "$(cat workspace/target/metadata/version.txt)",
-  "artifacts": [
-    "$(ls ${OUTPUT_DIR}/*.tar.gz | xargs basename)"
-  ]
-}
-EOF
-
-echo "=== Build Complete ==="
-exit 0
-```
-
-## Directory Structure
-
-### ci-adoptium-pipelines Repository (Pipeline Code)
-```
-ci-adoptium-pipelines/
-├── ci/                                          # CI-specific orchestration
-│   ├── jenkins/
-│   │   ├── Jenkinsfile.declarative             # Jenkins declarative pipeline
-│   │   ├── TEST_BUILD_UID.Jenkinsfile          # Test build UID pipeline
-│   │   └── README.md
-│   ├── local/
-│   │   ├── run-pipeline.py                     # Local pipeline runner
-│   │   ├── workspace_manager.py                # Workspace management module
-│   │   └── README.md
-│   └── README.md
-├── scripts/                                     # CI-agnostic stage scripts
-│   ├── stages/
-│   │   ├── 01-initialize.sh                    # Generate configuration
-│   │   ├── 02-build.sh                         # Build OpenJDK
-│   │   ├── 02-build.groovy                     # (Legacy Groovy version)
-│   │   ├── 03-internal-sign.groovy             # (Legacy Groovy version)
-│   │   ├── 06-sign.sh                          # Sign artifacts
-│   │   ├── 07-installer.sh                     # Build installers
-│   │   ├── 13-smoke-tests.sh                   # Run smoke tests
-│   │   ├── 13-smoke-tests.groovy               # (Legacy Groovy version)
-│   │   └── 20-reproducible-compare.sh          # Reproducible build comparison
-│   └── lib/                                     # Shared utilities
-│       ├── artifact-utils.sh                    # Artifact management
-│       ├── config-utils.sh                      # Configuration utilities
-│       ├── load-json-config.py                  # JSON config loader
-│       ├── logging-utils.sh                     # Logging utilities
-│       └── workspace-cleanup.sh                 # Workspace cleanup
-├── docs/                                        # Documentation
-│   ├── CI_AGNOSTIC_ARCHITECTURE.md             # This file
-│   ├── JENKINS_CLEANUP_REFACTORING.md
-│   ├── LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md
-│   ├── RESTARTABILITY_GUIDE.md
-│   └── (other documentation files)
-├── tools/                                       # Helper tools
-│   └── convert-groovy-config-to-json.sh
-├── CONTRIBUTING.md
-└── README.md
-```
-
-### ci-temurin-config Repository (Vendor Configurations - Separate Repo)
-```
-ci-temurin-config/
-├── configurations/                              # JSON configuration files
-│   ├── jdk8u_pipeline_config.json
-│   ├── jdk11u_pipeline_config.json
-│   ├── jdk17u_pipeline_config.json
-│   ├── jdk21u_pipeline_config.json
-│   ├── jdk22u_pipeline_config.json
-│   ├── jdk23u_pipeline_config.json
-│   └── jdk_pipeline_config.json
-├── .gitignore
-└── README.md
-```
-
-**Note**: The configuration repository is cloned at runtime by the pipeline. This separation allows:
-- Pipeline code (ci-adoptium-pipelines) to be vendor-agnostic
-- Vendor-specific configurations (ci-temurin-config) to be maintained separately
-- Different vendors to maintain their own configuration repositories
-
-## Shell Script Template
-
-```bash
-#!/bin/bash
-# scripts/stages/XX-stage-name.sh
-# CI-agnostic implementation of [Stage Name]
-
-set -euo pipefail
-
-# Source shared utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/logging-utils.sh"
 source "${SCRIPT_DIR}/../lib/config-utils.sh"
 source "${SCRIPT_DIR}/../lib/artifact-utils.sh"
 
-# Stage name for logging
-STAGE_NAME="Stage Name"
+STAGE_NAME="build"
+BUILD_NUMBER="${BUILD_NUMBER:-local}"
 
-log_info "=== ${STAGE_NAME} Stage ==="
-
-# Validate environment
-validate_environment() {
-    require_env "WORKSPACE"
-    require_env "CONFIG_FILE"
-    require_file "${CONFIG_FILE}"
-}
-
-# Main stage logic
 main() {
-    validate_environment
+    log_section "${STAGE_NAME} Stage - Start"
+    validate_standard_environment
 
-    # Load configuration
-    local config=$(load_config "${CONFIG_FILE}")
+    local config
+    config="$(load_config "${CONFIG_FILE}")"
+    local java_to_build variant target_os architecture build_args
+    java_to_build="$(get_config_value "${config}" ".buildConfig.JAVA_TO_BUILD")"
+    variant="$(get_config_value       "${config}" ".buildConfig.VARIANT")"
+    target_os="$(get_config_value     "${config}" ".buildConfig.TARGET_OS")"
+    architecture="$(get_config_value  "${config}" ".buildConfig.ARCHITECTURE")"
+    build_args="$(get_config_value    "${config}" ".buildConfig.BUILD_ARGS")"
 
-    # Get required values
-    local java_version=$(get_config_value "${config}" ".buildConfig.JAVA_TO_BUILD")
+    log_info "Building: ${java_to_build} ${variant} ${target_os}-${architecture}"
 
-    log_info "Processing ${java_version}"
+    prepare_output_dir "${TARGET_DIR}"
 
-    # Create output directory
-    mkdir -p "${OUTPUT_DIR:-${WORKSPACE}/outputs}"
+    # Clone temurin-build and call make-adopt-build-farm.sh
+    # ... (actual build logic)
 
-    # Do the actual work
-    perform_stage_work
-
-    # Create stage metadata
-    create_stage_metadata "success"
-
-    log_info "=== ${STAGE_NAME} Complete ==="
+    create_stage_metadata "${STAGE_NAME}" "SUCCESS" "${TARGET_DIR}"
+    log_section "${STAGE_NAME} Stage - Complete"
 }
 
-# Execute main function
 main "$@"
-exit $?
 ```
 
-## Shared Utilities
+## Directory Structure
+
+### ci-adoptium-pipelines (Pipeline Code)
+
+```
+ci-adoptium-pipelines/
+├── ci/
+│   ├── jenkins/
+│   │   ├── Jenkinsfile.declarative         # Platform build pipeline
+│   │   ├── Jenkinsfile.launch              # Multi-platform launch pipeline
+│   │   ├── lib/
+│   │   │   ├── BuildUidHelper.groovy       # BUILD_UID tracking & stage results
+│   │   │   ├── ConfigHelper.groovy         # pipeline-config.json generation
+│   │   │   ├── PipelineHelper.groovy       # Stage lifecycle
+│   │   │   └── StageScriptRunner.groovy    # Vendor-override script resolution
+│   │   └── job-dsl/
+│   │       ├── openjdk_build_pipeline.groovy
+│   │       └── seed/
+│   │           └── seed_job_consolidated.groovy
+│   └── local/
+│       ├── run-pipeline.py
+│       ├── stage_resolver.py
+│       └── workspace_manager.py
+├── scripts/
+│   ├── stages/
+│   │   ├── 02-build.sh
+│   │   ├── 03-internal-sign.sh
+│   │   ├── 04-assemble.sh
+│   │   ├── 06-sign.sh
+│   │   ├── 07-installer.sh
+│   │   ├── 08-sign-installer.sh
+│   │   ├── 09-gpg-sign.sh
+│   │   ├── 10-sbom-sign.sh
+│   │   ├── 11-verify-signing.sh
+│   │   ├── 12-validate-sbom.sh
+│   │   ├── 13-smoke-tests.sh
+│   │   ├── 14-aqa-tests.sh
+│   │   ├── 15-tck-tests.sh
+│   │   ├── 16-publish.sh
+│   │   └── 20-reproducible-compare.sh
+│   └── lib/
+│       ├── logging-utils.sh
+│       ├── config-utils.sh
+│       ├── artifact-utils.sh
+│       ├── load-json-config.py             # Generates pipeline-config.json
+│       └── load-adoptium-pipeline-config-json.py
+├── tests/
+│   ├── test_determine_filename.sh
+│   └── test_release_type_validation.sh
+├── tools/
+│   ├── convert-groovy-to-json.py
+│   ├── convert-all-legacy-groovy-configs.py
+│   └── convert-legacy-configs-to-new-architecture.py
+└── docs/
+```
+
+### ci-temurin-config (Vendor Configuration — Separate Repo)
+
+```
+ci-temurin-config/
+├── adoptium_pipeline_config.json           # Pipeline defaults (repo URLs, branches, variant)
+├── jenkins_job_config.json                 # Job DSL settings (log rotation, default params)
+├── configurations/
+│   ├── jdk8u_pipeline_config.json          # Per-version platform build matrix
+│   ├── jdk11u_pipeline_config.json
+│   ├── jdk17u_pipeline_config.json
+│   ├── jdk21u_pipeline_config.json
+│   └── ...
+└── vendor-scripts/                         # Optional: overrides for default stage scripts
+    ├── 02-build.sh                         # Replaces scripts/stages/02-build.sh
+    ├── 09-gpg-sign.sh                      # Replaces scripts/stages/09-gpg-sign.sh
+    └── ...
+```
+
+**Key separation**: pipeline *code* (ci-adoptium-pipelines) is vendor-agnostic. Vendor-specific configuration *and* any vendor-specific stage overrides live in the config repo, cloned at runtime.
+
+## Shared Utilities (`scripts/lib/`)
 
 ### logging-utils.sh
+
+Consistent logging functions used by all stage scripts:
+
 ```bash
-#!/bin/bash
-# Logging utilities
-
-log_info() {
-    echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') - $*"
-}
-
-log_error() {
-    echo "[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
-}
-
-log_warn() {
-    echo "[WARN] $(date '+%Y-%m-%d %H:%M:%S') - $*"
-}
+log_info()    # [INFO]  timestamped message to stdout
+log_error()   # [ERROR] timestamped message to stderr
+log_warn()    # [WARN]  timestamped message to stdout
+log_section() # section header divider
 ```
 
 ### config-utils.sh
+
+Configuration reading and environment validation:
+
 ```bash
-#!/bin/bash
-# Configuration utilities
-
-require_env() {
-    local var_name=$1
-    if [[ -z "${!var_name:-}" ]]; then
-        log_error "Required environment variable not set: ${var_name}"
-        exit 1
-    fi
-}
-
-require_file() {
-    local file_path=$1
-    if [[ ! -f "${file_path}" ]]; then
-        log_error "Required file not found: ${file_path}"
-        exit 1
-    fi
-}
-
-load_config() {
-    local config_file=$1
-    cat "${config_file}"
-}
-
-get_config_value() {
-    local config=$1
-    local json_path=$2
-    echo "${config}" | jq -r "${json_path}"
-}
+validate_standard_environment()  # validates WORKSPACE, CONFIG_FILE, TARGET_DIR
+require_env()                     # fails if env var not set
+require_file()                    # fails if file doesn't exist
+require_dir()                     # fails if directory doesn't exist
+load_config()                     # reads pipeline-config.json as string
+get_config_value()                # extracts value with jq
+get_config_bool()                 # extracts boolean with jq
+prepare_output_dir()              # mkdir -p TARGET_DIR
 ```
 
 ### artifact-utils.sh
+
+Artifact management helpers:
+
 ```bash
-#!/bin/bash
-# Artifact management utilities
-
-create_stage_metadata() {
-    local status=$1
-    local metadata_file="${WORKSPACE}/stage-metadata.json"
-
-    cat > "${metadata_file}" <<EOF
-{
-  "stage": "${STAGE_NAME}",
-  "status": "${status}",
-  "timestamp": $(date +%s),
-  "build_number": "${BUILD_NUMBER:-unknown}",
-  "workspace": "${WORKSPACE}"
-}
-EOF
-
-    log_info "Created stage metadata: ${metadata_file}"
-}
-
-copy_artifacts() {
-    local source=$1
-    local dest=$2
-
-    log_info "Copying artifacts from ${source} to ${dest}"
-    mkdir -p "${dest}"
-    cp -r "${source}"/* "${dest}/"
-}
+create_stage_metadata()  # writes stage-metadata.json to TARGET_DIR
+copy_artifacts()         # copies files between directories
+verify_artifact()        # asserts an artifact exists
+list_artifacts()         # lists all artifacts in a directory
+create_checksums()       # generates SHA256 checksums
+verify_checksums()       # verifies checksums
 ```
 
 ## Benefits of This Architecture
 
-### 1. **CI Portability**
-- Shell scripts work on any CI system
-- Only orchestration layer needs rewriting for new CI
-- Core logic remains unchanged
+### 1. CI Portability
+Shell scripts run on any CI system. Only the orchestration layer (Layer 1) needs to change when moving to a new CI platform. Stage scripts (Layer 2) remain unchanged.
 
-### 2. **Local Testing**
-- Can run stages locally without CI system
-- Easier debugging and development
-- Faster iteration
+### 2. Local Testing
+Any stage script can be run directly on a developer machine by setting the required environment variables. No Jenkins required.
 
-### 3. **Maintainability**
-- Clear separation of concerns
-- Shell scripts are simpler than Groovy
-- Standard Unix tools (jq, bash)
+### 3. Vendor Customisation Without Forking
+Vendors place override scripts in `vendor-scripts/` in their config repo. `StageScriptRunner` picks these up automatically. The pipeline code repository needs no modification.
 
-### 4. **Consistency**
-- Same scripts run in any CI
-- Reduces CI-specific bugs
-- Easier to validate behavior
+### 4. Maintainability
+Clear separation of concerns. Shell scripts are simpler than Groovy. Standard Unix tools (`jq`, `bash`). Each stage script is focused on a single task.
 
-### 5. **Future-Proof**
-- Not locked into Jenkins
-- Can evaluate other CI systems
-- Migration path is clear
-
-## Migration Strategy
-
-### Phase 1: Create Shell Scripts
-1. Convert existing Groovy stage scripts to shell scripts
-2. Add shared utility libraries
-3. Test locally
-
-### Phase 2: Update Jenkins Pipeline
-1. Modify Jenkinsfile to call shell scripts
-2. Keep artifact management in Jenkins
-3. Test in parallel with old pipeline
-
-### Phase 3: Add Alternative CI
-1. Create GitLab CI or GitHub Actions config
-2. Use same shell scripts
-3. Validate outputs match Jenkins
-
-### Phase 4: Deprecate Old Pipeline
-1. Switch all builds to new pipeline
-2. Archive old scripted pipeline
-3. Document new architecture
-
-## Testing Strategy
-
-### Local Testing
-```bash
-# Set up environment
-export WORKSPACE=/tmp/test-build
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export BUILD_NUMBER=test-123
-
-# Create test configuration
-cat > ${CONFIG_FILE} <<EOF
-{
-  "buildConfig": {
-    "JAVA_TO_BUILD": "jdk21u",
-    "TARGET_OS": "linux",
-    "ARCHITECTURE": "x64",
-    "VARIANT": "temurin"
-  }
-}
-EOF
-
-# Run stage script
-./scripts/stages/02-build.sh
-
-# Verify outputs
-ls -la ${WORKSPACE}/outputs/
-cat ${WORKSPACE}/stage-metadata.json
-```
-
-### CI Testing
-- Run in Jenkins with new architecture
-- Run in GitLab CI (if available)
-- Compare outputs and timing
-- Validate artifact integrity
-
-## Implementation Checklist
-
-- [ ] Create shared utility scripts (logging, config, artifacts)
-- [ ] Convert build stage to shell script
-- [ ] Convert signing stages to shell scripts
-- [ ] Convert test stages to shell scripts
-- [ ] Update Jenkins pipeline to call shell scripts
-- [ ] Test locally
-- [ ] Test in Jenkins
-- [ ] Create GitLab CI example
-- [ ] Create GitHub Actions example
-- [ ] Document migration guide
-- [ ] Update team on new architecture
+### 5. Consistency
+The same script runs in Jenkins, locally, and in any future CI system. CI-specific bugs are minimised.
 
 ## Summary
 
-**Key Principle**: Separate CI orchestration from build logic
+| Layer | What | Where | CI-Specific? |
+|---|---|---|---|
+| 1 | Orchestration | `ci/jenkins/`, `ci/local/` | Yes — per platform |
+| 2 | Stage logic | `scripts/stages/`, `config-repo/vendor-scripts/` | No — portable bash |
+| 3 | Build tools | `make-adopt-build-farm.sh`, signing tools, etc. | No — already portable |
 
-- **CI Layer**: Manages stages, artifacts, conditions (CI-specific)
-- **Script Layer**: Does the actual work (CI-agnostic shell scripts)
-- **Tool Layer**: Existing build tools (already portable)
-
-This architecture ensures the OpenJDK build pipeline can run on any CI/CD system with minimal changes.
+The architecture ensures OpenJDK builds can be driven from any CI system (or locally) without changing the stage scripts that contain the actual build logic.
