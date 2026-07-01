@@ -123,10 +123,11 @@ After all stages complete:
 
 ### `GROUP_UID`
 
-- **Format**: `group-<yyyyMMdd-HHmmss>-<uuid8>` (e.g. `group-20260617-143022-f1e2d3c4`)
+- **Format**: `group-<yyyyMMdd-HHmmss>-<uuid8>` (e.g. `group-20260617-143022-f1e2d3c4`) — or any custom string when set explicitly
 - Links all platform builds triggered by the same launch job run
 - Resolution priority: existing `env.GROUP_UID` → `params.GROUP_UID` → auto-generate
 - The launch pipeline (`Jenkinsfile.launch`) generates `GROUP_UID` and passes it as a job parameter to every platform build job it triggers
+- **Custom value**: supply a human-readable string via the `GROUP_UID` parameter on the launch job or directly on a platform build job (e.g. `"April 2026 CPU jdk21u release"`). Any non-empty value is used as-is and propagated to all platform builds in that run.
 
 ### `BUILD_STAGE_RESULTS`
 
