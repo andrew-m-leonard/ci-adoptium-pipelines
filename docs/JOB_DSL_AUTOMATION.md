@@ -1,12 +1,12 @@
 # Job DSL Automation
 
-This document describes how to automate Jenkins job creation using Job DSL scripts that read configuration from a vendor-specific configuration repository.
+This document describes how Jenkins pipeline jobs are created and updated using Job DSL scripts that read configuration from a vendor-specific configuration repository.
 
 ## Overview
 
 All Jenkins pipeline jobs are defined as code using Job DSL scripts. A seed job reads these scripts and creates/updates all pipeline jobs automatically. This ensures jobs are reproducible and version-controlled.
 
-**Key Feature**: The configuration repository URL and branch are **mandatory parameters** - there are no defaults. This ensures each vendor explicitly specifies their configuration source.
+**Key Feature**: The configuration repository URL and branch are **mandatory parameters** — there are no defaults. This ensures each vendor explicitly specifies their configuration source.
 
 ## Prerequisites
 
@@ -23,22 +23,27 @@ Your Jenkins instance must have:
 ## Architecture
 
 ```
-seed-job (Freestyle)
-  → seed_job_consolidated.groovy
-       reads jenkins_job_config.json from config repo
-       creates per-JDK launch jobs and initial folder structure
-       ├─ /openjdk-builds/jdk21/jdk21-launch-build-pipelines  (Jenkinsfile.launch)
-       ├─ /openjdk-builds/jdk17/jdk17-launch-build-pipelines
-       └─ ...
+openjdk-build-seed-job (Freestyle, self-updating)
+  → ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy
+       reads adoptium_pipeline_config.json from config repo  (active JDK versions, repo URLs)
+       reads jenkins_job_config.json from config repo        (log rotation, default params)
+       creates Jenkins views
+       creates per-JDK launch jobs:
+         openjdk-launch-pipelines/
+           ├── 21-launch-build-pipelines   (Jenkinsfile.launch)
+           ├── 17-launch-build-pipelines
+           └── ...
 
-jdk21-launch-build-pipelines (run manually or on schedule)
-  → Jenkinsfile.launch
-       reads jdk21_pipeline_config.json from config repo
-       runs openjdk_build_pipeline.groovy via jobDsl() for each selected platform
-       creates/updates platform build jobs:
-         ├─ /openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline
-         ├─ /openjdk-builds/jdk21/jdk21-aarch64Linux-build-pipeline
-         └─ /openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline  ...
+21-launch-build-pipelines (run manually or on schedule)
+  → ci/jenkins/Jenkinsfile.launch
+       git clone config-repo
+       reads configurations/jdk21_pipeline_config.json   (available platforms)
+       if REGENERATE_JOBS=true (or build #1): calls jobDsl(openjdk_build_pipeline.groovy)
+         → creates/updates platform build jobs:
+             openjdk-builds/jdk21/
+               ├── jdk21-x64Linux-build-pipeline
+               ├── jdk21-aarch64Linux-build-pipeline
+               └── jdk21-aarch64Mac-build-pipeline  ...
        triggers all selected platform builds in parallel
 ```
 
@@ -46,17 +51,17 @@ jdk21-launch-build-pipelines (run manually or on schedule)
 
 ### Step 1: Create Seed Job
 
-1. In Jenkins, create a new **Freestyle project** named `seed-job`
+1. In Jenkins, create a new **Freestyle project** named `openjdk-build-seed-job`
 
-2. **Add Parameters** (This is required):
+2. **Add Parameters** (required):
    - Click "This project is parameterized"
    - Add **String Parameter**:
      - **Name**: `CONFIG_REPO_URL`
-     - **Default Value**: Leave empty (no default)
-     - **Description**: `URL of the configuration repository containing jenkins_job_config.json (REQUIRED)`
+     - **Default Value**: Leave empty
+     - **Description**: `URL of the configuration repository (REQUIRED)`
    - Add **String Parameter**:
      - **Name**: `CONFIG_REPO_BRANCH`
-     - **Default Value**: Leave empty (no default)
+     - **Default Value**: Leave empty
      - **Description**: `Branch of the configuration repository (REQUIRED)`
 
 3. Configure Source Code Management:
@@ -65,97 +70,99 @@ jdk21-launch-build-pipelines (run manually or on schedule)
    - **Branch**: `*/main`
 
 4. Add Build Step: **Process Job DSLs**
-   - **Look on Filesystem**: Unchecked
    - **DSL Scripts**: `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
    - **Action for removed jobs**: Delete
    - **Action for removed views**: Delete
+   - **Additional Classpath**: `ci/jenkins/job-dsl`
 
-5. (Optional) Add Build Trigger: **Poll SCM**
-   - **Schedule**: `H * * * *` (hourly)
+5. Save the job
 
-6. Save the job
+> **Note**: After the first run the seed job manages itself — it recreates `openjdk-build-seed-job` with an SCM poll trigger (`H/15 * * * *`) so it automatically re-runs when the Job DSL scripts change.
 
 ### Step 2: Run Seed Job
 
 1. Click "Build with Parameters" on the seed job
 2. **Provide required parameters**:
-   - **CONFIG_REPO_URL**: `https://github.com/adoptium/ci-temurin-config.git` (or your vendor's config repo)
-   - **CONFIG_REPO_BRANCH**: `main` (or your vendor's branch)
+   - **CONFIG_REPO_URL**: `https://github.com/adoptium/ci-temurin-config.git` (or your vendor config repo)
+   - **CONFIG_REPO_BRANCH**: `main`
 3. Click "Build"
 4. The job will:
-   - Fetch `jenkins_job_config.json` from your configuration repository
-   - Create launch jobs for all active JDK versions under `/openjdk-builds/jdk${version}/`
+   - Fetch `adoptium_pipeline_config.json` and `jenkins_job_config.json` from the config repo
+   - Create the `openjdk-launch-pipelines/` and `openjdk-builds/` folders
+   - Create one launch job per active JDK version under `openjdk-launch-pipelines/`
+   - Create two Jenkins views: **JDK Pipeline Launchers** and **JDK Build Platform Pipelines**
+   - Recreate itself (`openjdk-build-seed-job`) with the SCM poll trigger
 
 ### Step 3: Verify
 
-Check that the following jobs were created:
-- `/openjdk-builds/jdk8/jdk8-launch-build-pipelines`
-- `/openjdk-builds/jdk11/jdk11-launch-build-pipelines`
-- `/openjdk-builds/jdk17/jdk17-launch-build-pipelines`
-- `/openjdk-builds/jdk21/jdk21-launch-build-pipelines`
+Check that the following jobs were created (exact versions depend on `adoptium_pipeline_config.json`):
+- `openjdk-launch-pipelines/21-launch-build-pipelines`
+- `openjdk-launch-pipelines/17-launch-build-pipelines`
+- `openjdk-launch-pipelines/11-launch-build-pipelines`
 
 ### Step 4: Create Platform Build Jobs
 
-Run a launch job (e.g. `jdk21-launch-build-pipelines`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
-- `/openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline`
-- `/openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline`
+Run a launch job (e.g. `21-launch-build-pipelines`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
+- `openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline`
+- `openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline`
+
+Platform jobs are also automatically created on the first run of each launch job (build #1).
 
 ## Configuration
 
 ### Active JDK Versions
 
-Active versions are defined in your configuration repository's `jenkins_job_config.json` file.
-
-Example from Adoptium's configuration ([`ci-temurin-config/jenkins_job_config.json`](https://github.com/adoptium/ci-temurin-config/blob/main/jenkins_job_config.json)):
+Active versions are defined in `adoptium_pipeline_config.json` in the config repo (not `jenkins_job_config.json`):
 
 ```json
 {
   "activeJdkVersions": [
-    {
-      "version": "8",
-      "fullVersion": "jdk8u",
-      "enabled": true,
-      "lts": true,
-      "configFile": "configurations/jdk8u_pipeline_config.json"
-    },
-    ...
-  ]
+    { "version": "21u", "enabled": true },
+    { "version": "17u", "enabled": true },
+    { "version": "11u", "enabled": false }
+  ],
+  "configFilePrefix": "configurations/",
+  "configFileSuffix": "_pipeline_config.json"
 }
 ```
+
+The seed reads the enabled entries and creates one launch job per version. The config file path for each version is constructed as `configFilePrefix + version + configFileSuffix`.
 
 ### Adding/Removing Versions
 
-1. Edit `jenkins_job_config.json` in ci-temurin-config repository
-2. Set `"enabled": false` to disable a version
-3. Add new entry to enable a new version
-4. Commit and push changes
-5. Run the seed job (or wait for automatic poll)
+1. Edit `adoptium_pipeline_config.json` in the config repo
+2. Set `"enabled": false` to disable a version; add a new entry to enable one
+3. Commit and push
+4. Run the seed job (or wait for the automatic `H/15 * * * *` poll)
 
 ### Job Parameters
 
-Default parameters are also defined in `jenkins_job_config.json`:
+Default parameter values for platform build jobs come from `jenkins_job_config.json`:
 
 ```json
 {
+  "pipelineTimeoutHours": 8,
+  "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
   "jobConfiguration": {
     "defaultParameters": {
-      "CONFIG_REPO_URL": "https://github.com/adoptium/ci-temurin-config.git",
-      "CONFIG_REPO_BRANCH": "main",
-      "BUILD_VARIANT": "temurin",
-      "CLEAN_WORKSPACE_AFTER_STAGE": true,
-      "RUN_TESTS": true,
-      "SIGN_ARTIFACTS": true,
+      "RUN_TESTS": false,
+      "ENABLE_INSTALLERS": true,
+      "SIGN_ARTIFACTS": false,
       "PUBLISH_ARTIFACTS": false,
-      "RUN_REPRODUCIBLE_COMPARE": false
+      "RUN_REPRODUCIBLE_COMPARE": false,
+      "CLEAN_WORKSPACE_AFTER_STAGE": true
     },
-    "platformChoices": [
-      "linux-x64",
-      "linux-aarch64",
-      ...
-    ]
+    "logRotation": {
+      "daysToKeep": 30,
+      "numToKeep": 50,
+      "artifactDaysToKeep": 7,
+      "artifactNumToKeep": 10
+    }
   }
 }
 ```
+
+`jenkinsfilePath` controls which Jenkinsfile the platform build jobs use. `logRotation` is applied to all generated jobs.
 
 ## Job DSL Scripts
 
@@ -163,99 +170,120 @@ Default parameters are also defined in `jenkins_job_config.json`:
 
 Job DSL scripts are in [`ci/jenkins/job-dsl/`](../ci/jenkins/job-dsl/):
 
-- **`seed/seed_job_consolidated.groovy`**: Creates all launch jobs from `jenkins_job_config.json`
-- **`openjdk_build_pipeline.groovy`**: Called by the launch pipeline to create one platform build job
+- **`seed/seed_job_consolidated.groovy`** — run by the seed job; reads both config files, creates launch jobs, views, and recreates the seed job itself
+- **`seed/load_config.groovy`** — standalone config loader (used when scripts are split; the consolidated script includes equivalent logic inline)
+- **`openjdk_build_pipeline.groovy`** — called by each launch job via `jobDsl()` to create one platform build job
 
 ### How It Works
 
 **`seed_job_consolidated.groovy`**:
-1. Fetches `jenkins_job_config.json` and `adoptium_pipeline_config.json` from the config repo
-2. For each enabled JDK version: creates a `jdk${version}-launch-build-pipelines` pipeline job
-3. Configures log rotation and parameters from `jenkins_job_config.json`
+1. Validates `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters (fails immediately if empty)
+2. Fetches `adoptium_pipeline_config.json` via `raw.githubusercontent.com` — provides active JDK versions, pipeline repo URL/branch, default build args
+3. Fetches `jenkins_job_config.json` via `raw.githubusercontent.com` — provides log rotation and default parameter values
+4. For each enabled JDK version in `activeJdkVersions`: loads the per-version platform config to discover available platforms, then creates `openjdk-launch-pipelines/${version}-launch-build-pipelines` with a `PLATFORMS` choice parameter pre-populated from the config
+5. Creates the `openjdk-launches-pipelines/` and `openjdk-builds/` folders
+6. Creates the `JDK Pipeline Launchers` and `JDK Build Platform Pipelines` views
+7. Recreates `openjdk-build-seed-job` with an SCM poll trigger pointing at `ci-adoptium-pipelines`
 
-**`openjdk_build_pipeline.groovy`** (called by the launch pipeline via `jobDsl()`):
-1. Fetches `jdk${version}_pipeline_config.json` to extract `arch`, `os`, `variant` for the platform
-2. Creates `/openjdk-builds/jdk${version}/jdk${version}-${platform}-build-pipeline`
-3. Configures parameters (fixed: `JDK_VERSION`, `TARGET_OS`, `ARCHITECTURE`; variable: all others from `jenkins_job_config.json`)
-4. Sets `disableResume()`, `disableConcurrentBuilds()`, `CopyArtifactPermissionProperty`
+**`openjdk_build_pipeline.groovy`** (called by each launch job via `jobDsl()`):
+1. Receives `JDK_VERSION`, `PLATFORM`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH` as binding variables
+2. Fetches both config files from `raw.githubusercontent.com`
+3. Fetches `configurations/jdk${JDK_VERSION}_pipeline_config.json` and extracts `arch`, `os`, and `variant` for the requested platform key
+4. Creates `openjdk-builds/jdk${JDK_VERSION}/jdk${JDK_VERSION}-${PLATFORM}-build-pipeline` with:
+   - Fixed params: `JDK_VERSION`, `TARGET_OS`, `ARCHITECTURE`
+   - Variable params sourced from `jenkins_job_config.json` defaults: `RUN_TESTS`, `ENABLE_INSTALLERS`, `SIGN_ARTIFACTS`, `PUBLISH_ARTIFACTS`, `RUN_REPRODUCIBLE_COMPARE`, `CLEAN_WORKSPACE_AFTER_STAGE`, `ENABLE_TCK`
+   - Other params: `VARIANT`, `SCM_REF`, `BUILD_REF`, `AQA_REF`, `RELEASE_TYPE`, `GROUP_UID`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH`
+   - `scriptPath` read from `jenkins_job_config.json`'s `jenkinsfilePath` field
+   - `disableResume()`, `disableConcurrentBuilds()`, `CopyArtifactPermissionProperty('*')`
 
 ### Error Handling
 
-If `jenkins_job_config.json` cannot be fetched, the seed job will **fail** with a clear error message:
+Both config files are required. If either cannot be fetched, the seed job fails with a clear error identifying the URL and error:
 
 ```
-ERROR: Failed to load Jenkins job configuration from ci-temurin-config repository!
+ERROR: Failed to load adoptium_pipeline_config.json from configuration repository!
 
-Configuration URL: https://raw.githubusercontent.com/adoptium/ci-temurin-config/main/jenkins_job_config.json
+Configuration Repository: https://github.com/adoptium/ci-temurin-config.git
+Branch: main
+Configuration URL: https://raw.githubusercontent.com/adoptium/ci-temurin-config/main/adoptium_pipeline_config.json
 Error: <error details>
-
-The jenkins_job_config.json file must exist in the ci-temurin-config repository.
 ```
 
-This ensures jobs are never created with incorrect or missing configuration.
+A separate error is thrown if `jenkins_job_config.json` is unreachable.
+
+> **Note**: The raw.githubusercontent.com URL derivation only works for `https://github.com/` URLs. Private repos served from GitHub Enterprise or other hosting require credentials or an alternative fetch approach.
 
 ## Maintenance
 
 ### Updating Job Configuration
 
-To change job parameters, platforms, or log rotation:
+To change default parameters, log rotation, or the Jenkinsfile path:
 
-1. Edit `jenkins_job_config.json` in ci-temurin-config
+1. Edit `jenkins_job_config.json` in the config repo
 2. Commit and push
-3. Run seed job
-4. All jobs will be updated with new configuration
+3. Run the seed job, then run each launch job with `REGENERATE_JOBS=true`
+
+### Updating Active JDK Versions
+
+To add or remove a version:
+
+1. Edit `adoptium_pipeline_config.json` in the config repo
+2. Commit and push
+3. Run the seed job — launch jobs will be created/removed accordingly
 
 ### Updating Pipeline Code
 
-To change the pipeline itself:
+To change the pipeline itself (`Jenkinsfile.declarative`):
 
-1. Edit `ci/jenkins/Jenkinsfile.declarative` in ci-adoptium-pipelines
+1. Edit in `ci-adoptium-pipelines`
 2. Commit and push
-3. No seed job run needed - jobs will use new code on next build
+3. No seed job run needed — platform build jobs pick up the new code on their next run
 
 ### Updating Job DSL Scripts
 
 To change how jobs are created:
 
-1. Edit scripts in `ci/jenkins/job-dsl/` in ci-adoptium-pipelines
+1. Edit scripts in `ci/jenkins/job-dsl/` in `ci-adoptium-pipelines`
 2. Commit and push
-3. Run seed job
-4. Jobs will be recreated with new DSL logic
+3. The seed job's SCM poll will detect the change and re-run automatically within ~15 minutes (or run it manually)
 
 ## Troubleshooting
 
-### Seed Job Fails with "Configuration Not Found"
+### Seed Job Fails with "CONFIG_REPO_URL not provided"
 
-**Cause**: `jenkins_job_config.json` doesn't exist in ci-temurin-config
+**Cause**: Seed job run without parameters.
 
-**Solution**: Ensure the file exists at the repository root
+**Solution**: Use "Build with Parameters" and supply both `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH`.
+
+### Seed Job Fails with "Failed to load config"
+
+**Cause**: Config file doesn't exist in the config repo, the repo URL is wrong, or the branch doesn't exist.
+
+**Solution**: Verify the file exists at the repo root, check the URL format (`https://github.com/<owner>/<repo>.git`), and confirm the branch name.
 
 ### Seed Job Fails with "Script Security"
 
-**Cause**: Jenkins Script Security blocking Job DSL operations
+**Cause**: Jenkins Script Security blocking Job DSL operations.
 
-**Solution**: In Jenkins, go to Manage Jenkins → In-process Script Approval and approve the required signatures
+**Solution**: Go to **Manage Jenkins → In-process Script Approval** and approve the required signatures.
 
-### Jobs Not Created
+### Launch Job Doesn't Show All Platforms
 
-**Cause**: Version has `"enabled": false` in configuration
+**Cause**: The `PLATFORMS` choice parameter is populated at seed-job time from the per-version config. If platforms were added to the config after the seed last ran, the choice list will be stale.
 
-**Solution**: Set `"enabled": true` in `jenkins_job_config.json`
+**Solution**: Re-run the seed job to regenerate the launch job with an updated platform list.
+
+### Platform Jobs Not Created / Out of Date
+
+**Cause**: `REGENERATE_JOBS` was not set, or this is not build #1.
+
+**Solution**: Run the launch job with `REGENERATE_JOBS=true`.
 
 ### Jobs Not Updated After Config Change
 
-**Cause**: Seed job hasn't run since config change
+**Cause**: Seed job and/or launch job have not re-run since the config change.
 
-**Solution**: Manually run the seed job or wait for automatic poll
-
-## Benefits
-
-✅ **Version Controlled**: All job definitions in Git
-✅ **Reproducible**: Recreate all jobs by running seed job
-✅ **Centralized Config**: Single source of truth in ci-temurin-config
-✅ **Automatic Updates**: Seed job polls for changes
-✅ **No Manual Setup**: No clicking through Jenkins UI
-✅ **Vendor Independent**: Each vendor maintains their own config repo
+**Solution**: Run the seed job (for launch job changes) or the launch job with `REGENERATE_JOBS=true` (for platform job changes).
 
 ## Related Documentation
 
