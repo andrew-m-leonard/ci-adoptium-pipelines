@@ -137,6 +137,6 @@ stage('My Stage') {
 
 ## Related Documentation
 
-- [`STAGE_IO_SPECIFICATION.md`](./STAGE_IO_SPECIFICATION.md) — per-stage input/output contracts
+- [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) — interface contract, per-stage summary, artifact flow
 - [`ARTIFACT_DIRECTORY_PATTERN.md`](./ARTIFACT_DIRECTORY_PATTERN.md) — INPUT_ARTIFACTS_DIR vs TARGET_DIR
 - [`ci/jenkins/lib/StageScriptRunner.groovy`](../ci/jenkins/lib/StageScriptRunner.groovy) — vendor override resolution
