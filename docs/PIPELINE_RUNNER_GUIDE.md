@@ -325,6 +325,6 @@ chmod +x scripts/stages/*.sh
 
 ## See Also
 
-- [`CONFIGURATION_GUIDE.md`](CONFIGURATION_GUIDE.md) — JSON configuration details
+- [`CODE_CONFIG_SEPARATION.md`](CODE_CONFIG_SEPARATION.md) — JSON configuration details
 - [`CI_AGNOSTIC_ARCHITECTURE.md`](CI_AGNOSTIC_ARCHITECTURE.md) — Architecture overview
 - [`ci/local/README.md`](../ci/local/README.md) — Local runner full reference

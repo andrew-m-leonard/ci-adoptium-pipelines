@@ -119,7 +119,7 @@ Contains settings that are Jenkins-specific and only needed at job creation time
 
 ### 3. `configurations/jdkNN_pipeline_config.json` — Per-version platform build settings
 
-**Location**: `configurations/` directory of the config repo (path determined by `configFilePrefix` / `configFileSuffix` in `adoptium_pipeline_config.json`)  
+**Location**: `configurations/` directory of the config repo (path determined by `configFilePrefix` / `configFileSuffix` in `adoptium_pipeline_config.json`)
 **Consumed by**: `scripts/lib/load-json-config.py` (invoked by `ConfigHelper.groovy` on Jenkins, or `run-pipeline.py` locally)
 
 One file per JDK version. Describes every supported build platform and its platform-specific settings. The filename pattern is `<configFilePrefix><version><configFileSuffix>`, e.g. `configurations/jdk21u_pipeline_config.json`.
@@ -161,8 +161,6 @@ One file per JDK version. Describes every supported build platform and its platf
 }
 ```
 
-`buildArgs` and `configureArgs` can be either a plain string (applied to all variants) or a variant-keyed object (`{ "temurin": "...", "hotspot": "...", "default": "..." }`).
-
 **How it is loaded**:
 
 The file is located by [`scripts/lib/load-json-config.py`](../scripts/lib/load-json-config.py) which constructs the path as:
@@ -174,6 +172,66 @@ The file is located by [`scripts/lib/load-json-config.py`](../scripts/lib/load-j
 `--config-dir` defaults to `./configurations` and is set to `./config-repo/configurations` (Jenkins) or resolved from `configFilePrefix` in `adoptium_pipeline_config.json` (local runner).
 
 The script extracts the entry for the requested platform key (e.g. `aarch64Mac`), merges it with runtime parameters, and writes the output to `pipeline-config.json`.
+
+#### Platform configuration fields
+
+| Field | Type | Description |
+|---|---|---|
+| `os` | string | Operating system: `mac`, `linux`, `windows`, `aix` |
+| `arch` | string | Architecture: `aarch64`, `x64`, `x32`, `ppc64` |
+| `buildArgs` | string or object | Build arguments passed to `make-adopt-build-farm.sh` |
+| `configureArgs` | string or object | Arguments passed to OpenJDK `configure` |
+| `dockerImage` | string or object | Docker image to use for the build |
+| `dockerFile` | string or object | Custom Dockerfile path |
+| `dockerRegistry` | string | Docker registry URL |
+| `dockerCredential` | string | Jenkins credential ID for the Docker registry |
+| `dockerArgs` | string | Additional arguments passed to `docker run` |
+| `additionalNodeLabels` | string or object | Extra Jenkins node labels appended to the base label |
+| `additionalTestLabels` | string or object | Extra labels for test nodes |
+| `additionalTestParams` | object | Extra parameters forwarded to the test stage |
+| `test` | object | Test lists keyed by build type (`nightly`, `weekly`, `release`) |
+| `cleanWorkspaceAfterBuild` | boolean | Whether to clean the workspace after the build stage |
+
+Fields marked as "string or object" support **variant-specific values**: supply either a plain string (applies to all variants) or an object keyed by variant name:
+
+```json
+// Plain string — same value for all variants
+"buildArgs": "--create-jre-image --create-sbom"
+
+// Variant-specific — different value per variant; "default" is the fallback
+"buildArgs": {
+  "temurin": "--create-jre-image --create-sbom",
+  "hotspot": "--create-jre-image",
+  "default": "--create-jre-image"
+}
+```
+
+`load-json-config.py` detects which form is used, extracts the value for the active variant, and falls back to `"default"` if the variant key is absent.
+
+#### Test configuration
+
+```json
+"test": {
+  "nightly": ["sanity.openjdk", "sanity.system"],
+  "weekly":  ["sanity.openjdk", "sanity.system", "extended.system"],
+  "release": ["sanity.openjdk", "extended.openjdk", "special.functional"]
+}
+```
+
+Use `"test": "default"` to inherit the default test list without listing targets explicitly.
+
+#### Platform keys
+
+Platform keys are constructed as `{architecture}{OS}` (camel-case), e.g.:
+
+| Key | Platform |
+|---|---|
+| `aarch64Mac` | Apple Silicon Mac |
+| `x64Mac` | Intel Mac |
+| `x64Linux` | Intel/AMD Linux |
+| `aarch64Linux` | ARM Linux |
+| `x64Windows` | Intel/AMD Windows |
+| `ppc64Aix` | PowerPC AIX |
 
 ---
 
@@ -371,9 +429,36 @@ Sensitive settings belong in the config repo:
 
 ---
 
+## Troubleshooting
+
+### Configuration file not found
+
+**Error**: `Configuration file not found: configurations/jdk21u_pipeline_config.json`
+
+1. Check that `CONFIG_REPO_URL` / `CONFIG_REPO_BRANCH` point to the right repo and branch.
+2. Verify the file exists in the config repo under `configurations/`.
+3. Confirm the filename matches the pattern set by `configFilePrefix` + `<version>` + `configFileSuffix` in `adoptium_pipeline_config.json`.
+
+### Platform key not found
+
+**Error**: `Platform 'aarch64Mac' not found in configuration`
+
+1. List available keys: `jq '.buildConfigurations | keys' configurations/jdkNN_pipeline_config.json`
+2. Verify the OS and architecture match the `{arch}{OS}` key convention.
+3. Add the missing platform entry to the config file.
+
+### Variant-specific value falls back unexpectedly
+
+`load-json-config.py` logs a warning and falls back to `"default"` when the active variant key is absent from a variant-specific object. Add the missing key or set a `"default"` entry.
+
+### Mixed string/object format error
+
+Each field must consistently use either a plain string or a variant-keyed object across all platform entries. Mixing formats for the same field in different platform entries is not supported.
+
+---
+
 ## Related Documentation
 
-- [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) — per-version config file schema reference
-- [CI_AGNOSTIC_ARCHITECTURE.md](CI_AGNOSTIC_ARCHITECTURE.md) — overall architecture overview
+- [CI_AGNOSTIC_ARCHITECTURE.md](CI_AGNOSTIC_ARCHITECTURE.md) — overall architecture overview, artifact flow, per-stage summary
 - [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — job hierarchy and launch pipeline
 - [JOB_DSL_AUTOMATION.md](JOB_DSL_AUTOMATION.md) — seed job and job creation

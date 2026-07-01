@@ -10,7 +10,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 |---|---|
 | Set up Jenkins from scratch | [JOB_DSL_AUTOMATION.md](./JOB_DSL_AUTOMATION.md) |
 | Understand the overall design | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) |
-| Configure a build | [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) |
+| Configure a build | [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) |
 | Restart a failed stage | [BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md) |
 | Run the pipeline locally | [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) |
 | Add or modify a stage script | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) (Per-Stage Summary) + [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) |
@@ -23,12 +23,11 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 ## Architecture & Design
 
 - **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** — 3-layer design (Configuration / Shell Scripts / CI Orchestration), standard interface contract, per-stage summary
-- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Why pipeline code and vendor configuration live in separate repositories
 - **[UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)** — How to write a new stage script following the standard pattern
 
 ## Configuration
 
-- **[CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md)** — Full reference for `pipeline-config.json`, `adoptium_pipeline_config.json`, and `jenkins_job_config.json`
+- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Config repo layout, all config file schemas, vendor-scripts resolution, config flow through the pipeline
 
 ## Jenkins Integration
 
@@ -62,6 +61,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 These documents capture decisions, refactoring work, and intermediate designs from the original pipeline implementation. Retained for reference.
 
 - [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — Launch pipeline → build pipeline → stage script flow
+- [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) — Configuration system guide (superseded by [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md))
 - [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) — Per-stage input/output contracts (superseded by [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) Standard Interface Contract section)
 - [JENKINS_ENVIRONMENT_VARIABLES.md](./JENKINS_ENVIRONMENT_VARIABLES.md) — `CONFIG_*` and pipeline env vars (superseded by [`ci/jenkins/README.md`](../ci/jenkins/README.md) parameters table)
 - [PARAMETER_CONSOLIDATION.md](./PARAMETER_CONSOLIDATION.md) — How job parameters were consolidated

@@ -159,7 +159,7 @@ The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the
 | 16 | Publish Artifacts | `16-publish.sh` | Build | Publication confirmation |
 | 20 | Reproducible Compare | `20-reproducible-compare.sh` | Build | `comparison-report.txt`, `reprotest.diff` |
 
-Conditional stages only run when their guard condition is met (e.g. `PUBLISH_ARTIFACTS=true`, signing enabled, `REPRODUCIBLE_COMPARE_BUILD=true`). See [`CONFIGURATION_GUIDE.md`](./CONFIGURATION_GUIDE.md) for the full set of condition flags.
+Conditional stages only run when their guard condition is met (e.g. `PUBLISH_ARTIFACTS=true`, signing enabled, `REPRODUCIBLE_COMPARE_BUILD=true`). See [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md) for the full config schema.
 
 ## Example: Build Stage
 

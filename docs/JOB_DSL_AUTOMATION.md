@@ -261,4 +261,4 @@ To change how jobs are created:
 
 - [BUILD_UID Integration](BUILD_UID_INTEGRATION.md) — Pipeline restart safety
 - [ci/jenkins/README.md](../ci/jenkins/README.md) — Jenkins integration overview
-- [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) — Config repo JSON reference
+- [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) — Config repo JSON reference
