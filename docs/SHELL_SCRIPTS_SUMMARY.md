@@ -1,382 +1,245 @@
-# CI-Agnostic Shell Scripts Summary
+# Shell Scripts Reference
 
-This document provides an overview of all the CI-agnostic shell scripts that have been created to replace Jenkins Groovy stage implementations.
-
-## Overview
-
-All stage scripts follow the same pattern and can run on any CI/CD system (Jenkins, GitLab CI, GitHub Actions, etc.) or locally for testing.
-
-## Standard Interface
-
-### Required Environment Variables
-```bash
-WORKSPACE     # Root workspace directory
-CONFIG_FILE   # Path to pipeline-config.json
-BUILD_NUMBER  # Build number (optional, defaults to 'local')
-INPUT_DIR     # Directory containing input artifacts (stage-specific)
-OUTPUT_DIR    # Directory for output artifacts (stage-specific)
-```
-
-### Standard Outputs
-- Artifacts in `${OUTPUT_DIR}/`
-- `stage-metadata.json` - Stage execution metadata
-- Exit code: 0 = success, non-zero = failure
-
-## Shared Utilities
-
-### [`scripts/lib/logging-utils.sh`](scripts/lib/logging-utils.sh)
-Logging functions for consistent output:
-- `log_info()` - Information messages
-- `log_error()` - Error messages
-- `log_warn()` - Warning messages
-- `log_debug()` - Debug messages (when DEBUG=true)
-- `log_section()` - Section headers
-
-### [`scripts/lib/config-utils.sh`](scripts/lib/config-utils.sh)
-Configuration management:
-- `require_env()` - Validate environment variable exists
-- `require_file()` - Validate file exists
-- `require_dir()` - Validate directory exists
-- `load_config()` - Load JSON configuration file
-- `get_config_value()` - Extract value from JSON
-- `get_config_bool()` - Extract boolean from JSON
-- `validate_standard_environment()` - Validate all required env vars
-
-### [`scripts/lib/artifact-utils.sh`](scripts/lib/artifact-utils.sh)
-Artifact management:
-- `create_stage_metadata()` - Create stage metadata JSON
-- `copy_artifacts()` - Copy artifacts between directories
-- `verify_artifact()` - Verify artifact exists
-- `list_artifacts()` - List all artifacts in directory
-- `create_checksums()` - Create SHA256 checksums
-- `verify_checksums()` - Verify checksums
-- `prepare_output_dir()` - Prepare output directory
-
-## Stage Scripts
-
-All stage scripts listed here are implemented and present in `scripts/stages/`.
-
-### 1. Build Stage — [`scripts/stages/02-build.sh`](../scripts/stages/02-build.sh)
-
-**Purpose**: Compile the JDK
-
-**Inputs**:
-- `pipeline-config.json` - Build configuration
-
-**Outputs**:
-- `${OUTPUT_DIR}/**/*` - Built JDK artifacts (tar.gz, zip)
-- `${OUTPUT_DIR}/metadata/*` - Build metadata
-- `build-metadata.json` - Version and build information
-- `stage-metadata.json` - Stage execution metadata
-
-**Key Functions**:
-- `prepare_workspace()` - Clean workspace if requested
-- `execute_build()` - Run make-adopt-build-farm.sh
-- `extract_build_metadata()` - Extract version information
-- `organize_build_outputs()` - Copy outputs to standard location
-
-**Usage**:
-```bash
-export WORKSPACE=/path/to/workspace
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export OUTPUT_DIR=${WORKSPACE}/outputs
-export BUILD_NUMBER=123
-
-./scripts/stages/02-build.sh
-```
+Index of all files under `scripts/` — stage scripts and shared utility libraries. For the stage interface contract (environment variables, archive/restore flow) see [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md). For writing a new stage see [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md).
 
 ---
 
-### 2. Sign Artifacts Stage — [`scripts/stages/06-sign.sh`](../scripts/stages/06-sign.sh)
+## Shared Libraries (`scripts/lib/`)
 
-**Purpose**: Sign JDK artifacts (tar.gz, zip files)
+All stage scripts source these libraries at the top of their file.
 
-**Inputs**:
-- `${INPUT_DIR}/**/*.tar.gz` - JDK artifacts to sign
-- `${INPUT_DIR}/**/*.zip` - JDK artifacts to sign
-- `pipeline-config.json` - Configuration
+### [`scripts/lib/logging-utils.sh`](../scripts/lib/logging-utils.sh)
 
-**Outputs**:
-- `${OUTPUT_DIR}/signed/*` - Signed artifacts
-- `${OUTPUT_DIR}/signed/*.sig` - Signature files
-- `${OUTPUT_DIR}/checksums.txt` - Checksums
-- `stage-metadata.json` - Stage execution metadata
+Timestamped logging to stderr.
 
-**Key Functions**:
-- `find_artifacts_to_sign()` - Locate artifacts
-- `sign_artifacts()` - Sign each artifact
-- `create_signature()` - Create signature file
+| Function | Purpose |
+|---|---|
+| `log_info msg` | `[INFO]` line to stderr |
+| `log_warn msg` | `[WARN]` line to stderr |
+| `log_error msg` | `[ERROR]` line to stderr |
+| `log_debug msg` | `[DEBUG]` line — only emitted when `DEBUG=true` |
+| `log_section msg` | Separator banner to stderr |
 
-**Usage**:
-```bash
-export WORKSPACE=/path/to/workspace
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export INPUT_DIR=${WORKSPACE}/outputs
-export OUTPUT_DIR=${WORKSPACE}/signed
-export BUILD_NUMBER=123
+### [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh)
 
-./scripts/stages/06-sign.sh
-```
+Environment validation and JSON config helpers.
 
-**Note**: Currently creates placeholder signatures. In production, would call actual signing service.
+| Function | Purpose |
+|---|---|
+| `require_env VAR` | Exit 1 if `VAR` is unset or empty |
+| `require_file PATH` | Exit 1 if file does not exist |
+| `require_dir PATH` | Exit 1 if directory does not exist |
+| `load_config FILE` | `cat` the JSON file (requires `jq`) |
+| `get_config_value FILE JQ_PATH [DEFAULT]` | Extract string value via `jq`; exit 1 if absent and no default |
+| `get_config_bool FILE JQ_PATH [DEFAULT]` | Extract boolean value; returns `true`/`false` string |
+| `validate_standard_environment` | Checks `WORKSPACE` and `CONFIG_FILE` are set and file exists; sets `TARGET_DIR` default to `${WORKSPACE}/target` if not already provided |
 
----
+### [`scripts/lib/artifact-utils.sh`](../scripts/lib/artifact-utils.sh)
 
-### 3. Build Installer Stage — [`scripts/stages/07-installer.sh`](../scripts/stages/07-installer.sh)
+Artifact directory and file helpers.
 
-**Purpose**: Build platform-specific installers
+| Function | Purpose |
+|---|---|
+| `create_stage_metadata STAGE STATUS` | Writes `${WORKSPACE}/stage-metadata.json` |
+| `copy_artifacts SRC DEST` | `cp -r SRC/* DEST/` with existence checks |
+| `verify_artifact PATH` | Exit-safe check that a file exists; logs size |
+| `list_artifacts DIR` | `find DIR -type f` with `ls -lh` |
+| `create_checksums DIR` | SHA256 checksums for all files in `DIR` → `DIR/checksums.txt` |
+| `verify_checksums DIR` | Verify `DIR/checksums.txt` against contents |
+| `prepare_output_dir [DIR]` | `mkdir -p DIR`; optionally cleans if `CLEAN_OUTPUT=true` |
+| `determine_filename` | Derives the Adoptium artifact filename from config vars; exports `$FILENAME` |
 
-**Inputs**:
-- `${INPUT_DIR}/signed/*` - Signed JDK artifacts
-- `pipeline-config.json` - Configuration
+### [`scripts/lib/workspace-cleanup.sh`](../scripts/lib/workspace-cleanup.sh)
 
-**Outputs**:
-- `${OUTPUT_DIR}/installers/*.msi` - Windows installers
-- `${OUTPUT_DIR}/installers/*.pkg` - macOS installers
-- `${OUTPUT_DIR}/installers/*.deb` - Debian installers
-- `${OUTPUT_DIR}/installers/*.rpm` - RPM installers
-- `installer-metadata.json` - Installer metadata
-- `stage-metadata.json` - Stage execution metadata
-
-**Key Functions**:
-- `determine_installer_types()` - Determine types for platform
-- `build_installers()` - Build all installer types
-- `build_installer_type()` - Build specific type
-- `build_msi_installer()` - Windows MSI
-- `build_pkg_installer()` - macOS PKG
-- `build_deb_installer()` - Debian DEB
-- `build_rpm_installer()` - Red Hat RPM
-
-**Usage**:
-```bash
-export WORKSPACE=/path/to/workspace
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export INPUT_DIR=${WORKSPACE}/signed
-export OUTPUT_DIR=${WORKSPACE}/installers
-export BUILD_NUMBER=123
-
-./scripts/stages/07-installer.sh
-```
-
-**Note**: Currently creates placeholder installers. In production, would call actual installer build tools (WiX, pkgbuild, dpkg-deb, rpmbuild).
+Utility functions for cleaning build scratch directories inside `WORKSPACE`.
 
 ---
 
-### 4. Smoke Test Stage — [`scripts/stages/13-smoke-tests.sh`](../scripts/stages/13-smoke-tests.sh)
+## Stage Scripts (`scripts/stages/`)
 
-**Purpose**: Run quick validation tests on built JDK
+Stages are invoked by the pipeline runner via [`StageScriptRunner.groovy`](../ci/jenkins/lib/StageScriptRunner.groovy) (Jenkins) or [`ci/local/stage_resolver.py`](../ci/local/stage_resolver.py) (local). Both resolve vendor overrides from `config-repo/vendor-scripts/` first, then fall back to defaults here.
 
-**Inputs**:
-- `${INPUT_DIR}/**/*.tar.gz` - JDK artifact to test
-- `pipeline-config.json` - Configuration
+**Key:** `REAL` = has a full working implementation. `STUB` = logs a skip message and exits 0; must be overridden via `config-repo/vendor-scripts/` for real behaviour.
 
-**Outputs**:
-- `${OUTPUT_DIR}/java-version.txt` - Java version output
-- `${OUTPUT_DIR}/hello-compile.txt` - Compilation test output
-- `${OUTPUT_DIR}/hello-run.txt` - Execution test output
-- `${OUTPUT_DIR}/system-properties.txt` - System properties
-- `${OUTPUT_DIR}/class-loading.txt` - Class loading test
-- `test-metadata.json` - Test results metadata
-- `stage-metadata.json` - Stage execution metadata
+### Standard environment variables received by every stage
 
-**Tests Performed**:
-1. **Java Version** - Verify `java -version` works
-2. **Hello World** - Compile and run simple program
-3. **System Properties** - Verify system properties accessible
-4. **Class Loading** - Verify class loading works
-
-**Key Functions**:
-- `find_jdk_artifact()` - Locate JDK to test
-- `extract_jdk()` - Extract JDK for testing
-- `run_smoke_tests()` - Execute all tests
-- `test_java_version()` - Test 1
-- `test_hello_world()` - Test 2
-- `test_system_properties()` - Test 3
-- `test_class_loading()` - Test 4
-
-**Usage**:
-```bash
-export WORKSPACE=/path/to/workspace
-export CONFIG_FILE=${WORKSPACE}/pipeline-config.json
-export INPUT_DIR=${WORKSPACE}/outputs
-export OUTPUT_DIR=${WORKSPACE}/test-results
-export BUILD_NUMBER=123
-
-./scripts/stages/13-smoke-tests.sh
-```
-
-**Exit Codes**:
-- `0` - All tests passed
-- `1` - One or more tests failed
+| Variable | Value |
+|---|---|
+| `WORKSPACE` | Ephemeral stage scratch directory (cleaned before/after stage) |
+| `CONFIG_FILE` | Path to `pipeline-config.json` inside `WORKSPACE` |
+| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages |
+| `TARGET_DIR` | Directory where this stage writes its output files |
+| `BUILD_NUMBER` | Build number string |
 
 ---
 
-## Testing Locally
+### `02-build.sh` — Build JDK `REAL`
 
-All scripts can be tested locally without a CI system:
+Clones `temurin-build`, invokes `build-farm/make-adopt-build-farm.sh`, copies outputs to `TARGET_DIR`.
 
-### 1. Create Test Configuration
-```bash
-cat > /tmp/test-config.json <<EOF
-{
-  "buildConfig": {
-    "JAVA_TO_BUILD": "jdk21u",
-    "TARGET_OS": "linux",
-    "ARCHITECTURE": "x64",
-    "VARIANT": "temurin",
-    "BUILD_ARGS": "",
-    "NODE_LABEL": "worker"
-  },
-  "parameters": {
-    "enableTests": true,
-    "enableInstallers": true,
-    "enableSigner": true,
-    "cleanWorkspace": true
-  },
-  "buildNumber": "test-123",
-  "jobName": "local-test"
-}
-EOF
+**Inputs:** `CONFIG_FILE` (for all build parameters)
+**Outputs:** `${TARGET_DIR}/*.tar.gz` or `*.zip`, `*.json` (SBOM if `--create-sbom`), `build-metadata.json`, `checksums.txt`
+**Extra env:** none required beyond standard set
+
+Key functions: `setup_build_environment`, `setup_temurin_build`, `setup_reproducible_build_padding` (fetches upstream SBOM to derive workspace path length for reproducible builds), `prepare_workspace`, `execute_build`, `extract_build_metadata`, `organize_build_outputs`
+
+---
+
+### `03-internal-sign.sh` — Internal JMOD Signing `STUB`
+
+Signs individual JMOD files before assembly. Vendor-specific (Eclipse codesign node).
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing `jmods/` from Build
+**Outputs:** `TARGET_DIR` containing signed jmods
+
+---
+
+### `04-assemble.sh` — Assemble `STUB`
+
+Reassembles the JDK image from signed JMODs. Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed jmods
+**Outputs:** `TARGET_DIR` containing assembled JDK tarballs
+
+---
+
+### `06-sign.sh` — Sign Artifacts `STUB`
+
+Signs the final JDK tarballs/zips. Vendor-specific (code signing service).
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing `*.tar.gz`/`*.zip`
+**Outputs:** `TARGET_DIR` containing signed artifacts
+
+---
+
+### `07-installer.sh` — Build Installers `STUB`
+
+Creates platform-specific installers (`.msi`, `.pkg`, `.deb`, `.rpm`). Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed JDK tarballs
+**Outputs:** `TARGET_DIR` containing installer packages
+
+---
+
+### `08-sign-installer.sh` — Sign Installers `STUB`
+
+Signs the installer packages. Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing installers
+**Outputs:** `TARGET_DIR` containing signed installers
+
+---
+
+### `09-gpg-sign.sh` — GPG Sign `STUB`
+
+GPG-signs artifacts and metadata (Temurin variant only). Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed artifacts + installers
+**Outputs:** `TARGET_DIR` containing `.sig`/`.asc` signature files
+
+---
+
+### `10-sbom-sign.sh` — SBOM JSF Sign `STUB`
+
+Signs SBOM files in JSF format. Vendor-specific. Only called when `--create-sbom` is in `BUILD_ARGS`.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing SBOM JSON files
+**Outputs:** `TARGET_DIR` containing signed SBOM files
+
+---
+
+### `11-verify-signing.sh` — Verify Signing `STUB`
+
+Verifies all GPG signatures. Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed artifacts + `.sig`/`.asc` files
+**Outputs:** `TARGET_DIR` containing verification results
+
+---
+
+### `12-validate-sbom.sh` — Validate SBOM `REAL`
+
+Clones `temurin-build`, invokes `tooling/validateSBOM.sh` against the SBOM JSON files produced by Build. Only runs when `--create-sbom` is present in `BUILD_ARGS`.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing `*sbom*.json`
+**Outputs:** `TARGET_DIR` containing validation results
+**Extra env (optional):** `TEMURIN_BUILD_REPO`, `TEMURIN_BUILD_BRANCH`
+
+---
+
+### `13-smoke-tests.sh` — Smoke Tests `REAL`
+
+Extracts the built JDK into `WORKSPACE/jdk-test/` and runs four quick checks.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing `*jdk_*.tar.gz` or `*jdk_*.zip`
+**Outputs:** `${TARGET_DIR}/java-version.txt`, `hello-compile.txt`, `hello-run.txt`, `system-properties.txt`, `class-loading.txt`, `test-metadata.json`
+
+Tests performed:
+1. `java -version` executes successfully
+2. HelloWorld.java compiles and runs (`javac` + `java`)
+3. `-XshowSettings:properties` returns `java.version`, `java.home`, `os.name`
+4. `-cp lib -version` verifies class loading
+
+Key functions: `find_jdk_artifact`, `extract_jdk`, `run_smoke_tests`, `test_java_version`, `test_hello_world`, `test_system_properties`, `test_class_loading`, `create_test_metadata`
+
+---
+
+### `14-aqa-tests.sh` — AQA Tests `STUB`
+
+Runs the full AQA test suite. Vendor-specific (AQA infrastructure required).
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing JDK tarballs + metadata
+**Outputs:** `TARGET_DIR` containing AQA test reports
+
+---
+
+### `15-tck-tests.sh` — TCK Tests `STUB`
+
+Runs the TCK (Technology Compatibility Kit). Vendor-specific. Skipped for `jdk8u/s390x/linux`.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing JDK tarballs + metadata
+**Outputs:** `TARGET_DIR` containing TCK results
+
+---
+
+### `16-publish.sh` — Publish Artifacts `STUB`
+
+Publishes artifacts to a release repository. Vendor-specific.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing all final artifacts
+**Outputs:** `TARGET_DIR` containing publish receipts/logs
+
+---
+
+### `20-reproducible-compare.sh` — Reproducible Build Comparison `REAL`
+
+Downloads the corresponding Adoptium production binary via the Adoptium API, then compares it against the locally built JDK using `temurin-build/tooling/reproducible/repro_compare.sh`.
+
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing built JDK tarballs
+**Outputs:** `${TARGET_DIR}/comparison-report.txt`, `reprotest.diff`, `ReproduciblePercent`, `reproducible_evidence.log`
+**Extra env:** `SCM_REF` (required), `RELEASE` (`true`/`false`), `BUILD_REPO_URL` (optional), `BUILD_REF` (optional)
+
+Exit codes: `0` = 100% reproducible, non-zero = differences found (pipeline marks build UNSTABLE, does not fail)
+
+---
+
+## Vendor Override Pattern
+
+Any `STUB` stage (and any `REAL` stage) can be overridden by placing a replacement script in the config repo:
+
+```
+config-repo/
+└── vendor-scripts/
+    ├── 06-sign.sh          ← overrides scripts/stages/06-sign.sh
+    ├── 07-installer.sh     ← overrides scripts/stages/07-installer.sh
+    └── ...
 ```
 
-### 2. Set Environment Variables
-```bash
-export WORKSPACE=/tmp/test-workspace
-export CONFIG_FILE=/tmp/test-config.json
-export BUILD_NUMBER=test-123
-export OUTPUT_DIR=${WORKSPACE}/outputs
-export INPUT_DIR=${WORKSPACE}/inputs
-```
+Resolution order (first match wins):
+1. `config-repo/vendor-scripts/<stem>.sh`
+2. `config-repo/vendor-scripts/<stem>.py`
+3. `scripts/stages/<stem>.sh`
+4. `scripts/stages/<stem>.py`
+5. built-in no-op (logs skip, returns 0)
 
-### 3. Run Stage Script
-```bash
-# Make executable
-chmod +x scripts/stages/02-build.sh
-chmod +x scripts/lib/*.sh
-
-# Run
-./scripts/stages/02-build.sh
-```
-
-### 4. Verify Outputs
-```bash
-ls -la ${OUTPUT_DIR}/
-cat ${WORKSPACE}/stage-metadata.json
-```
-
-## CI System Integration
-
-### Jenkins
-```groovy
-stage('Build') {
-    steps {
-        script {
-            env.WORKSPACE = pwd()
-            env.CONFIG_FILE = "${env.WORKSPACE}/pipeline-config.json"
-            env.OUTPUT_DIR = "${env.WORKSPACE}/outputs"
-
-            sh './scripts/stages/02-build.sh'
-
-            archiveArtifacts artifacts: 'outputs/**/*,stage-metadata.json'
-        }
-    }
-}
-```
-
-### GitLab CI
-```yaml
-build:
-  script:
-    - export WORKSPACE=$CI_PROJECT_DIR
-    - export CONFIG_FILE=$WORKSPACE/pipeline-config.json
-    - export OUTPUT_DIR=$WORKSPACE/outputs
-    - ./scripts/stages/02-build.sh
-  artifacts:
-    paths:
-      - outputs/
-      - stage-metadata.json
-```
-
-### GitHub Actions
-```yaml
-- name: Build
-  env:
-    WORKSPACE: ${{ github.workspace }}
-    CONFIG_FILE: ${{ github.workspace }}/pipeline-config.json
-    OUTPUT_DIR: ${{ github.workspace }}/outputs
-  run: ./scripts/stages/02-build.sh
-
-- name: Upload artifacts
-  uses: actions/upload-artifact@v3
-  with:
-    name: build-outputs
-    path: |
-      outputs/
-      stage-metadata.json
-```
-
-## Additional Stage Scripts
-
-The following stages are also implemented in `scripts/stages/`:
-
-- `03-internal-sign.sh` — JMOD signing (Windows/Mac, JDK ≥ 11)
-- `04-assemble.sh` — assembly after internal signing
-- `08-sign-installer.sh` — installer signing
-- `09-gpg-sign.sh` — GPG signing (Temurin)
-- `10-sbom-sign.sh` — SBOM JSF signing
-- `11-verify-signing.sh` — signature verification
-- `12-validate-sbom.sh` — SBOM validation
-- `14-aqa-tests.sh` — AQA test suite
-- `15-tck-tests.sh` — TCK tests
-- `16-publish.sh` — artifact publication
-- `20-reproducible-compare.sh` — reproducible build comparison
-
-All follow the same interface pattern documented in [`STAGE_IO_SPECIFICATION.md`](./STAGE_IO_SPECIFICATION.md).
-
-## Benefits of Shell Script Approach
-
-1. **CI Portability** - Same scripts work on any CI system
-2. **Local Testing** - Can test without CI infrastructure
-3. **Simplicity** - Standard Unix tools (bash, jq, etc.)
-4. **Maintainability** - Easier to understand than Groovy
-5. **Debugging** - Can run with `bash -x` for detailed output
-6. **Future-proof** - Not locked into any CI vendor
-
-## Best Practices
-
-1. **Always source utilities** at the start of each script
-2. **Validate environment** before doing work
-3. **Use error traps** to catch failures
-4. **Create metadata** for every stage
-5. **Log extensively** for debugging
-6. **Test locally** before committing
-7. **Keep scripts focused** - one stage per script
-8. **Use functions** for reusable logic
-9. **Document inputs/outputs** clearly
-10. **Handle errors gracefully**
-
-## Troubleshooting
-
-### Script fails with "command not found"
-- Ensure `jq` is installed: `apt-get install jq` or `brew install jq`
-- Make scripts executable: `chmod +x scripts/**/*.sh`
-
-### Configuration not found
-- Verify `CONFIG_FILE` environment variable is set
-- Check file exists: `ls -la ${CONFIG_FILE}`
-
-### Artifacts not found
-- Verify `INPUT_DIR` contains expected files
-- Check previous stage completed successfully
-- List directory: `ls -la ${INPUT_DIR}`
-
-### Permission denied
-- Make scripts executable: `chmod +x scripts/stages/*.sh scripts/lib/*.sh`
-- Check workspace permissions
-
-## Summary
-
-- 15 stage scripts in `scripts/stages/` covering the full build pipeline
-- 3 shared utility libraries in `scripts/lib/`
-- Consistent `INPUT_ARTIFACTS_DIR` / `TARGET_DIR` / `CONFIG_FILE` interface across all stages
-- Vendor overrides supported via `config-repo/vendor-scripts/` (see [`StageScriptRunner.groovy`](../ci/jenkins/lib/StageScriptRunner.groovy))
+See [`ci/jenkins/lib/StageScriptRunner.groovy`](../ci/jenkins/lib/StageScriptRunner.groovy) (Jenkins) and [`ci/local/stage_resolver.py`](../ci/local/stage_resolver.py) (local) for the implementation.

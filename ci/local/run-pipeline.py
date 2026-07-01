@@ -47,10 +47,10 @@ class PipelineRunner:
         config_file = pipeline_workspace / 'pipeline-config.json'
         self.workspace_mgr = WorkspaceManager(pipeline_workspace, config_file)
 
-        # Convenience properties for backward compatibility
+        # Convenience properties
         self.pipeline_workspace = self.workspace_mgr.pipeline_workspace
         self.stage_workspace = self.workspace_mgr.stage_workspace
-        self.artifacts_dir = self.workspace_mgr.artifacts_dir
+        self.build_artifacts_dir = self.workspace_mgr.build_artifacts_dir
         self.workspace = self.pipeline_workspace
         self.config_file = self.workspace_mgr.config_file
         self.build_number = args.build_number or f"local-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -177,7 +177,7 @@ class PipelineRunner:
             print("=" * 80)
             print("✅ Pipeline completed successfully!")
             print("=" * 80)
-            print(f"\n📦 All artifacts in: {self.artifacts_dir}")
+            print(f"\n📦 All artifacts in: {self.build_artifacts_dir}")
             print(f"   - JDK tarballs")
             print(f"   - Signed artifacts")
             print(f"   - Installers")
@@ -337,6 +337,10 @@ class PipelineRunner:
 
         print("\nGenerated Configuration:")
         print(json.dumps(config, indent=2))
+
+        # Archive pipeline-config.json → build_artifacts/ (≈ Jenkins archiveArtifacts)
+        self.workspace_mgr.archive_file(self.config_file, 'Initialize')
+
         print("\n✅ Initialize stage complete")
 
         # Post-stage cleanup (config now exists, so cleanup can read it)
@@ -348,37 +352,42 @@ class PipelineRunner:
         print("STAGE 2: Build OpenJDK")
         print("=" * 80)
 
-        # Pre-stage cleanup
+        # Pre-stage cleanup (wipes stage_workspace/, recreates stage_workspace/target/)
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
-        # Ensure artifacts directory exists
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        # Restore inputs from build_artifacts/ → stage_workspace/ (≈ Jenkins copyArtifacts)
+        self.workspace_mgr.restore_stage_inputs('Build', 'pipeline-config.json')
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
         env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(self.artifacts_dir)
-        # Build stage doesn't need INPUT_ARTIFACTS_DIR (first stage)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
+        # Build is first substantive stage — no INPUT_ARTIFACTS_DIR needed
 
         exit_code = self._make_resolver().run('02-build', env)
         if exit_code != 0:
             raise subprocess.CalledProcessError(exit_code, '02-build')
+
+        # Archive outputs stage_workspace/target/ → build_artifacts/ (≈ Jenkins archiveArtifacts)
+        self.workspace_mgr.archive_stage_outputs('Build')
+
         print("\n✅ Build stage complete")
-        print(f"   Artifacts in: {self.artifacts_dir}")
+        print(f"   Artifacts in: {self.build_artifacts_dir}")
 
         # Post-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('post')
     
     def stage_validate_sbom(self):
         """Stage 3: Validate SBOM files (if SBOM generation is enabled)"""
-        # Check if SBOM generation is enabled by reading the config
+        # Check if SBOM generation is enabled by reading the archived config
+        archived_config = self.build_artifacts_dir / 'pipeline-config.json'
         try:
-            with open(self.config_file, 'r') as f:
+            with open(archived_config, 'r') as f:
                 config = json.load(f)
                 build_args = config.get('buildConfig', {}).get('BUILD_ARGS', '')
-                
+
                 if '--create-sbom' not in build_args:
                     print("\nℹ️  Skipping SBOM validation (--create-sbom not in BUILD_ARGS)")
                     return
@@ -394,17 +403,24 @@ class PipelineRunner:
         # Pre-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
+        # Restore inputs: pipeline-config.json + SBOM json files
+        self.workspace_mgr.restore_stage_inputs('Validate SBOM', 'pipeline-config.json,*sbom*.json')
+
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
-        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
-        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
+        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
 
         exit_code = self._make_resolver().run('12-validate-sbom', env)
         if exit_code != 0:
             print(f"\n❌ SBOM validation failed with exit code {exit_code}")
             raise subprocess.CalledProcessError(exit_code, '12-validate-sbom')
+
+        # Archive any validation outputs
+        self.workspace_mgr.archive_stage_outputs('Validate SBOM')
+
         print("\n✅ SBOM validation stage complete")
 
         # Post-stage cleanup
@@ -419,17 +435,25 @@ class PipelineRunner:
         # Pre-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
+        # Restore inputs: config + tarballs/zips + metadata
+        self.workspace_mgr.restore_stage_inputs('Sign Artifacts',
+            'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
+
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
         env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
-        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
 
         exit_code = self._make_resolver().run('06-sign', env)
         if exit_code != 0:
             raise subprocess.CalledProcessError(exit_code, '06-sign')
+
+        # Archive signed outputs
+        self.workspace_mgr.archive_stage_outputs('Sign Artifacts')
+
         print("\n✅ Sign stage complete")
 
         # Post-stage cleanup
@@ -444,17 +468,25 @@ class PipelineRunner:
         # Pre-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
+        # Restore inputs: config + tarballs/zips + metadata
+        self.workspace_mgr.restore_stage_inputs('Build Installers',
+            'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
+
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
         env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
-        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
 
         exit_code = self._make_resolver().run('07-installer', env)
         if exit_code != 0:
             raise subprocess.CalledProcessError(exit_code, '07-installer')
+
+        # Archive installer outputs
+        self.workspace_mgr.archive_stage_outputs('Build Installers')
+
         print("\n✅ Installer stage complete")
 
         # Post-stage cleanup
@@ -469,17 +501,25 @@ class PipelineRunner:
         # Pre-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
+        # Restore inputs: config + tarballs/zips
+        self.workspace_mgr.restore_stage_inputs('Smoke Tests',
+            'pipeline-config.json,**/*.tar.gz,**/*.zip')
+
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
         env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
-        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
 
         exit_code = self._make_resolver().run('13-smoke-tests', env)
         if exit_code != 0:
             raise subprocess.CalledProcessError(exit_code, '13-smoke-tests')
+
+        # Archive test result outputs
+        self.workspace_mgr.archive_stage_outputs('Smoke Tests')
+
         print("\n✅ Smoke tests complete")
 
         # Post-stage cleanup
@@ -494,13 +534,17 @@ class PipelineRunner:
         # Pre-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
+        # Restore inputs: config + tarballs/zips
+        self.workspace_mgr.restore_stage_inputs('Reproducible Compare',
+            'pipeline-config.json,**/*.tar.gz,**/*.zip')
+
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
         env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.config_file)
+        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
         env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.artifacts_dir)
-        env['TARGET_DIR'] = str(self.artifacts_dir)
+        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
+        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
         env['SCM_REF'] = self.args.scm_ref
         # Set RELEASE based on release_type (true if RELEASE, false otherwise)
         release_type = (self.args.release_type or 'NIGHTLY').upper()
@@ -517,11 +561,11 @@ class PipelineRunner:
         # Capture exit code without raising — result drives UNSTABLE-equivalent behaviour
         comparison_exit_code = self._make_resolver().run('20-reproducible-compare', env)
 
-        # Check for comparison results in stage_workspace
-        comparison_report = self.stage_workspace / 'reproducible-compare' / 'comparison-report.txt'
-        reprotest_diff = self.stage_workspace / 'reproducible-compare' / 'reprotest.diff'
-        reproducible_percent = self.stage_workspace / 'reproducible-compare' / 'ReproduciblePercent'
-        reproducible_log = self.stage_workspace / 'reproducible-compare' / 'reproducible_evidence.log'
+        # Check for comparison results in stage_workspace/target/
+        comparison_report = self.stage_workspace / 'target' / 'comparison-report.txt'
+        reprotest_diff = self.stage_workspace / 'target' / 'reprotest.diff'
+        reproducible_percent = self.stage_workspace / 'target' / 'ReproduciblePercent'
+        reproducible_log = self.stage_workspace / 'target' / 'reproducible_evidence.log'
 
         print(f"\nComparison exit code: {comparison_exit_code}")
 
@@ -558,8 +602,11 @@ class PipelineRunner:
                 percent = reproducible_percent.read_text().strip()
                 print(f"\n   Reproducibility: {percent}%")
 
+        # Archive comparison outputs
+        self.workspace_mgr.archive_stage_outputs('Reproducible Compare')
+
         # List all comparison artifacts
-        print(f"\n📁 Comparison artifacts saved to: {self.stage_workspace / 'reproducible-compare'}")
+        print(f"\n📁 Comparison artifacts saved to: {self.stage_workspace / 'target'}")
         if comparison_report.exists():
             print(f"   - comparison-report.txt")
         if reprotest_diff.exists():

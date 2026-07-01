@@ -1,5 +1,7 @@
 # Local Runner Workspace Architecture
 
+> **This document is historical.** The local runner now uses a three-directory architecture (`stage_workspace/`, `build_artifacts/`, `config-repo/`) with explicit archive and restore semantics that mirror Jenkins precisely. See [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) for current documentation.
+
 ## Overview
 
 The local pipeline runner (`ci/local/run-pipeline.py`) uses a two-directory architecture to separate ephemeral stage workspaces from persistent artifacts, similar to how Jenkins separates workspace from archived artifacts.
@@ -213,5 +215,5 @@ def cleanup_stage_workspace(self, cleanup_type):
 
 ## Related Documentation
 
-- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — Workspace/artifacts separation
+- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — Current workspace architecture documentation (supersedes this document)
 - [ci/local/README.md](../ci/local/README.md) — Local runner full reference

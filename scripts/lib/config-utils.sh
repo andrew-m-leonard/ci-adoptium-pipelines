@@ -105,8 +105,10 @@ validate_standard_environment() {
     require_env "CONFIG_FILE"
     require_file "${CONFIG_FILE}"
 
-    # Set default directory if not set
-    export TARGET_DIR="${TARGET_DIR:-${WORKSPACE}/workspace/target}"
+    # Set default directory if not set.
+    # WORKSPACE points to stage_workspace/ (local) or the Jenkins agent workspace.
+    # Outputs land in stage_workspace/target/ so they can be archived after the stage.
+    export TARGET_DIR="${TARGET_DIR:-${WORKSPACE}/target}"
 
     log_info "Environment validated successfully"
     log_debug "WORKSPACE=${WORKSPACE}"

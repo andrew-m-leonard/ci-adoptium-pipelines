@@ -36,13 +36,11 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 ## Workspace Management
 
-- **[WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)** — Jenkins workspace layout; how artifacts flow between stages via `copyArtifacts` + `archiveArtifacts`
-- **[LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md)** — Local runner two-directory layout (`stage_workspace/` + `artifacts/`)
+- **[WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md)** — Three-directory layout (`stage_workspace/`, `build_artifacts/`, `config-repo/`); Jenkins vs local archive/restore semantics; validation rules; CLI usage and error messages
 
 ## Stage Implementation Details
 
-- **[SHELL_SCRIPTS_SUMMARY.md](./SHELL_SCRIPTS_SUMMARY.md)** — Index of all `scripts/stages/` and `scripts/lib/` files with purpose and key variables
-- **[ARTIFACT_DIRECTORY_PATTERN.md](./ARTIFACT_DIRECTORY_PATTERN.md)** — Artifact naming and directory structure conventions
+- **[SHELL_SCRIPTS_SUMMARY.md](./SHELL_SCRIPTS_SUMMARY.md)** — Index of all `scripts/stages/` and `scripts/lib/` files; STUB vs REAL status; key functions and I/O contract per stage; vendor override resolution order
 
 ## Pipeline Features
 
@@ -60,6 +58,8 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 These documents capture decisions, refactoring work, and intermediate designs from the original pipeline implementation. Retained for reference.
 
+- [ARTIFACT_DIRECTORY_PATTERN.md](./ARTIFACT_DIRECTORY_PATTERN.md) — `INPUT_ARTIFACTS_DIR` vs `TARGET_DIR` pattern (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
+- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) — Local runner workspace architecture (superseded by [`WORKSPACE_ARTIFACTS_ARCHITECTURE.md`](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md))
 - [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — Launch pipeline → build pipeline → stage script flow
 - [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) — Configuration system guide (superseded by [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md))
 - [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) — Per-stage input/output contracts (superseded by [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) Standard Interface Contract section)
