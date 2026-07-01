@@ -212,6 +212,37 @@ class WorkspaceManager:
         shutil.copy2(src, dst)
         print(f"✅ Archive ({stage_name}): {src.name} → {self.build_artifacts_dir}")
 
+    @staticmethod
+    def _matches_pattern(rel, name, pat):
+        """
+        Match a file against a glob pattern using fnmatch semantics.
+
+        Handles both flat patterns (e.g. '*.tar.gz') and path patterns
+        (e.g. 'metadata/**/*') correctly.  Python's fnmatch does not treat
+        '**' as a recursive wildcard, so we expand '**' into both '' and '*'
+        to cover files at any depth.
+
+        Args:
+            rel:  Relative path from build_artifacts/ root, e.g. 'foo.tar.gz'
+                  or 'metadata/subdir/file.json'
+            name: Bare filename (Path.name), e.g. 'foo.tar.gz'
+            pat:  Glob pattern, e.g. '*.tar.gz' or 'metadata/**/*'
+        """
+        # Direct match against full relative path or bare filename
+        if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(name, pat):
+            return True
+        # If pattern contains '**', expand it into both '*' (one level) and
+        # '' (zero levels, i.e. collapse the separator too) and retry.
+        if '**' in pat:
+            for replacement in ('*', ''):
+                expanded = pat.replace('**/', replacement)
+                if replacement == '':
+                    # Collapsed form: 'metadata/**/*' → 'metadata/*'  — avoid double-slash
+                    expanded = expanded.replace('//', '/')
+                if fnmatch.fnmatch(rel, expanded) or fnmatch.fnmatch(name, expanded):
+                    return True
+        return False
+
     def restore_stage_inputs(self, stage_name, artifact_filter=None):
         """
         Copy matching files from build_artifacts/ → stage_workspace/.
@@ -243,7 +274,7 @@ class WorkspaceManager:
             if not src.is_file():
                 continue
             rel = str(src.relative_to(self.build_artifacts_dir))
-            if any(fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(src.name, pat) for pat in patterns):
+            if any(self._matches_pattern(rel, src.name, pat) for pat in patterns):
                 dst = self.stage_workspace / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)

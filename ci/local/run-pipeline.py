@@ -437,7 +437,7 @@ class PipelineRunner:
 
         # Restore inputs: config + tarballs/zips + metadata
         self.workspace_mgr.restore_stage_inputs('Sign Artifacts',
-            'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
+            'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
@@ -470,7 +470,7 @@ class PipelineRunner:
 
         # Restore inputs: config + tarballs/zips + metadata
         self.workspace_mgr.restore_stage_inputs('Build Installers',
-            'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
+            'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
@@ -503,7 +503,7 @@ class PipelineRunner:
 
         # Restore inputs: config + tarballs/zips
         self.workspace_mgr.restore_stage_inputs('Smoke Tests',
-            'pipeline-config.json,**/*.tar.gz,**/*.zip')
+            'pipeline-config.json,*.tar.gz,*.zip')
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
@@ -536,7 +536,7 @@ class PipelineRunner:
 
         # Restore inputs: config + tarballs/zips
         self.workspace_mgr.restore_stage_inputs('Reproducible Compare',
-            'pipeline-config.json,**/*.tar.gz,**/*.zip')
+            'pipeline-config.json,*.tar.gz,*.zip')
 
         env = os.environ.copy()
         env['WORKSPACE'] = str(self.stage_workspace)
