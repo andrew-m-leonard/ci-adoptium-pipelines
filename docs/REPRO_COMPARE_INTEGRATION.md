@@ -4,7 +4,7 @@
 
 This document describes the reproducible build comparison capability in the CI Adoptium Pipelines. The system validates build reproducibility by comparing locally built JDKs against production Adoptium binaries using the proven `temurin-build/tooling/reproducible/repro_compare.sh` tool.
 
-**Key Principle**: The comparison logic is **CI-agnostic** - implemented in a single shell script (`scripts/stages/20-reproducible-compare.sh`) that works across all CI platforms and local execution.
+**Key Principle**: The comparison logic is **CI-agnostic** — implemented in a single shell script (`scripts/stages/20-reproducible-compare.sh`) that works across all CI platforms and local execution.
 
 ---
 
@@ -32,7 +32,7 @@ This shell script provides the complete reproducible build comparison functional
 ┌─────────────────────────────────────────────────────────────────┐
 │  3. Unpack both binaries                                         │
 │     ├─ Production binary (from Adoptium API)                    │
-│     └─ Locally built binary (from TARGET_DIR)                   │
+│     └─ Locally built binary (from INPUT_ARTIFACTS_DIR)          │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -41,48 +41,46 @@ This shell script provides the complete reproducible build comparison functional
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│  5. Generate comparison report                                   │
-│     ├─ comparison-report.txt (script output)                    │
-│     ├─ reprotest.diff (differences found)                       │
-│     ├─ reproducible_evidence.log (detailed log)                 │
-│     └─ ReproduciblePercent (percentage metric)                  │
+│  5. Copy results to TARGET_DIR                                   │
+│     ├─ comparison-report.txt                                    │
+│     ├─ reprotest.diff (if differences found)                    │
+│     └─ ReproduciblePercent                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Required Environment Variables
 
-The stage script requires these environment variables (set by CI orchestration):
-
 | Variable | Description | Example |
-|----------|-------------|---------|
-| `WORKSPACE` | Stage workspace directory | `/path/to/stage_workspace` |
-| `CONFIG_FILE` | Path to pipeline-config.json | `/path/to/pipeline-config.json` |
-| `TARGET_DIR` | Directory containing built artifacts | `/path/to/artifacts` |
+|---|---|---|
+| `WORKSPACE` | Stage workspace directory | `stage_workspace/` |
+| `CONFIG_FILE` | Path to `pipeline-config.json` | `stage_workspace/pipeline-config.json` |
+| `INPUT_ARTIFACTS_DIR` | Directory containing built JDK artifacts from the Build stage | `stage_workspace/` |
+| `TARGET_DIR` | Directory where this stage writes comparison result files | `stage_workspace/target/` |
 | `SCM_REF` | Git tag/ref for the build | `jdk-21.0.2+13` |
-| `RELEASE` | Boolean: true for release, false for EA | `true` or `false` |
+| `RELEASE` | `true` for release builds, `false` for EA/nightly | `true` |
 
 ### Optional Environment Variables
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+|---|---|---|
 | `BUILD_REPO_URL` | temurin-build repository URL | `https://github.com/adoptium/temurin-build.git` |
 | `BUILD_REF` | temurin-build branch/tag | `master` |
 
 ### Output Files
 
-The script creates these files in `${WORKSPACE}/reproducible-compare/`:
+The script uses `${WORKSPACE}/reproducible-compare/` as a scratch area during execution. At the end, it copies result files to `${TARGET_DIR}/` so they are available for archiving by the orchestration layer:
 
-| File | Description | Source |
-|------|-------------|--------|
-| `comparison-report.txt` | Complete comparison output | Stage script |
-| `reprotest.diff` | List of different files | repro_compare.sh |
-| `reproducible_evidence.log` | Detailed comparison log | repro_compare.sh |
-| `ReproduciblePercent` | Reproducibility percentage (0-100) | repro_compare.sh |
+| File | Location | Description |
+|---|---|---|
+| `comparison-report.txt` | `${TARGET_DIR}/` | Complete `repro_compare.sh` output |
+| `ReproduciblePercent` | `${TARGET_DIR}/` | Reproducibility percentage (0–100) |
+| `reprotest.diff` | `${TARGET_DIR}/` | List of differing files (only present when differences found) |
+| `reproducible_evidence.log` | `${WORKSPACE}/reproducible-compare/` only | Detailed comparison log (written by `repro_compare.sh` but **not** copied to `TARGET_DIR`) |
 
 ### Exit Codes
 
-- **0**: Build is 100% reproducible (success)
-- **Non-zero**: Differences detected (failure)
+- **0**: Build is 100% reproducible
+- **Non-zero**: Differences detected — pipeline marks build `UNSTABLE`, does not fail
 
 ---
 
@@ -92,21 +90,10 @@ The script creates these files in `${WORKSPACE}/reproducible-compare/`:
 
 **File**: [`ci/jenkins/Jenkinsfile.declarative`](../ci/jenkins/Jenkinsfile.declarative)
 
-#### Parameter
+#### Enablement
 
-```groovy
-booleanParam(
-    name: 'REPRODUCIBLE_COMPARE_BUILD',
-    defaultValue: false,
-    description: 'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)'
-)
-```
+The stage runs when all three conditions are true:
 
-#### Stage Definition
-
-The `Reproducible Compare Build` stage is positioned after `Smoke Tests` and before `AQA Tests`.
-
-**When Condition**:
 ```groovy
 when {
     allOf {
@@ -117,35 +104,25 @@ when {
 }
 ```
 
-**Key Features**:
-- Pre-stage workspace cleanup with `cleanWs()`
-- Retrieves built JDK using `copyArtifacts`
-- Executes `scripts/stages/20-reproducible-compare.sh`
-- Archives comparison results as artifacts
-- Sets build to `UNSTABLE` if comparison fails
-- Displays comparison report and diff summary
-- Post-stage cleanup (optional, controlled by `CLEAN_WORKSPACE_AFTER_STAGE`)
+#### Stage behaviour
 
-#### Usage Example
+1. `initializeStage()` — `cleanWs()`, checkout, `copyArtifacts` (filter: `pipeline-config.json,*.tar.gz,*.zip`) into `stage_input_artifacts/`
+2. `env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"`
+3. `env.SCM_REF = params.SCM_REF`
+4. `env.RELEASE = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'`
+5. `stageRunner.run('20-reproducible-compare', config)`
+6. `archiveArtifacts artifacts: 'TARGET_DIR/**/*', allowEmptyArchive: true` — archives flat files from `reproducible_compare_output/`
+7. Sets `currentBuild.result = 'UNSTABLE'` on non-zero exit code (does **not** call `error()`)
+8. `finalizeStage()` — optional `cleanWs()`
 
-```groovy
-// Jenkins job parameters:
-JDK_VERSION = 'jdk21u'
-VARIANT = 'temurin'
-TARGET_OS = 'mac'
-ARCHITECTURE = 'aarch64'
-SCM_REF = 'jdk-21.0.2+13'
-RELEASE = true
-REPRODUCIBLE_COMPARE_BUILD = true
-```
+Jenkins does **not** display the comparison report inline — results are available via the archived artifacts link.
 
-#### Output
+#### Jenkins archived artifact paths
 
-Comparison artifacts are archived and available in Jenkins:
-- `reproducible-compare/comparison-report.txt`
-- `reproducible-compare/reprotest.diff`
-- `reproducible-compare/reproducible_evidence.log`
-- `reproducible-compare/ReproduciblePercent`
+Jenkins archives the contents of `reproducible_compare_output/` flat:
+- `comparison-report.txt`
+- `ReproduciblePercent`
+- `reprotest.diff` (when differences found)
 
 ---
 
@@ -153,54 +130,64 @@ Comparison artifacts are archived and available in Jenkins:
 
 **File**: [`ci/local/run-pipeline.py`](../ci/local/run-pipeline.py)
 
-#### Command Line Option
+#### Command line options
 
 ```bash
 --compare-build              # Enable reproducible build comparison
---scm-ref <ref>             # SCM reference (REQUIRED with --compare-build)
+--scm-ref <ref>              # SCM reference (REQUIRED with --compare-build)
+--release-type RELEASE       # Set to RELEASE for release builds (default: NIGHTLY → RELEASE=false)
 ```
 
-#### Usage Example
+#### Usage example
 
 ```bash
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk21u \
-    --variant temurin \
     --target-os mac \
     --architecture aarch64 \
     --scm-ref jdk-21.0.2+13 \
-    --release \
+    --release-type RELEASE \
     --compare-build
 ```
 
-#### Stage Execution
+#### Stage execution
 
-The `stage_reproducible_compare()` method:
-1. Sets up environment variables
-2. Executes `scripts/stages/20-reproducible-compare.sh`
-3. Captures exit code
-4. Checks for output files
-5. Displays results with reproducibility percentage
-6. Shows comparison report and diff on failure
-7. Lists all comparison artifacts
-8. Raises exception if comparison fails
+`stage_reproducible_compare()`:
 
-#### Output Example
+1. `cleanup_stage_workspace('pre')` — wipes `stage_workspace/`
+2. `restore_stage_inputs('Reproducible Compare', 'pipeline-config.json,**/*.tar.gz,**/*.zip')` — copies from `build_artifacts/`
+3. Sets env: `WORKSPACE=stage_workspace/`, `TARGET_DIR=stage_workspace/target/`, `INPUT_ARTIFACTS_DIR=stage_workspace/`, `SCM_REF`, `RELEASE`
+4. `StageResolver.run('20-reproducible-compare', env)`
+5. Reads result files from `stage_workspace/target/`
+6. Displays inline: reproducibility percentage, comparison report (on failure), first 50 lines of `reprotest.diff` (on failure)
+7. `archive_stage_outputs('Reproducible Compare')` — copies `stage_workspace/target/**` → `build_artifacts/`
+8. **Does not raise** if comparison fails — prints warning and raises `CalledProcessError` to fail the stage
 
-**Success**:
+#### Restart support
+
+```bash
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21u \
+    --target-os mac \
+    --architecture aarch64 \
+    --scm-ref jdk-21.0.2+13 \
+    --start-from-stage reproducible-compare
+```
+
+#### Output example (success)
+
 ```
 Comparison exit code: 0
 ✅ SUCCESS: Build is 100% reproducible
    Reproducibility: 100%
 
-📁 Comparison artifacts saved to: /path/to/stage_workspace/reproducible-compare
+📁 Comparison artifacts saved to: ~/openjdk-build/stage_workspace/target
    - comparison-report.txt
-   - reprotest.diff
    - ReproduciblePercent
-   - reproducible_evidence.log
 ```
 
-**Failure**:
+#### Output example (failure)
+
 ```
 Comparison exit code: 1
 ❌ FAILED: Reproducible build comparison failed (exit code: 1)
@@ -216,19 +203,6 @@ Comparison exit code: 1
 ⚠️  Stage failed due to reproducibility issues
 ```
 
-#### Restart Support
-
-```bash
-# Resume from comparison stage only
-python3 ci/local/run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture aarch64 \
-    --scm-ref jdk-21.0.2+13 \
-    --start-from-stage reproducible-compare
-```
-
 ---
 
 ## Tool Capabilities
@@ -242,11 +216,11 @@ The underlying `repro_compare.sh` tool provides:
    - Removes build timestamps
    - Removes build IDs and UUIDs
    - Removes absolute paths in debug info
-   - Normalizes platform-specific metadata
+   - Normalises platform-specific metadata
 5. **Detailed Reporting**:
-   - `reprotest.diff` - Lists different files
-   - `reproducible_evidence.log` - Detailed comparison log
-   - `ReproduciblePercent` - Percentage match metric (0-100)
+   - `reprotest.diff` — lists differing files
+   - `reproducible_evidence.log` — detailed comparison log (in scratch workspace, not archived)
+   - `ReproduciblePercent` — percentage match metric (0–100)
    - Exit code 0 = identical, non-zero = differences
 
 ---
@@ -255,29 +229,25 @@ The underlying `repro_compare.sh` tool provides:
 
 For a build to be considered reproducible:
 
-- ✅ **Exit code 0** (no differences detected)
+- ✅ **Exit code 0** (no differences detected by `repro_compare.sh`)
 - ✅ **100% ReproduciblePercent**
-- ✅ **Empty reprotest.diff** (no files differ)
-- ✅ **All test results match**
-- ✅ **Performance within acceptable range**
+- ✅ **Empty or absent `reprotest.diff`**
 
 ---
 
 ## Platform Support
 
-| Platform | Tool Support | Status |
-|----------|-------------|--------|
-| Linux x64 | ✅ Supported | Ready |
-| Linux aarch64 | ✅ Supported | Ready |
-| Linux ppc64le | ✅ Supported | Ready |
-| Linux s390x | ✅ Supported | Ready |
-| macOS x64 | ✅ Supported (Darwin) | Ready |
-| macOS aarch64 | ✅ Supported (Darwin) | Ready |
-| Windows x64 | ✅ Supported (CYGWIN) | Ready |
-| Windows x86-32 | ✅ Supported (CYGWIN) | Ready |
-| AIX ppc64 | ⚠️ Check support | TBD |
-
----
+| Platform | `repro_compare.sh` OS identifier | Status |
+|---|---|---|
+| Linux x64 | `Linux` | Supported |
+| Linux aarch64 | `Linux` | Supported |
+| Linux ppc64le | `Linux` | Supported |
+| Linux s390x | `Linux` | Supported |
+| macOS x64 | `Darwin` | Supported |
+| macOS aarch64 | `Darwin` | Supported |
+| Windows x64 | `CYGWIN` | Supported |
+| Windows x86-32 | `CYGWIN` | Supported |
+| AIX ppc64 | `AIX` | Mapped but upstream tool support may vary |
 
 ---
 
@@ -285,5 +255,5 @@ For a build to be considered reproducible:
 
 - **Stage Script**: [`scripts/stages/20-reproducible-compare.sh`](../scripts/stages/20-reproducible-compare.sh)
 - **Comparison Tool**: `temurin-build/tooling/reproducible/repro_compare.sh`
-- **Jenkins Implementation**: [`ci/jenkins/Jenkinsfile.declarative`](../ci/jenkins/Jenkinsfile.declarative)
-- **Local Runner**: [`ci/local/run-pipeline.py`](../ci/local/run-pipeline.py)
+- **Jenkins Implementation**: [`ci/jenkins/Jenkinsfile.declarative`](../ci/jenkins/Jenkinsfile.declarative) (`Reproducible Compare Build` stage)
+- **Local Runner**: [`ci/local/run-pipeline.py`](../ci/local/run-pipeline.py) (`stage_reproducible_compare()`)
