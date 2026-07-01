@@ -13,7 +13,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 | Configure a build | [CONFIGURATION_GUIDE.md](./CONFIGURATION_GUIDE.md) |
 | Restart a failed stage | [BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md) |
 | Run the pipeline locally | [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) |
-| Add or modify a stage script | [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) + [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) |
+| Add or modify a stage script | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) (Per-Stage Summary) + [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) |
 | Understand BUILD_UID tracking | [BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md) |
 | Work with reproducible builds | [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md) |
 | Convert legacy Groovy configs | [`tools/README.md`](../tools/README.md) |
@@ -22,10 +22,8 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 ## Architecture & Design
 
-- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** — 3-layer design (Configuration / Shell Scripts / CI Orchestration), before/after comparison, portability rationale
+- **[CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md)** — 3-layer design (Configuration / Shell Scripts / CI Orchestration), standard interface contract, per-stage summary
 - **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Why pipeline code and vendor configuration live in separate repositories
-- **[PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md)** — Launch pipeline → build pipeline → stage script flow
-- **[STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md)** — Per-stage input/output contracts (environment variables, artifacts in/out)
 - **[UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md)** — How to write a new stage script following the standard pattern
 
 ## Configuration
@@ -63,6 +61,8 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 These documents capture decisions, refactoring work, and intermediate designs from the original pipeline implementation. Retained for reference.
 
+- [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](./PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — Launch pipeline → build pipeline → stage script flow
+- [STAGE_IO_SPECIFICATION.md](./STAGE_IO_SPECIFICATION.md) — Per-stage input/output contracts (superseded by [`CI_AGNOSTIC_ARCHITECTURE.md`](./CI_AGNOSTIC_ARCHITECTURE.md) Standard Interface Contract section)
 - [JENKINS_ENVIRONMENT_VARIABLES.md](./JENKINS_ENVIRONMENT_VARIABLES.md) — `CONFIG_*` and pipeline env vars (superseded by [`ci/jenkins/README.md`](../ci/jenkins/README.md) parameters table)
 - [PARAMETER_CONSOLIDATION.md](./PARAMETER_CONSOLIDATION.md) — How job parameters were consolidated
 - [JENKINS_RESTART_BEHAVIOR.md](./JENKINS_RESTART_BEHAVIOR.md) — Restart from Stage mechanics (superseded by [`BUILD_UID_INTEGRATION.md`](./BUILD_UID_INTEGRATION.md))

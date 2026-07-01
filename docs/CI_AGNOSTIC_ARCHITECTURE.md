@@ -122,6 +122,45 @@ Every stage script communicates with the orchestration layer through:
 | `stage-metadata.json` | Stage execution metadata (optional) |
 | stdout / stderr | Logs captured by the CI system |
 
+### Artifact Flow
+
+In Jenkins, `initializeStage()` calls `copyArtifacts` to pull artifacts from the current build's archive into `INPUT_ARTIFACTS_DIR` before the stage script runs. The stage writes outputs to `TARGET_DIR`, which is then archived with `archiveArtifacts` for downstream stages.
+
+```
+Initialize stage
+  → archiveArtifacts pipeline-config.json
+       ↓
+Each subsequent stage
+  copyArtifacts → INPUT_ARTIFACTS_DIR    ← stage reads from here
+                      stage logic
+                  TARGET_DIR             ← stage writes here
+  → archiveArtifacts TARGET_DIR/**/*
+```
+
+The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the stage workspace from a shared `artifacts/` directory, and outputs are copied back after the stage exits.
+
+### Per-Stage Summary
+
+| # | Stage | Script | Prerequisites | Key Outputs |
+|---|---|---|---|---|
+| 01 | Initialize | *(ConfigHelper.groovy + load-json-config.py)* | — | `pipeline-config.json` |
+| 02 | Build | `02-build.sh` | Initialize | JDK tarballs/zips, metadata, SBOMs |
+| 03 | Internal Sign | `03-internal-sign.sh` | Build | Signed JMODs (macOS/Windows, JDK ≥ 11) |
+| 04 | Assemble | `04-assemble.sh` | Internal Sign | Assembled JDK image |
+| 06 | Sign Artifacts | `06-sign.sh` | Assemble or Build | Signed archives |
+| 07 | Build Installers | `07-installer.sh` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
+| 08 | Sign Installers | `08-sign-installer.sh` | Build Installers | Signed installer packages |
+| 09 | GPG Sign | `09-gpg-sign.sh` | Sign Artifacts | `.sig` / `.asc` GPG signatures |
+| 11 | Verify Signing | `11-verify-signing.sh` | GPG Sign | Verification report |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | Build | SBOM validation report |
+| 13 | Smoke Tests | `13-smoke-tests.sh` | Build | Test results (UNSTABLE on failure) |
+| 14 | AQA Tests | `14-aqa-tests.sh` | Smoke Tests | AQA test results |
+| 15 | TCK Tests | `15-tck-tests.sh` | Smoke Tests | TCK test results |
+| 16 | Publish Artifacts | `16-publish.sh` | Build | Publication confirmation |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | Build | `comparison-report.txt`, `reprotest.diff` |
+
+Conditional stages only run when their guard condition is met (e.g. `PUBLISH_ARTIFACTS=true`, signing enabled, `REPRODUCIBLE_COMPARE_BUILD=true`). See [`CONFIGURATION_GUIDE.md`](./CONFIGURATION_GUIDE.md) for the full set of condition flags.
+
 ## Example: Build Stage
 
 ### Jenkins (Layer 1) — actual current pattern
