@@ -1,330 +1,314 @@
 # Pipeline Runner Guide
 
-The `run-pipeline.py` script allows you to run the complete OpenJDK build pipeline locally from the command line.
+The `ci/local/run-pipeline.py` script runs the complete OpenJDK build pipeline locally from the command line. It mirrors Jenkins semantics: each stage runs in a clean `stage_workspace/`, copies inputs from `build_artifacts/`, and archives outputs back to `build_artifacts/` when done.
 
 ## Quick Start
 
 ```bash
 cd ci-adoptium-pipelines
 
-# Run full pipeline
-./ci/local/run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
-    --architecture aarch64
+    --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git
 ```
+
+The `--config-repo-url` default is already `https://github.com/adoptium/ci-temurin-config.git`, so for Temurin builds it can be omitted.
 
 ## What It Does
 
-The pipeline runner orchestrates all build stages automatically:
+The pipeline runner orchestrates all build stages in sequence:
 
-1. **Initialize**: Generates `pipeline-config.json` from JSON configuration files
-2. **Build**: Builds OpenJDK using `make-adopt-build-farm.sh`
-3. **Sign**: Signs the built artifacts (if enabled)
-4. **Installer**: Creates installers (if enabled)
-5. **Smoke Tests**: Runs basic smoke tests (if enabled)
+1. **Initialize** — clones the config repo; generates `pipeline-config.json`; archives it to `build_artifacts/`
+2. **Build** — clones `temurin-build`; runs `make-adopt-build-farm.sh`; archives JDK tarballs to `build_artifacts/`
+3. **Validate SBOM** — validates SBOM files (only when `--create-sbom` is in `BUILD_ARGS`)
+4. **Sign Artifacts** — signs tarballs (only when `enableSigner=true`; stub unless vendor-overridden)
+5. **Build Installers** — creates platform installers (only when `enableInstallers=true`; stub unless vendor-overridden)
+6. **Smoke Tests** — extracts JDK and runs four basic checks (only when `enableTests=true`)
+7. **Reproducible Compare** — downloads Adoptium production binary and compares (only when `--compare-build` is set)
 
-## Command Line Options
+Stages 3–7 are each gated and will silently skip if their condition is not met.
 
-### Required Parameters
+---
 
-| Parameter | Description | Choices |
-|-----------|-------------|---------|
-| `--jdk-version` | JDK version to build | jdk8u, jdk11u, jdk17u, jdk21u, jdk22u, jdk23u, jdk |
-| `--variant` | Build variant | temurin, hotspot |
-| `--target-os` | Target operating system | mac, linux, windows, aix |
-| `--architecture` | Target architecture | aarch64, x64, x32, ppc64, s390x |
+## Command Line Reference
 
-### Optional Parameters
+### Required
+
+| Parameter | Description | Format |
+|---|---|---|
+| `--jdk-version` | JDK version to build | `jdk<N>` — e.g. `jdk21`, `jdk17`, `jdk8` |
+| `--target-os` | Target OS | `mac`, `linux`, `windows`, `aix` |
+| `--architecture` | Target architecture | `aarch64`, `x64`, `x32`, `ppc64`, `s390x` |
+
+Note: `--jdk-version` must match the pattern `jdk` followed by digits only (e.g. `jdk21`). Suffixes like `jdk21u` are not accepted.
+
+### Configuration repo
 
 | Parameter | Description | Default |
-|-----------|-------------|---------|
-| `--workspace` | Workspace directory | `~/openjdk-build` |
-| `--build-number` | Build identifier | `local-YYYYMMDD-HHMMSS` |
-| `--release` | Mark as release build | false |
-| `--weekly` | Mark as weekly build | false |
-| `--scm-ref` | OpenJDK source branch/tag | master |
-| `--build-ref` | temurin-build branch/tag | master |
-| `--build-repo-url` | temurin-build repository URL | https://github.com/adoptium/temurin-build.git |
+|---|---|---|
+| `--config-repo-url` | URL of the config repo containing `configurations/`, `vendor-scripts/`, `adoptium_pipeline_config.json` | `https://github.com/adoptium/ci-temurin-config.git` |
+| `--config-repo-branch` | Branch to clone | `main` |
 
-### Workspace Control
+The config repo provides: build/AQA repo URLs and branches, the default variant, and active JDK version list. CLI `--build-ref`, `--build-repo-url`, `--aqa-ref`, `--aqa-repo-url` override values from the repo.
 
-| Parameter | Description |
-|-----------|-------------|
-| `--clean-workspace` | Remove existing workspace before starting (ensures clean build) |
+### Build references (overrides)
 
-**Workspace Behavior:**
-- **Without `--clean-workspace`**: Reuses existing workspace if present (faster, but may have stale files)
-- **With `--clean-workspace`**: Removes entire workspace directory before starting (clean build, slower)
-
-### Stage Control
+These override values from `adoptium_pipeline_config.json`. If neither the CLI flag nor the config repo provides a value, the runner errors.
 
 | Parameter | Description |
-|-----------|-------------|
-| `--skip-build` | Only generate configuration, don't build |
-| `--no-tests` | Skip smoke tests |
-| `--no-installers` | Skip installer creation |
-| `--no-signer` | Skip artifact signing |
+|---|---|
+| `--build-ref` | `temurin-build` branch/tag |
+| `--build-repo-url` | `temurin-build` repository URL |
+| `--aqa-ref` | `aqa-tests` branch/tag |
+| `--aqa-repo-url` | `aqa-tests` repository URL |
+
+### Release type
+
+| Parameter | Description |
+|---|---|
+| `--release-type` | `NIGHTLY` (default), `WEEKLY` (adds `--with-version-opt=ea`), or `RELEASE` (case-insensitive) |
+| `--scm-ref` | OpenJDK source tag/ref (e.g. `jdk-21.0.2+13`). Required with `--compare-build`. |
+
+### Workspace control
+
+| Parameter | Description |
+|---|---|
+| `--workspace` | Root workspace directory (default: `~/openjdk-build`) |
+| `--build-number` | Build identifier string (default: `local-YYYYMMDD-HHMMSS`) |
+| `--clean-workspace` | Remove existing workspace before starting |
+
+**Workspace rules** — the runner validates workspace state before any stage runs:
+- **Workspace does not exist**: fresh build proceeds normally
+- **Workspace exists + no flags**: ❌ error — use `--clean-workspace` or `--start-from-stage`
+- **`--clean-workspace`**: removes entire `pipeline_workspace/` then creates fresh structure
+- **`--start-from-stage` + workspace + `build_artifacts/` exist**: restart proceeds
+- **`--clean-workspace` + `--start-from-stage`**: ❌ error — mutually exclusive
+
+### Stage control
+
+| Parameter | Description |
+|---|---|
+| `--start-from-stage` | Start from a specific stage, skipping earlier ones (requires existing workspace) |
+| `--skip-build` | Generate configuration only; skip all subsequent stages |
+| `--no-tests` | Disable smoke tests |
+| `--no-installers` | Disable installer building |
+| `--no-signer` | Disable artifact signing |
+| `--compare-build` | Enable reproducible build comparison against Adoptium production binary (requires `--scm-ref`) |
+
+Valid `--start-from-stage` values: `initialize`, `build`, `sign`, `installer`, `smoke-tests`, `reproducible-compare`
+
+---
 
 ## Usage Examples
 
-### Example 1: Full Build (Mac Apple Silicon)
+### Full build (macOS Apple Silicon)
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64
 ```
 
-**Output:**
-- Configuration: `~/openjdk-build/pipeline-config.json`
-- JDK tarball: `~/openjdk-build/workspace/target/OpenJDK*.tar.gz`
-- Build logs: `~/openjdk-build/workspace/build/logs/`
-
-### Example 2: Clean Build (Remove Existing Workspace)
+### Clean build (remove existing workspace first)
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
     --clean-workspace
 ```
 
-Removes the existing workspace directory before starting, ensuring a completely clean build.
-
-### Example 3: Build Only (No Tests or Installers)
+### Build only — no tests or installers
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
     --no-tests \
     --no-installers
 ```
 
-Runs only the build stage, skipping tests and installer creation.
-
-### Example 4: Linux x64 Release Build
+### Configuration inspection only — no build
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk17u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
+    --target-os mac \
+    --architecture aarch64 \
+    --skip-build
+```
+
+Generates and prints `pipeline-config.json` without running any build stages.
+
+### Release build with SCM ref (Linux x64)
+
+```bash
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk17 \
     --target-os linux \
     --architecture x64 \
-    --release \
+    --release-type RELEASE \
     --scm-ref jdk-17.0.10+7
 ```
 
-Builds a release version of JDK 17 for Linux x64.
-
-### Example 5: Custom Workspace
+### Weekly (EA beta) build
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --workspace ~/my-custom-build
+    --release-type WEEKLY
 ```
 
-Uses a custom workspace directory instead of the default.
+Adds `--with-version-opt=ea` to configure args.
 
-### Example 6: Custom temurin-build Branch
+### Custom temurin-build branch
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
     --build-ref develop
 ```
 
-Uses the `develop` branch of temurin-build instead of `master`.
-
-### Example 7: Fork of temurin-build
+### Custom workspace directory
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --build-repo-url https://github.com/myorg/temurin-build.git \
-    --build-ref my-feature-branch
+    --workspace ~/my-jdk21-build
 ```
 
-Uses a forked repository and custom branch.
-
-### Example 8: Configuration Only
+### Restart from a specific stage
 
 ```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+# After a failed sign stage, re-run from sign onwards
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --skip-build
+    --start-from-stage sign
 ```
 
-Only generates the configuration file without running the build.
+The workspace and `build_artifacts/` from the previous run must exist.
 
-## Pipeline Stages
+### Reproducible build comparison
 
-### Stage 1: Initialize
-
-Generates `pipeline-config.json` by:
-1. Loading `jdkNN_pipeline_config.json`
-2. Extracting platform-specific settings
-3. Applying variant-specific overrides
-4. Creating configuration file
-
-**Output:** `${WORKSPACE}/pipeline-config.json`
-
-### Stage 2: Build
-
-Builds OpenJDK by:
-1. Cloning temurin-build repository
-2. Running `make-adopt-build-farm.sh`
-3. Creating JDK tarball
-
-**Output:** `${WORKSPACE}/workspace/target/OpenJDK*.tar.gz`
-
-### Stage 3: Sign (Optional)
-
-Signs artifacts if enabled and applicable.
-
-**Output:** `${WORKSPACE}/signed/`
-
-### Stage 4: Installer (Optional)
-
-Creates platform-specific installers.
-
-**Output:** `${WORKSPACE}/installers/`
-
-### Stage 5: Smoke Tests (Optional)
-
-Runs basic smoke tests on the built JDK.
-
-**Output:** Test results in console
-
-## Environment Variables
-
-The pipeline runner sets these environment variables for each stage:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `WORKSPACE` | Root workspace directory | `/Users/user/openjdk-build` |
-| `CONFIG_FILE` | Path to pipeline config | `${WORKSPACE}/pipeline-config.json` |
-| `BUILD_NUMBER` | Build identifier | `local-20260506-140000` |
-
-## Output Structure
-
-```
-~/openjdk-build/                    # Workspace root
-├── pipeline-config.json            # Generated configuration
-├── temurin-build/                  # Cloned build scripts
-├── workspace/
-│   ├── build/                      # Build artifacts
-│   │   └── logs/                   # Build logs
-│   └── target/                     # Final outputs
-│       ├── OpenJDK*.tar.gz         # JDK tarball
-│       └── metadata/               # Build metadata
-├── signed/                         # Signed artifacts (if enabled)
-├── installers/                     # Installers (if enabled)
-└── stage-metadata.json             # Stage execution info
-```
-
-## Troubleshooting
-
-### Pipeline fails at initialize stage
-
-**Problem:** Configuration file not found
-
-**Solution:**
-- Verify `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters point to a valid config repo
-- Ensure `jdk${version}_pipeline_config.json` exists under `configurations/` in the config repo
-- Use the conversion tools in `tools/` if migrating from legacy Groovy configs
-
-### Pipeline fails at build stage
-
-**Problem:** Missing dependencies
-
-**Solution:** Ensure required build tools (git, make, gcc, boot JDK) are installed on the agent
-
-### Workspace has stale files
-
-**Problem:** Previous build artifacts interfering with new build
-
-**Solution:**
 ```bash
-# Clean workspace before building
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --clean-workspace
+    --scm-ref jdk-21.0.2+13 \
+    --release-type RELEASE \
+    --compare-build
 ```
 
-### Build takes too long
+Downloads the matching Adoptium production binary and compares it byte-by-byte against the locally built JDK. See [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md).
 
-**Problem:** Full build can take 30-60 minutes
-
-**Solution:** Use `--skip-build` to test configuration only, or `--no-tests --no-installers` to speed up
-
-### Permission denied
-
-**Problem:** Script not executable
-
-**Solution:**
-```bash
-chmod +x scripts/stages/*.sh
-```
-
-## Advanced Usage
-
-### Dry Run (Configuration Only)
-
-```bash
-./run-pipeline.py \
-    --jdk-version jdk21u \
-    --variant temurin \
-    --target-os mac \
-    --architecture aarch64 \
-    --skip-build
-```
-
-### Build Multiple Variants
-
-```bash
-# Build Temurin
-./ci/local/run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64
-# Build HotSpot
-./ci/local/run-pipeline.py --jdk-version jdk21u --variant hotspot --target-os mac --architecture aarch64
-```
-
-### Parallel Builds (Different Workspaces)
+### Parallel builds (different workspaces)
 
 ```bash
 # Terminal 1: JDK 21
-./run-pipeline.py --jdk-version jdk21u --variant temurin --target-os mac --architecture aarch64 --workspace ~/jdk21-build
+python3 ci/local/run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64 \
+    --workspace ~/jdk21-build
 
 # Terminal 2: JDK 17
-./run-pipeline.py --jdk-version jdk17u --variant temurin --target-os mac --architecture aarch64 --workspace ~/jdk17-build
+python3 ci/local/run-pipeline.py --jdk-version jdk17 --target-os mac --architecture aarch64 \
+    --workspace ~/jdk17-build
 ```
+
+---
+
+## Workspace Layout
+
+```
+~/openjdk-build/                    # pipeline_workspace (--workspace)
+│
+├── pipeline-config.json            # Generated by Initialize
+│                                   # (immediately archived to build_artifacts/)
+│
+├── config-repo/                    # Cloned once at Initialize
+│   ├── configurations/
+│   ├── vendor-scripts/
+│   └── adoptium_pipeline_config.json
+│
+├── stage_workspace/                # Ephemeral — wiped before each stage
+│   ├── pipeline-config.json        # Restored from build_artifacts/ before each stage
+│   ├── *.tar.gz, *.zip …           # Other stage inputs (restored from build_artifacts/)
+│   └── target/                     # Stage writes outputs here (TARGET_DIR)
+│
+└── build_artifacts/                # Durable archive store — persists across stages
+    ├── pipeline-config.json
+    ├── OpenJDK*.tar.gz             # Built JDK (after Build stage)
+    ├── *.json                      # SBOM, metadata
+    └── …                          # Signed artifacts, installer outputs, test results
+```
+
+All final artifacts are in `build_artifacts/` after the pipeline completes.
+
+---
+
+## Environment Variables Set Per Stage
+
+| Variable | Value |
+|---|---|
+| `WORKSPACE` | `stage_workspace/` — ephemeral scratch dir for this stage |
+| `CONFIG_FILE` | `stage_workspace/pipeline-config.json` — restored from `build_artifacts/` |
+| `INPUT_ARTIFACTS_DIR` | `stage_workspace/` — inputs copied in from `build_artifacts/` |
+| `TARGET_DIR` | `stage_workspace/target/` — stage writes outputs here |
+| `BUILD_NUMBER` | `local-YYYYMMDD-HHMMSS` (or `--build-number` value) |
+| `PIPELINE_ROOT` | Root of the `ci-adoptium-pipelines` checkout |
+
+---
+
+## Troubleshooting
+
+### "Workspace already exists" error on fresh build
+
+The runner refuses to overwrite an existing workspace without an explicit instruction. Use `--clean-workspace` to remove it first, or `--start-from-stage` to continue from where it left off.
+
+### "build_artifacts/ does not exist" on restart
+
+The workspace was created by an older version of the local runner (which used `artifacts/` instead of `build_artifacts/`). Run with `--clean-workspace` to start fresh.
+
+### Initialize fails — configuration not found
+
+- Verify `--config-repo-url` points to a reachable repository
+- Confirm the repo contains `configurations/` and `adoptium_pipeline_config.json`
+- Check that `configFilePrefix` in `adoptium_pipeline_config.json` matches the actual config directory name
+- Use `tools/` to convert legacy Groovy configs if migrating
+
+### Build fails — missing dependencies
+
+Ensure the following are installed on the build machine: `git`, `make`, `gcc`/`clang`, a boot JDK (N−1 version of the target JDK). The boot JDK must be in `PATH` or `JAVA_HOME` must be set.
+
+### Build time
+
+A full JDK build typically takes 30–60 minutes. Use `--skip-build` to test configuration generation only, or `--no-tests --no-installers` to get just the JDK tarball.
+
+### Script not executable
+
+```bash
+chmod +x ci/local/run-pipeline.py
+chmod +x scripts/stages/*.sh scripts/lib/*.sh
+```
+
+---
 
 ## See Also
 
-- [`CODE_CONFIG_SEPARATION.md`](CODE_CONFIG_SEPARATION.md) — JSON configuration details
-- [`CI_AGNOSTIC_ARCHITECTURE.md`](CI_AGNOSTIC_ARCHITECTURE.md) — Architecture overview
-- [`ci/local/README.md`](../ci/local/README.md) — Local runner full reference
+- [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md) — workspace layout, archive/restore semantics, validation rules
+- [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) — config repo structure and `pipeline-config.json` schema
+- [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md) — reproducible build comparison details
+- [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) — overall pipeline architecture
+- [`ci/local/README.md`](../ci/local/README.md) — local runner module README
