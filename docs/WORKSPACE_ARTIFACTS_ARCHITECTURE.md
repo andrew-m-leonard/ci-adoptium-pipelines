@@ -2,267 +2,232 @@
 
 ## Overview
 
-The pipeline uses a clear separation between workspace (ephemeral, stage-specific) and artifacts (persistent, cross-stage) to support restartable pipelines that may execute stages on different nodes.
+The pipeline maintains a clear separation between **ephemeral workspace** (stage working directory, cleaned between stages) and **persistent artifacts** (cross-stage outputs that survive restarts). Both Jenkins and the local runner honour this contract, but the way the underlying directories are structured — and how the standard `WORKSPACE`, `TARGET_DIR`, and `INPUT_ARTIFACTS_DIR` environment variables are set — differs significantly between the two.
 
-## Directory Structure
+Understanding these differences is important when writing stage scripts that must work identically in both environments.
 
-### Local Execution (run-pipeline.py)
+---
+
+## Common Interface Contract
+
+Every stage script receives the same three environment variables regardless of which CI system is running it. Their **meaning** is consistent; only their **physical paths** differ:
+
+| Variable | Meaning | Jenkins value | Local runner value |
+|---|---|---|---|
+| `WORKSPACE` | Ephemeral scratch directory for this stage | Jenkins workspace root (cleaned by `cleanWs()`) | `<pipeline_workspace>/stage_workspace/` |
+| `CONFIG_FILE` | Path to `pipeline-config.json` | `${INPUT_ARTIFACTS_DIR}/pipeline-config.json` | `<pipeline_workspace>/pipeline-config.json` |
+| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}/stage_input_artifacts/` | `<pipeline_workspace>/artifacts/` |
+| `TARGET_DIR` | Directory where this stage writes its output artifacts | `${WORKSPACE}/<stage>_output/` (e.g. `build_output`) | `<pipeline_workspace>/artifacts/` |
+| `BUILD_NUMBER` | Build identifier | Jenkins build number | `local-<YYYYMMDD-HHMMSS>` |
+
+`validate_standard_environment()` in [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) checks `WORKSPACE`, `CONFIG_FILE`, and sets the `TARGET_DIR` default to `${WORKSPACE}/workspace/target` if not already set by the orchestration layer.
+
+---
+
+## Jenkins Architecture
+
+### Directory Layout (per stage)
+
+Every stage begins with a fresh workspace — `cleanWs()` wipes the entire `WORKSPACE` root. The orchestration layer then re-populates it:
 
 ```
-${WORKSPACE}/                    # Base workspace directory
-├── stage_workspace/             # Ephemeral workspace (cleaned before/after each stage)
-│   └── [stage-specific files]  # Temporary files, cloned repos, build outputs
+${WORKSPACE}/                         # Jenkins workspace root
+├── ci/                               # ← checked out from ci-adoptium-pipelines (checkout scm)
+│   └── jenkins/lib/
+│       ├── PipelineHelper.groovy
+│       └── ...
+├── scripts/                          # ← checked out from ci-adoptium-pipelines
+│   └── stages/, lib/
+├── config-repo/                      # ← sparse-checkout: configurations/, vendor-scripts/,
+│   ├── configurations/               #   adoptium_pipeline_config.json
+│   ├── vendor-scripts/
+│   └── adoptium_pipeline_config.json
+└── stage_input_artifacts/            # ← copyArtifacts pulls here: pipeline-config.json + stage inputs
+    ├── pipeline-config.json          #   (created by initializeStage when INPUT_ARTIFACTS_DIR is set)
+    └── <previous stage outputs>
+
+# Outputs:
+${WORKSPACE}/<stage>_output/          # ← stage writes here (e.g. build_output/, smoke_test_output/)
+                                      #   then archiveArtifacts uploads to Jenkins artifact store
+```
+
+### How `WORKSPACE` is set
+
+Jenkins sets `WORKSPACE` automatically to the job's workspace directory. `PipelineHelper.initializeStage()` calls `cleanWs()` on it at the start of every stage, so each stage starts from a completely empty directory.
+
+### How artifacts flow
+
+```
+Initialize stage
+  ConfigHelper.generatePipelineConfig()
+  → writes pipeline-config.json to WORKSPACE root
+  → archiveArtifacts: pipeline-config.json
+
+Build stage (and every subsequent stage)
+  initializeStage():
+    cleanWs()                          # wipe entire WORKSPACE
+    checkout scm                       # restore scripts/
+    sparse-checkout config-repo        # restore vendor-scripts/ + config files
+    copyArtifacts(filter, target: stage_input_artifacts/)
+      # retrieves: pipeline-config.json + prior stage outputs
+
+  env.TARGET_DIR = "${WORKSPACE}/build_output"
+  stageRunner.run('02-build', config)
+    # stage script reads from INPUT_ARTIFACTS_DIR, writes to TARGET_DIR
+
+  archiveArtifacts("${TARGET_DIR}/**/*")
+    # uploads build_output/** to Jenkins artifact store
+
+  finalizeStage()
+    # optional cleanWs()
+```
+
+### Jenkins-specific notes
+
+- `WORKSPACE` is cleaned and **fully reconstructed** on every stage allocation (including `checkout scm` + config-repo sparse-checkout). Stages may run on different agents.
+- `INPUT_ARTIFACTS_DIR` is always a **sub-directory** of `WORKSPACE` (`stage_input_artifacts/`). Stage scripts must not assume it is the same directory as `TARGET_DIR`.
+- `TARGET_DIR` is a **dedicated per-stage sub-directory** of `WORKSPACE` (e.g. `build_output`, `smoke_test_output`). After the stage, its contents are archived and the directory can be discarded.
+- Artifacts never touch the local filesystem between stages — they travel via `archiveArtifacts` → Jenkins artifact store → `copyArtifacts`.
+
+---
+
+## Local Runner Architecture
+
+### Directory Layout
+
+The local runner uses a **persistent root** (`pipeline_workspace`) that survives across stages, containing two purpose-specific sub-directories:
+
+```
+<pipeline_workspace>/                 # Root — persists for the life of the pipeline run
+│                                     # (default: ~/openjdk-build)
+├── pipeline-config.json              # Generated by Initialize; never moved or cleaned
+├── config-repo/                      # git clone of the config repo (Initialize only)
+│   ├── configurations/
+│   ├── vendor-scripts/
+│   └── adoptium_pipeline_config.json
 │
-├── artifacts/                   # Persistent artifacts (never auto-cleaned)
-│   ├── jdk/                    # Built JDK tarballs
-│   ├── signed/                 # Signed artifacts
-│   ├── installers/             # Built installers
-│   ├── metadata/               # Build metadata, SBOMs
-│   ├── test-results/           # Test results and reports
-│   └── build-uid.txt           # Workspace validation marker
+├── stage_workspace/                  # Ephemeral — cleaned BEFORE every stage
+│   └── (stage working files,         # and optionally AFTER (cleanWorkspaceAfterStage)
+│       cloned repos, build scratch)
 │
-├── config-repo/                # Cloned configuration repository
-└── pipeline-config.json        # Generated pipeline configuration
+└── artifacts/                        # Persistent — never auto-cleaned
+    └── (all stage outputs:           # both INPUT_ARTIFACTS_DIR and TARGET_DIR
+        *.tar.gz, *.zip, metadata/,   # point here for all post-Initialize stages
+        test results, etc.)
 ```
 
-**Key Points**:
-- `stage_workspace/` is cleaned before and optionally after each stage
-- `artifacts/` persists across all stages and is never auto-cleaned
-- Each stage uses `stage_workspace/` for WORKSPACE and `artifacts/` for TARGET_DIR
-- `build-uid.txt` in artifacts/ validates workspace integrity
+### How `WORKSPACE` is set
 
-**Note**: The `artifacts/` directory is specific to local execution. Jenkins uses `archiveArtifacts` and `copyArtifacts` for artifact management instead of a local directory.
+`run-pipeline.py` sets `env['WORKSPACE'] = str(self.stage_workspace)` for every stage. Stage scripts therefore see `WORKSPACE` pointing to `<pipeline_workspace>/stage_workspace/` — **not** the pipeline root.
 
-### Jenkins Execution
+`pipeline-config.json` lives at the pipeline root (`<pipeline_workspace>/pipeline-config.json`), not inside `stage_workspace/`. The `CONFIG_FILE` env var is set to this root-level path directly.
+
+### How artifacts flow
 
 ```
-${WORKSPACE}/                    # Jenkins workspace directory
-├── stage_workspace/             # Ephemeral workspace (cleaned via cleanWs())
-│   └── [stage-specific files]  # Temporary files, cloned repos, build outputs
-│
-├── config-repo/                # Cloned configuration repository
-└── pipeline-config.json        # Generated pipeline configuration
+Initialize stage
+  workspace_mgr.cleanup_stage_workspace('pre')   # clean stage_workspace/
+  git clone config-repo → pipeline_workspace/config-repo/
+  load-json-config.py → writes pipeline_workspace/pipeline-config.json
+  workspace_mgr.cleanup_stage_workspace('post')  # optional
 
-# Artifacts managed by Jenkins archiveArtifacts/copyArtifacts
-# (not stored in workspace directory)
+Build stage (and every subsequent stage)
+  workspace_mgr.cleanup_stage_workspace('pre')   # clean stage_workspace/
+  env['WORKSPACE']           = stage_workspace/
+  env['CONFIG_FILE']         = pipeline_workspace/pipeline-config.json
+  env['INPUT_ARTIFACTS_DIR'] = pipeline_workspace/artifacts/
+  env['TARGET_DIR']          = pipeline_workspace/artifacts/
+
+  StageResolver.run('02-build', env)
+    # stage script reads from artifacts/ (INPUT_ARTIFACTS_DIR)
+    # stage script writes to artifacts/ (TARGET_DIR)
+    # temporary work done inside stage_workspace/ (WORKSPACE)
+
+  workspace_mgr.cleanup_stage_workspace('post')  # optional
 ```
 
-**Key Points**:
-- Jenkins uses native `cleanWs()` utility for workspace cleanup
-- Artifacts are managed through Jenkins' artifact system, not local directories
-- Each stage cleans workspace before execution using `cleanWs()`
-- Optional post-stage cleanup controlled by `CLEAN_WORKSPACE_AFTER_STAGE` parameter
+### Local-runner-specific notes
 
-## Key Principles
+- `WORKSPACE` points to `stage_workspace/` — the ephemeral scratch area. Stage scripts using `${WORKSPACE}` for temporary files get a clean directory on every run.
+- `INPUT_ARTIFACTS_DIR` and `TARGET_DIR` **both point to the same directory** (`artifacts/`). Outputs from previous stages are already present when the next stage starts; no copy step is needed.
+- `pipeline-config.json` lives at the pipeline root, **outside** `stage_workspace/`. It is never cleaned by the pre/post stage cleanup.
+- `config-repo/` is cloned once during Initialize and left at the pipeline root. It is not re-cloned for subsequent stages (unlike Jenkins which sparse-checks out on every stage).
+- The `artifacts/` directory is never automatically cleaned. To start fresh, use `--clean-workspace` which removes the entire `pipeline_workspace`.
 
-### 1. Workspace is Ephemeral
+---
 
-**Purpose**: Provide clean working directory for each stage
+## Side-by-Side Comparison
 
-**Lifecycle**:
-- **Before Stage**: Always cleaned (ensures fresh start, critical for restartability)
-- **During Stage**: Stage writes temporary files, intermediate artifacts
-- **After Stage**: Optionally cleaned (controlled by `cleanWorkspaceAfterStage`)
+| Aspect | Jenkins | Local runner |
+|---|---|---|
+| `WORKSPACE` points to | Jenkins workspace root | `<pipeline_workspace>/stage_workspace/` |
+| `CONFIG_FILE` points to | `${INPUT_ARTIFACTS_DIR}/pipeline-config.json` | `<pipeline_workspace>/pipeline-config.json` |
+| `INPUT_ARTIFACTS_DIR` | `${WORKSPACE}/stage_input_artifacts/` | `<pipeline_workspace>/artifacts/` |
+| `TARGET_DIR` | `${WORKSPACE}/<stage>_output/` (unique per stage) | `<pipeline_workspace>/artifacts/` (shared) |
+| `INPUT_ARTIFACTS_DIR` == `TARGET_DIR`? | **No** — separate directories | **Yes** — same `artifacts/` directory |
+| Ephemeral area cleaned | `cleanWs()` wipes entire `WORKSPACE` | `stage_workspace/` wiped by `WorkspaceManager` |
+| config-repo checkout | Sparse-checkout on **every stage** | `git clone` **once** at Initialize |
+| `scripts/` availability | Re-checked-out via `checkout scm` on every stage | Permanent on disk (runner's own directory) |
+| Artifact transfer between stages | `archiveArtifacts` → Jenkins store → `copyArtifacts` | Direct file presence in `artifacts/` |
+| Pre-stage cleanup scope | Entire `WORKSPACE` (all checked-out files gone) | Only `stage_workspace/` (artifacts/ and config-repo/ untouched) |
+| Post-stage cleanup | `cleanWs()` in `finalizeStage()` if `CLEAN_WORKSPACE_AFTER_STAGE=true` | `shutil.rmtree(stage_workspace)` if `cleanWorkspaceAfterStage=true` |
 
-**Why Clean Before Every Stage?**
-- Restartable pipelines may execute on different nodes
-- Previous stage artifacts must come from artifact storage, not local workspace
-- Prevents pollution from failed/aborted previous runs
-- Ensures consistent behavior on first run vs restart
+---
 
-### 2. Artifacts are Persistent
+## Writing Stage Scripts That Work in Both Environments
 
-**Purpose**: Store outputs that must persist across stages and restarts
+Because `INPUT_ARTIFACTS_DIR` and `TARGET_DIR` have different physical paths on each system but are always provided via environment variables, stage scripts should:
 
-**Lifecycle**:
-- **Created**: By stages during execution
-- **Persisted**: Copied to artifact storage (Jenkins) or local directory (run-pipeline.py)
-- **Retrieved**: By subsequent stages from artifact storage
-- **Never Auto-Cleaned**: Manual cleanup only
+1. **Never hardcode paths** — always use `${WORKSPACE}`, `${CONFIG_FILE}`, `${INPUT_ARTIFACTS_DIR}`, `${TARGET_DIR}`
+2. **Write all outputs to `${TARGET_DIR}`** — the orchestration layer handles persistence (archive vs direct write)
+3. **Read all inputs from `${INPUT_ARTIFACTS_DIR}`** — do not assume they are already in `${WORKSPACE}`
+4. **Use `${WORKSPACE}` only for ephemeral scratch** — it will be empty at stage start on both systems
+5. **Call `validate_standard_environment`** — it verifies `WORKSPACE` and `CONFIG_FILE` are set and sets the `TARGET_DIR` default
 
-**What Goes in Artifacts?**
-- JDK tarballs (`.tar.gz`, `.zip`)
-- Signed binaries
-- Installers (`.pkg`, `.msi`, `.deb`, `.rpm`)
-- Metadata files (SBOMs, checksums, build info)
-- Test results and reports
+```bash
+# Correct — works on both Jenkins and local
+source "${SCRIPT_DIR}/../lib/config-utils.sh"
+validate_standard_environment
 
-### 3. Stage Workflow
+local config_file="${CONFIG_FILE}"
+local input_dir="${INPUT_ARTIFACTS_DIR}"
+local output_dir="${TARGET_DIR}"
+local scratch="${WORKSPACE}/my-stage-scratch"
 
-Every stage follows this pattern:
-
-**Local Execution (run-pipeline.py)**:
-```
-1. Validate workspace (check build-uid.txt)
-2. Clean stage_workspace/ (always)
-3. Retrieve artifacts from artifacts/ directory (if needed)
-4. Execute stage logic in stage_workspace/
-5. Copy outputs to artifacts/ directory
-6. Optionally clean stage_workspace/ (if cleanWorkspaceAfterStage=true)
-```
-
-**Jenkins Execution**:
-```
-1. Clean workspace with cleanWs() (always, before stage)
-2. Retrieve artifacts using copyArtifacts (if needed)
-3. Execute stage logic in workspace
-4. Archive outputs using archiveArtifacts
-5. Optionally clean workspace with cleanWs() (if CLEAN_WORKSPACE_AFTER_STAGE=true)
+mkdir -p "${scratch}" "${output_dir}"
+# read inputs from ${input_dir}/...
+# write outputs to ${output_dir}/...
+# temp files under ${scratch}/... (will be cleaned before next stage)
 ```
 
-## Configuration
-
-### Single Parameter
-
-```json
-{
-  "parameters": {
-    "cleanWorkspaceAfterStage": true
-  }
-}
-```
-
-**cleanWorkspaceAfterStage**:
-- **Type**: Boolean
-- **Default**: `true`
-- **Description**: Clean workspace after stage completes
-- **Use Cases**:
-  - `true`: Production builds, save disk space
-  - `false`: Debugging, inspect workspace after failure
-
-**Removed Parameters**:
-- `cleanWorkspace`: Removed (always true for restartability)
-
-## Implementation Details
-
-### Local Execution (run-pipeline.py)
-
-**Directory Structure**:
-```
-~/openjdk-build/              # Workspace root
-├── workspace/                # Ephemeral (cleaned before each stage)
-├── artifacts/                # Persistent (never auto-cleaned, local only)
-├── config-repo/             # Configuration repository
-└── pipeline-config.json     # Generated configuration
-```
-
-**Workspace Validation**:
-- When starting a new build (not using `--start-from-stage`), the workspace directory must NOT exist
-- This prevents pollution from previous builds and ensures clean state
-- Use `--clean-workspace` flag to remove existing workspace, or manually delete it
-- When restarting from a stage (`--start-from-stage`), existing workspace is expected and required
-
-**Stage Pattern**:
-```python
-def stage_build(self):
-    # 1. Clean workspace
-    self.clean_workspace()
-
-    # 2. No artifacts to retrieve (first stage)
-
-    # 3. Execute build
-    artifacts_dir = self.workspace / 'artifacts'
-    workspace_dir = self.workspace / 'workspace' / 'build'
-
-    env['WORKSPACE_DIR'] = str(workspace_dir)
-    env['ARTIFACTS_DIR'] = str(artifacts_dir)
-
-    subprocess.run(['bash', 'scripts/stages/02-build.sh'], env=env)
-
-    # 4. Artifacts already in artifacts/ (script writes there)
-
-    # 5. Optional cleanup
-    if self.should_clean_after_stage():
-        self.clean_workspace()
-```
-
-### Jenkins Execution
-
-**Directory Structure**:
-```
-${WORKSPACE}/                 # Jenkins workspace (cleaned by cleanWs() at start of each stage)
-├── config-repo/             # Config repo (re-cloned each stage by initializeStage)
-├── stage_input_artifacts/   # Copied in by copyArtifacts
-└── pipeline-config.json     # Copied in by copyArtifacts
-
-# Artifacts managed by Jenkins artifact store:
-# - archiveArtifacts: stores outputs from TARGET_DIR
-# - copyArtifacts: retrieves previous stage outputs into stage_input_artifacts/
-```
-
-**Stage Pattern** (via `PipelineHelper.initializeStage` + `stageRunner.run`):
-```groovy
-pipelineHelper.executeStageWithTracking('Build') {
-    def config = pipelineHelper.initializeStage('Build', ['Initialize'])
-    // ^ cleanWs, checkout scm, clone config-repo, copyArtifacts(pipeline-config.json)
-
-    env.TARGET_DIR = "${WORKSPACE}/build_output"
-    def exitCode = stageRunner.run('02-build', config)
-    if (exitCode != 0) { error("Build failed") }
-
-    dir(env.TARGET_DIR) {
-        archiveArtifacts artifacts: '**/*', fingerprint: true
-    }
-    pipelineHelper.finalizeStage('Build')
-}
-```
-
-## Benefits
-
-1. **Restartability**: Clean workspace ensures consistent behavior
-2. **Clarity**: Clear separation between ephemeral and persistent
-3. **Debugging**: Can disable post-stage cleanup to inspect workspace
-4. **Disk Management**: Can clean workspace to save space
-5. **Node Migration**: Stages can run on different nodes (artifacts via Jenkins)
-
-## Examples
-
-### Example 1: Production Build
-
-```json
-{
-  "parameters": {
-    "cleanWorkspaceAfterStage": true
-  }
-}
-```
-
-**Behavior**:
-- Workspace cleaned before each stage (always)
-- Workspace cleaned after each stage (save disk space)
-- Artifacts persist in `artifacts/` directory
-
-### Example 2: Debug Build
-
-```json
-{
-  "parameters": {
-    "cleanWorkspaceAfterStage": false
-  }
-}
-```
-
-**Behavior**:
-- Workspace cleaned before each stage (always)
-- Workspace kept after each stage (for inspection)
-- Artifacts persist in `artifacts/` directory
+---
 
 ## Troubleshooting
 
-### Issue: Stage Can't Find Previous Artifacts
+### Stage script can't find `pipeline-config.json`
 
-**Cause**: Artifacts not copied to `artifacts/` directory
+Check `CONFIG_FILE` is set correctly. On Jenkins it is set by `PipelineHelper.initializeStage()` to `${INPUT_ARTIFACTS_DIR}/pipeline-config.json`. Locally it is set by `run-pipeline.py` to `<pipeline_workspace>/pipeline-config.json`. Never assume `CONFIG_FILE` is inside `WORKSPACE`.
 
-**Solution**: Check stage script writes to `${ARTIFACTS_DIR}`
+### Stage outputs not found by next stage (Jenkins)
 
-### Issue: Workspace Not Clean
+The stage must `archiveArtifacts` its `TARGET_DIR` output, and the next stage's `artifactFilter` in `initializeStage()` must include the relevant glob. Missing a file from the filter means `copyArtifacts` won't retrieve it.
 
-**Cause**: Cleanup script not running
+### Stage outputs not found by next stage (Local)
 
-**Solution**: Check workspace cleanup is called before stage
+`TARGET_DIR` and `INPUT_ARTIFACTS_DIR` both point to `artifacts/`. If outputs are missing, the stage script may have written to `WORKSPACE` (ephemeral) instead of `TARGET_DIR` (persistent). Check the script writes to `${TARGET_DIR}`.
 
-### Issue: Disk Space Full
+### Disk space full (local)
 
-**Cause**: `cleanWorkspaceAfterStage: false` and large workspaces
+`artifacts/` is never auto-cleaned. Use `--clean-workspace` on the next run, or manually remove `<pipeline_workspace>/artifacts/`. Individual files can be deleted without affecting `stage_workspace/` or `pipeline-config.json`.
 
-**Solution**: Set `cleanWorkspaceAfterStage: true` or manually clean
+### `cleanWs()` or workspace cleanup not happening (Jenkins)
+
+`finalizeStage()` only calls `cleanWs()` when the `CLEAN_WORKSPACE_AFTER_STAGE` job parameter is `true`. The pre-stage `cleanWs()` inside `initializeStage()` always runs unconditionally.
+
+## Related Documentation
+
+- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) — local runner workspace validation rules and error messages
+- [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) — artifact flow diagram (Jenkins `copyArtifacts` ↔ `archiveArtifacts`)
+- [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) — stage script template using these env vars
+- [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) — `validate_standard_environment()` implementation
+- [`ci/local/workspace_manager.py`](../ci/local/workspace_manager.py) — `WorkspaceManager` implementation
