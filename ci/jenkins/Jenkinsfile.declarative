@@ -118,7 +118,7 @@ pipeline {
             }
         }
 
-        stage('Internal Sign') {
+        stage('Internal Code Sign') {
             agent {
                 label 'eclipse-codesign'
             }
@@ -135,19 +135,19 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('Internal Sign') {
-                        def config = pipelineHelper.initializeStage('Internal Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
+                    pipelineHelper.executeStageWithTracking('Internal Code Sign') {
+                        def config = pipelineHelper.initializeStage('Internal Code Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
-                        def signExitCode = stageRunner.run('03-internal-sign', config)
-                        if (signExitCode != 0) { error("Internal Sign failed with exit code: ${signExitCode}") }
+                        def signExitCode = stageRunner.run('03-internal-code-sign', config)
+                        if (signExitCode != 0) { error("Internal Code Sign failed with exit code: ${signExitCode}") }
 
-                        pipelineHelper.finalizeStage('Internal Sign')
+                        pipelineHelper.finalizeStage('Internal Code Sign')
                     }
                 }
             }
         }
 
-        stage('Assemble') {
+        stage('Assemble Images') {
             agent {
                 label getNodeLabel()
             }
@@ -164,19 +164,19 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('Assemble') {
-                        def config = pipelineHelper.initializeStage('Assemble', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
+                    pipelineHelper.executeStageWithTracking('Assemble Images') {
+                        def config = pipelineHelper.initializeStage('Assemble Images', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
-                        def assembleExitCode = stageRunner.run('04-assemble', config)
-                        if (assembleExitCode != 0) { error("Assemble failed with exit code: ${assembleExitCode}") }
+                        def assembleExitCode = stageRunner.run('04-assemble-images', config)
+                        if (assembleExitCode != 0) { error("Assemble Images failed with exit code: ${assembleExitCode}") }
 
-                        pipelineHelper.finalizeStage('Assemble')
+                        pipelineHelper.finalizeStage('Assemble Images')
                     }
                 }
             }
         }
 
-        stage('Sign Artifacts') {
+        stage('Post-Build Code Sign') {
             agent {
                 label 'worker'
             }
@@ -186,13 +186,13 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('Sign Artifacts') {
-                        def config = pipelineHelper.initializeStage('Sign Artifacts', ['Assemble'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
+                    pipelineHelper.executeStageWithTracking('Post-Build Code Sign') {
+                        def config = pipelineHelper.initializeStage('Post-Build Code Sign', ['Assemble Images'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
-                        def signExitCode = stageRunner.run('06-sign', config)
-                        if (signExitCode != 0) { error("Sign Artifacts failed with exit code: ${signExitCode}") }
+                        def signExitCode = stageRunner.run('06-post-build-code-sign', config)
+                        if (signExitCode != 0) { error("Post-Build Code Sign failed with exit code: ${signExitCode}") }
 
-                        pipelineHelper.finalizeStage('Sign Artifacts')
+                        pipelineHelper.finalizeStage('Post-Build Code Sign')
                     }
                 }
             }
@@ -220,7 +220,7 @@ pipeline {
             }
         }
 
-        stage('Sign Installers') {
+        stage('Code Sign Installer') {
             agent {
                 label 'worker'
             }
@@ -233,25 +233,52 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('Sign Installers') {
-                        def config = pipelineHelper.initializeStage('Sign Installers', ['Build Installers'], 'pipeline-config.json,installers/**/*')
+                    pipelineHelper.executeStageWithTracking('Code Sign Installer') {
+                        def config = pipelineHelper.initializeStage('Code Sign Installer', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
-                        def signInstExitCode = stageRunner.run('08-sign-installer', config)
-                        if (signInstExitCode != 0) { error("Sign Installers failed with exit code: ${signInstExitCode}") }
+                        def signInstExitCode = stageRunner.run('08-code-sign-installer', config)
+                        if (signInstExitCode != 0) { error("Code Sign Installer failed with exit code: ${signInstExitCode}") }
 
-                        pipelineHelper.finalizeStage('Sign Installers')
+                        pipelineHelper.finalizeStage('Code Sign Installer')
                     }
                 }
             }
         }
 
-        stage('GPG Sign') {
+        stage('SBOM Sign') {
             agent {
                 label 'worker'
             }
             when {
                 allOf {
-                    expression { env.CONFIG_VARIANT == 'temurin' }
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                    expression { config.buildConfig.BUILD_ARGS?.contains('--create-sbom') }
+                    not {
+                        expression { env.JOB_NAME?.contains('pr-tester') }
+                    }
+                }
+            }
+            steps {
+                script {
+                    ensureLibsLoaded()
+                    pipelineHelper.executeStageWithTracking('SBOM Sign') {
+                        def config = pipelineHelper.initializeStage('SBOM Sign', ['Post-Build Code Sign'], 'pipeline-config.json,**/*.json')
+
+                        def sbomExitCode = stageRunner.run('09-sbom-sign', config)
+                        if (sbomExitCode != 0) { error("SBOM Sign failed with exit code: ${sbomExitCode}") }
+
+                        pipelineHelper.finalizeStage('SBOM Sign')
+                    }
+                }
+            }
+        }
+
+        stage('Digital Artifact Sign') {
+            agent {
+                label 'worker'
+            }
+            when {
+                allOf {
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
@@ -261,19 +288,13 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('GPG Sign') {
-                        def config = pipelineHelper.initializeStage('GPG Sign', ['Sign Artifacts'], 'pipeline-config.json,signed/**/*,signed-installers/**/*')
+                    pipelineHelper.executeStageWithTracking('Digital Artifact Sign') {
+                        def config = pipelineHelper.initializeStage('Digital Artifact Sign', ['Post-Build Code Sign'], 'pipeline-config.json,signed/**/*,signed-installers/**/*,signed-sbom/**/*')
 
-                        def gpgExitCode = stageRunner.run('09-gpg-sign', config)
-                        if (gpgExitCode != 0) { error("GPG Sign failed with exit code: ${gpgExitCode}") }
+                        def gpgExitCode = stageRunner.run('10-digital-artifact-sign', config)
+                        if (gpgExitCode != 0) { error("Digital Artifact Sign failed with exit code: ${gpgExitCode}") }
 
-                        if (config.buildConfig.BUILD_ARGS?.contains('--create-sbom')) {
-                            echo "=== SBOM JSF Signing ==="
-                            def sbomExitCode = stageRunner.run('10-sbom-sign', config)
-                            if (sbomExitCode != 0) { error("SBOM Sign failed with exit code: ${sbomExitCode}") }
-                        }
-
-                        pipelineHelper.finalizeStage('GPG Sign')
+                        pipelineHelper.finalizeStage('Digital Artifact Sign')
                     }
                 }
             }
@@ -285,7 +306,6 @@ pipeline {
             }
             when {
                 allOf {
-                    expression { env.CONFIG_VARIANT == 'temurin' }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
@@ -296,7 +316,7 @@ pipeline {
                 script {
                     ensureLibsLoaded()
                     pipelineHelper.executeStageWithTracking('Verify Signing') {
-                        def config = pipelineHelper.initializeStage('Verify Signing', ['GPG Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
+                        def config = pipelineHelper.initializeStage('Verify Signing', ['Digital Artifact Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
                         def verifyExitCode = stageRunner.run('11-verify-signing', config)
                         if (verifyExitCode != 0) { error("Verify Signing failed with exit code: ${verifyExitCode}") }

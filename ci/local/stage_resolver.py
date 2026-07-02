@@ -11,7 +11,7 @@ Resolution order for a given stem (e.g. '13-smoke-tests'):
 Stage enablement is driven by parameters in pipeline-config.json (the same
 CONFIG_FILE used by stage scripts).  Mapping:
 
-  06-sign                → parameters.enableSigner
+  06-post-build-code-sign → parameters.enableSigner
   07-installer           → parameters.enableInstallers
   13-smoke-tests         → parameters.enableTests
   20-reproducible-compare→ parameters.compareBuild
@@ -35,7 +35,7 @@ from pathlib import Path
 # Maps stage stems to the parameter key in pipeline-config.json that gates them.
 # Stages not listed here are always enabled.
 _STAGE_PARAMETER_GATE = {
-    '06-sign': 'enableSigner',
+    '06-post-build-code-sign': 'enableSigner',
     '07-installer': 'enableInstallers',
     '13-smoke-tests': 'enableTests',
     '20-reproducible-compare': 'compareBuild',

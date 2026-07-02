@@ -447,9 +447,9 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
         env['TARGET_DIR'] = str(self.stage_workspace / 'target')
 
-        exit_code = self._make_resolver().run('06-sign', env)
+        exit_code = self._make_resolver().run('06-post-build-code-sign', env)
         if exit_code != 0:
-            raise subprocess.CalledProcessError(exit_code, '06-sign')
+            raise subprocess.CalledProcessError(exit_code, '06-post-build-code-sign')
 
         # Archive signed outputs
         self.workspace_mgr.archive_stage_outputs('Sign Artifacts')

@@ -153,8 +153,8 @@ Optionally, vendor-specific stage overrides:
 ```
 <config-repo>/
 └── vendor-scripts/
-    ├── 02-build.sh       # Replaces scripts/stages/02-build.sh for this vendor
-    └── 09-gpg-sign.sh
+    ├── 02-build.sh                    # Replaces scripts/stages/02-build.sh for this vendor
+    └── 10-digital-artifact-sign.sh   # Replaces scripts/stages/10-digital-artifact-sign.sh
 ```
 
 ## Troubleshooting

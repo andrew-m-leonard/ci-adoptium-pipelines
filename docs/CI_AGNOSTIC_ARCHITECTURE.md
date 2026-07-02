@@ -74,16 +74,16 @@ The solution is a **CI-agnostic architecture** that separates orchestration from
 ┌──────────────────────────────────────────────────────────────┐
 │  Layer 2: Stage Scripts (CI-Agnostic Bash)                   │
 │                                                              │
-│  config-repo/vendor-scripts/   scripts/stages/              │
-│  ├── 02-build.sh  (optional)   ├── 02-build.sh  (default)   │
-│  ├── 09-gpg-sign.sh            ├── 03-internal-sign.sh      │
-│  └── ...                       ├── 06-sign.sh               │
-│                                ├── 07-installer.sh           │
-│  Vendor overrides take         ├── 09-gpg-sign.sh           │
-│  priority over defaults        ├── 13-smoke-tests.sh        │
-│                                ├── 14-aqa-tests.sh          │
-│                                ├── 20-reproducible-compare  │
-│                                └── ...                      │
+│  config-repo/vendor-scripts/         scripts/stages/                    │
+│  ├── 02-build.sh  (optional)         ├── 02-build.sh  (default)         │
+│  ├── 10-digital-artifact-sign.sh     ├── 03-internal-code-sign.sh       │
+│  └── ...                             ├── 06-post-build-code-sign.sh     │
+│                                      ├── 07-installer.sh                │
+│  Vendor overrides take               ├── 10-digital-artifact-sign.sh    │
+│  priority over defaults              ├── 13-smoke-tests.sh              │
+│                                      ├── 14-aqa-tests.sh                │
+│                                      ├── 20-reproducible-compare.sh     │
+│                                      └── ...                            │
 │                                                              │
 │  scripts/lib/  (shared utilities)                           │
 │  ├── logging-utils.sh                                       │
@@ -145,13 +145,14 @@ The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the
 |---|---|---|---|---|
 | 01 | Initialize | *(ConfigHelper.groovy + load-json-config.py)* | — | `pipeline-config.json` |
 | 02 | Build | `02-build.sh` | Initialize | JDK tarballs/zips, metadata, SBOMs |
-| 03 | Internal Sign | `03-internal-sign.sh` | Build | Signed JMODs (macOS/Windows, JDK ≥ 11) |
-| 04 | Assemble | `04-assemble.sh` | Internal Sign | Assembled JDK image |
-| 06 | Sign Artifacts | `06-sign.sh` | Assemble or Build | Signed archives |
-| 07 | Build Installers | `07-installer.sh` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
-| 08 | Sign Installers | `08-sign-installer.sh` | Build Installers | Signed installer packages |
-| 09 | GPG Sign | `09-gpg-sign.sh` | Sign Artifacts | `.sig` / `.asc` GPG signatures |
-| 11 | Verify Signing | `11-verify-signing.sh` | GPG Sign | Verification report |
+| 03 | Internal Code Sign | `03-internal-code-sign.sh` | Build | Signed JMODs (macOS/Windows, JDK ≥ 11) |
+| 04 | Assemble Images | `04-assemble-images.sh` | Internal Code Sign | Assembled JDK image |
+| 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | Assemble Images or Build | Code-signed executables |
+| 07 | Build Installer | `07-installer.sh` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
+| 08 | Code Sign Installer | `08-code-sign-installer.sh` | Build Installer | Signed + notarized installer packages |
+| 09 | SBOM Sign | `09-sbom-sign.sh` | Post-Build Code Sign | JSF-signed SBOM |
+| 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | SBOM Sign | `.sig` / `.asc` GPG signatures |
+| 11 | Verify Signing | `11-verify-signing.sh` | Digital Artifact Sign | Verification report |
 | 12 | Validate SBOM | `12-validate-sbom.sh` | Build | SBOM validation report |
 | 13 | Smoke Tests | `13-smoke-tests.sh` | Build | Test results (UNSTABLE on failure) |
 | 14 | AQA Tests | `14-aqa-tests.sh` | Smoke Tests | AQA test results |
@@ -260,13 +261,13 @@ ci-adoptium-pipelines/
 ├── scripts/
 │   ├── stages/
 │   │   ├── 02-build.sh
-│   │   ├── 03-internal-sign.sh
-│   │   ├── 04-assemble.sh
-│   │   ├── 06-sign.sh
+│   │   ├── 03-internal-code-sign.sh
+│   │   ├── 04-assemble-images.sh
+│   │   ├── 06-post-build-code-sign.sh
 │   │   ├── 07-installer.sh
-│   │   ├── 08-sign-installer.sh
-│   │   ├── 09-gpg-sign.sh
-│   │   ├── 10-sbom-sign.sh
+│   │   ├── 08-code-sign-installer.sh
+│   │   ├── 09-sbom-sign.sh
+│   │   ├── 10-digital-artifact-sign.sh
 │   │   ├── 11-verify-signing.sh
 │   │   ├── 12-validate-sbom.sh
 │   │   ├── 13-smoke-tests.sh
@@ -302,9 +303,9 @@ ci-temurin-config/
 │   ├── jdk17u_pipeline_config.json
 │   ├── jdk21u_pipeline_config.json
 │   └── ...
-└── vendor-scripts/                         # Optional: overrides for default stage scripts
-    ├── 02-build.sh                         # Replaces scripts/stages/02-build.sh
-    ├── 09-gpg-sign.sh                      # Replaces scripts/stages/09-gpg-sign.sh
+└── vendor-scripts/                              # Optional: overrides for default stage scripts
+    ├── 02-build.sh                              # Replaces scripts/stages/02-build.sh
+    ├── 10-digital-artifact-sign.sh             # Replaces scripts/stages/10-digital-artifact-sign.sh
     └── ...
 ```
 

@@ -85,30 +85,30 @@ Key functions: `setup_build_environment`, `setup_temurin_build`, `setup_reproduc
 
 ---
 
-### `03-internal-sign.sh` — Internal JMOD Signing `STUB`
+### `03-internal-code-sign.sh` — Internal Code Sign `STUB`
 
-Signs individual JMOD files before assembly. Vendor-specific (Eclipse codesign node).
+Code signs EXEs/DLLs and dylibs inside JDK 11+ JMODs, before image assembly. Must run on a dedicated signing node. Windows & Mac only; not applicable to jdk8.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing `jmods/` from Build
 **Outputs:** `TARGET_DIR` containing signed jmods
 
 ---
 
-### `04-assemble.sh` — Assemble `STUB`
+### `04-assemble-images.sh` — Assemble Images `STUB`
 
-Reassembles the JDK image from signed JMODs. Vendor-specific.
+Runs the final OpenJDK `make images` processing to assemble signed JMODs into a complete JDK image. Must run after `03-internal-code-sign`. Windows & Mac only; not applicable to jdk8.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing signed jmods
 **Outputs:** `TARGET_DIR` containing assembled JDK tarballs
 
 ---
 
-### `06-sign.sh` — Sign Artifacts `STUB`
+### `06-post-build-code-sign.sh` — Post-Build Code Sign `STUB`
 
-Signs the final JDK tarballs/zips. Vendor-specific (code signing service).
+Code signs EXEs/DLLs and dylibs that were not signed in `03-internal-code-sign`. Covers all binaries for jdk8 (which has no internal signing stage), and the limited set of jdk11+ binaries outside of JMODs. Windows & Mac only.
 
-**Inputs:** `INPUT_ARTIFACTS_DIR` containing `*.tar.gz`/`*.zip`
-**Outputs:** `TARGET_DIR` containing signed artifacts
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing the assembled JDK image
+**Outputs:** `TARGET_DIR` containing code-signed output
 
 ---
 
@@ -121,39 +121,39 @@ Creates platform-specific installers (`.msi`, `.pkg`, `.deb`, `.rpm`). Vendor-sp
 
 ---
 
-### `08-sign-installer.sh` — Sign Installers `STUB`
+### `08-code-sign-installer.sh` — Code Sign Installer `STUB`
 
-Signs the installer packages. Vendor-specific.
+Code signs installer packages (`.msi` on Windows, `.pkg` on macOS). On macOS also submits to Apple for Notarization and staples the ticket. Windows & Mac only.
 
-**Inputs:** `INPUT_ARTIFACTS_DIR` containing installers
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing installers from Build Installer stage
 **Outputs:** `TARGET_DIR` containing signed installers
 
 ---
 
-### `09-gpg-sign.sh` — GPG Sign `STUB`
+### `09-sbom-sign.sh` — SBOM Sign `STUB`
 
-GPG-signs artifacts and metadata (Temurin variant only). Vendor-specific.
+JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM document. Must run before `10-digital-artifact-sign` so the signed SBOM is included in GPG armoring. Only runs when `--create-sbom` is in `BUILD_ARGS`.
 
-**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed artifacts + installers
-**Outputs:** `TARGET_DIR` containing `.sig`/`.asc` signature files
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing SBOM JSON files
+**Outputs:** `TARGET_DIR` containing JSF-signed SBOM files
 
 ---
 
-### `10-sbom-sign.sh` — SBOM JSF Sign `STUB`
+### `10-digital-artifact-sign.sh` — Digital Artifact Sign `STUB`
 
-Signs SBOM files in JSF format. Vendor-specific. Only called when `--create-sbom` is in `BUILD_ARGS`.
+Applies detached GPG signatures (`.sig` / `.asc`) to all build artifacts for public distribution verification. Covers code-signed JDK archives, installer packages, and JSF-signed SBOMs. Runs after `09-sbom-sign` so the signed SBOM is included in GPG armoring.
 
-**Inputs:** `INPUT_ARTIFACTS_DIR` containing SBOM JSON files
-**Outputs:** `TARGET_DIR` containing signed SBOM files
+**Inputs:** `INPUT_ARTIFACTS_DIR` containing signed artifacts and signed SBOMs
+**Outputs:** `TARGET_DIR` containing `.sig`/`.asc` signature files
 
 ---
 
 ### `11-verify-signing.sh` — Verify Signing `STUB`
 
-Verifies all GPG signatures. Vendor-specific.
+Verifies that all necessary signing has been completed: Windows/macOS executables are code-signed, installer packages are code-signed (and notarized on macOS), and detached GPG signatures are present for every distribution artifact.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing signed artifacts + `.sig`/`.asc` files
-**Outputs:** `TARGET_DIR` containing verification results
+**Outputs:** `TARGET_DIR` containing verification report
 
 ---
 
@@ -230,8 +230,8 @@ Any `STUB` stage (and any `REAL` stage) can be overridden by placing a replaceme
 ```
 config-repo/
 └── vendor-scripts/
-    ├── 06-sign.sh          ← overrides scripts/stages/06-sign.sh
-    ├── 07-installer.sh     ← overrides scripts/stages/07-installer.sh
+    ├── 06-post-build-code-sign.sh    ← overrides scripts/stages/06-post-build-code-sign.sh
+    ├── 07-installer.sh               ← overrides scripts/stages/07-installer.sh
     └── ...
 ```
 
