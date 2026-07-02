@@ -11,10 +11,11 @@
  * by CONFIG_REPO_URL parameter, which contains the JSON configuration files.
  *
  * Helper libraries (loaded after checkout):
- *   - PipelineHelper.groovy  — initializeStage, finalizeStage, executeStageWithTracking
- *   - StageScriptRunner.groovy — vendor-overridable stage script resolution
- *   - ConfigHelper.groovy    — generatePipelineConfig, summarizePipelineConfig
- *   - BuildUidHelper.groovy  — unique build tracking (loaded by PipelineHelper)
+ *   - PipelineHelper.groovy     — initializeStage, finalizeStage, executeStageWithTracking
+ *   - StageScriptRunner.groovy  — vendor-overridable stage script resolution
+ *   - ConfigHelper.groovy       — generatePipelineConfig, summarizePipelineConfig
+ *   - DockerAgentHelper.groovy  — withBuildAgent() for optional Docker container support
+ *   - BuildUidHelper.groovy     — unique build tracking (loaded by PipelineHelper)
  *
  * Core Principle: Every stage archives outputs, every stage copies inputs
  */
@@ -26,15 +27,17 @@ import groovy.transform.Field
 @Field def pipelineHelper
 @Field def stageRunner
 @Field def configHelper
+@Field def dockerAgentHelper
 
 /**
  * Ensure all helper libraries are loaded. Called once per agent allocation.
  */
 def ensureLibsLoaded() {
     if (pipelineHelper == null) {
-        pipelineHelper = load('ci/jenkins/lib/PipelineHelper.groovy')
-        stageRunner    = load('ci/jenkins/lib/StageScriptRunner.groovy')
-        configHelper   = load('ci/jenkins/lib/ConfigHelper.groovy')
+        pipelineHelper    = load('ci/jenkins/lib/PipelineHelper.groovy')
+        stageRunner       = load('ci/jenkins/lib/StageScriptRunner.groovy')
+        configHelper      = load('ci/jenkins/lib/ConfigHelper.groovy')
+        dockerAgentHelper = load('ci/jenkins/lib/DockerAgentHelper.groovy')
     }
 }
 
@@ -90,29 +93,32 @@ pipeline {
         }
 
         stage('Build') {
-            agent {
-                label getNodeLabel()
-            }
+            // agent none: the correct agent (plain node or Docker container) is
+            // selected at runtime by dockerAgentHelper.withBuildAgent(), because
+            // CONFIG_DOCKER_IMAGE is only known after the Initialize stage runs.
+            agent none
             steps {
                 script {
                     ensureLibsLoaded()
-                    pipelineHelper.executeStageWithTracking('Build') {
-                        def config = pipelineHelper.initializeStage('Build', ['Initialize'])
+                    dockerAgentHelper.withBuildAgent {
+                        pipelineHelper.executeStageWithTracking('Build') {
+                            def config = pipelineHelper.initializeStage('Build', ['Initialize'])
 
-                        env.TARGET_DIR = "${WORKSPACE}/build_output"
+                            env.TARGET_DIR = "${WORKSPACE}/build_output"
 
-                        def buildExitCode = stageRunner.run('02-build', config)
-                        if (buildExitCode != 0) {
-                            error("Build failed with exit code: ${buildExitCode}")
+                            def buildExitCode = stageRunner.run('02-build', config)
+                            if (buildExitCode != 0) {
+                                error("Build failed with exit code: ${buildExitCode}")
+                            }
+
+                            dir(env.TARGET_DIR) {
+                                archiveArtifacts artifacts: "**/*",
+                                               fingerprint: true,
+                                               allowEmptyArchive: false
+                            }
+
+                            pipelineHelper.finalizeStage('Build')
                         }
-
-                        dir(env.TARGET_DIR) {
-                            archiveArtifacts artifacts: "**/*",
-                                           fingerprint: true,
-                                           allowEmptyArchive: false
-                        }
-
-                        pipelineHelper.finalizeStage('Build')
                     }
                 }
             }

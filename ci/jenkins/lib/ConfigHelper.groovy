@@ -129,6 +129,10 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_JAVA_TO_BUILD     = config.buildConfig.JAVA_TO_BUILD
     env.CONFIG_NODE_LABEL        = config.buildConfig.NODE_LABEL ?: 'worker'
     env.CONFIG_BUILD_ARGS        = config.buildConfig.BUILD_ARGS ?: ''
+    env.CONFIG_DOCKER_IMAGE      = config.buildConfig.DOCKER_IMAGE ?: ''
+    env.CONFIG_DOCKER_REGISTRY   = config.buildConfig.DOCKER_REGISTRY ?: ''
+    env.CONFIG_DOCKER_CREDENTIAL = config.buildConfig.DOCKER_CREDENTIAL ?: ''
+    env.CONFIG_DOCKER_ARGS       = config.buildConfig.DOCKER_ARGS ?: ''
     env.CONFIG_RUN_TESTS         = config.parameters.enableTests.toString()
     env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
     env.CONFIG_SIGN_ARTIFACTS    = config.parameters.enableSigner.toString()
@@ -151,6 +155,10 @@ def summarizePipelineConfig(config) {
     echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
     echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
     echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
+    echo "  Docker Image: ${config.buildConfig.DOCKER_IMAGE ?: '(none)'}"
+    echo "  Docker Registry: ${config.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
+    echo "  Docker Credential: ${config.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"
+    echo "  Docker Args: ${config.buildConfig.DOCKER_ARGS ?: '(none)'}"
     echo "  Tests: ${config.buildConfig.TEST_LIST}"
 }
 
