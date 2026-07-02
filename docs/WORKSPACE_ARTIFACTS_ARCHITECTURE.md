@@ -17,7 +17,7 @@ Every stage script receives the same five environment variables regardless of wh
 | `WORKSPACE` | Ephemeral scratch directory for this stage | Jenkins workspace root | `<pipeline_workspace>/stage_workspace/` |
 | `CONFIG_FILE` | Path to `pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` |
 | `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}` | `${WORKSPACE}` |
-| `TARGET_DIR` | Directory where this stage writes its output artifacts | `${WORKSPACE}/<stage>_output/` (e.g. `build_output`); defaults to `${WORKSPACE}/target` | `${WORKSPACE}/<stage>_output/` (same names); defaults to `${WORKSPACE}/target` |
+| `TARGET_DIR` | Directory where this stage writes its output artifacts | `${WORKSPACE}/<stage>_output/`; defaults to `${WORKSPACE}/target` | `${WORKSPACE}/<stage>_output/`; defaults to `${WORKSPACE}/target` |
 | `BUILD_NUMBER` | Build identifier | Jenkins build number | `local-<YYYYMMDD-HHMMSS>` |
 
 `validate_standard_environment()` in [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) checks `WORKSPACE` and `CONFIG_FILE`, and defaults `TARGET_DIR` to `${WORKSPACE}/target` if not already set by the orchestration layer.
