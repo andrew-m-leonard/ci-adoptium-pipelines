@@ -136,9 +136,10 @@ class PipelineRunner:
         self.workspace_mgr.cleanup_stage_workspace('pre')
         self.workspace_mgr.restore_stage_inputs(stage_label, artifact_filter)
 
-        exit_code = self._make_resolver().run(stem, self._stage_env(extra_env))
+        env = self._stage_env(extra_env)
+        exit_code = self._make_resolver().run(stem, env)
 
-        self.workspace_mgr.archive_stage_outputs(stage_label)
+        self.workspace_mgr.archive_stage_outputs(stage_label, target_dir=env.get('TARGET_DIR'))
         self.workspace_mgr.cleanup_stage_workspace('post')
 
         if exit_code != 0:
@@ -190,10 +191,12 @@ class PipelineRunner:
                 self.stage_initialize()
 
             if 'build' in self.stages_to_run:
-                self._run_stage('Build', '02-build', 'pipeline-config.json')
+                self._run_stage('Build', '02-build', 'pipeline-config.json',
+                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'build_output')})
 
             if 'validate-sbom' in self.stages_to_run:
-                self._run_stage('Validate SBOM', '12-validate-sbom', 'pipeline-config.json,*sbom*.json')
+                self._run_stage('Validate SBOM', '12-validate-sbom', 'pipeline-config.json,*sbom*.json',
+                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')})
 
             if 'sign' in self.stages_to_run:
                 self._run_stage('Post-Build Code Sign', '06-post-build-code-sign',
@@ -205,13 +208,15 @@ class PipelineRunner:
 
             if 'smoke-tests' in self.stages_to_run:
                 self._run_stage('Smoke Tests', '13-smoke-tests',
-                                'pipeline-config.json,*.tar.gz,*.zip')
+                                'pipeline-config.json,*.tar.gz,*.zip',
+                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')})
 
             if 'reproducible-compare' in self.stages_to_run:
                 release_type = (self.args.release_type or 'NIGHTLY').upper()
                 self._run_stage('Reproducible Compare', '20-reproducible-compare',
                                 'pipeline-config.json,*.tar.gz,*.zip',
                                 extra_env={
+                                    'TARGET_DIR':     str(self.stage_workspace / 'reproducible_compare_output'),
                                     'SCM_REF':        self.args.scm_ref,
                                     'RELEASE':        'true' if release_type == 'RELEASE' else 'false',
                                     **({'BUILD_REPO_URL': self.args.build_repo_url} if self.args.build_repo_url else {}),

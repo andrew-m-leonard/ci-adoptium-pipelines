@@ -14,10 +14,10 @@ Every stage script receives the same five environment variables regardless of wh
 
 | Variable | Meaning | Jenkins value | Local runner value |
 |---|---|---|---|
-| `WORKSPACE` | Ephemeral scratch directory for this stage | Jenkins workspace root (cleaned by `cleanWs()`) | `<pipeline_workspace>/stage_workspace/` |
-| `CONFIG_FILE` | Path to `pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` (restored from `build_artifacts/`) |
-| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}` (artifacts are restored into the workspace root via `copyArtifacts target: '.'`) | `${WORKSPACE}` (inputs are restored into the workspace root) |
-| `TARGET_DIR` | Directory where this stage writes its output artifacts | Set explicitly per-stage to `${WORKSPACE}/<stage>_output/` (e.g. `build_output`, `smoke_test_output`); defaults to `${WORKSPACE}/target` via `validate_standard_environment()` for stages that do not set it | `${WORKSPACE}/target/` (always) |
+| `WORKSPACE` | Ephemeral scratch directory for this stage | Jenkins workspace root | `<pipeline_workspace>/stage_workspace/` |
+| `CONFIG_FILE` | Path to `pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` |
+| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}` | `${WORKSPACE}` |
+| `TARGET_DIR` | Directory where this stage writes its output artifacts | `${WORKSPACE}/<stage>_output/` (e.g. `build_output`); defaults to `${WORKSPACE}/target` | `${WORKSPACE}/<stage>_output/` (same names); defaults to `${WORKSPACE}/target` |
 | `BUILD_NUMBER` | Build identifier | Jenkins build number | `local-<YYYYMMDD-HHMMSS>` |
 
 `validate_standard_environment()` in [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) checks `WORKSPACE` and `CONFIG_FILE`, and defaults `TARGET_DIR` to `${WORKSPACE}/target` if not already set by the orchestration layer.
@@ -108,8 +108,8 @@ The local runner uses a persistent root (`pipeline_workspace`) containing three 
 │   │                                 # and optionally AFTER (cleanWorkspaceAfterStage)
 │   ├── pipeline-config.json          # ← restored from build_artifacts/ before each stage
 │   ├── *.tar.gz, *.zip, etc.         # ← restored from build_artifacts/ (stage inputs)
-│   └── target/                       # ← TARGET_DIR: stage writes outputs here
-│       └── <stage output files>
+│   └── build_output/                 # ← TARGET_DIR example (Build stage)
+│       └── <stage output files>      #   smoke_test_output/, sbom_validation_output/, etc.
 │
 └── build_artifacts/                  # ≈ Jenkins artifact store
     │                                 # Durable — never auto-cleaned; survives --start-from-stage
@@ -138,14 +138,14 @@ Build stage (and every subsequent stage)
   env['WORKSPACE']           = stage_workspace/
   env['CONFIG_FILE']         = stage_workspace/pipeline-config.json
   env['INPUT_ARTIFACTS_DIR'] = stage_workspace/
-  env['TARGET_DIR']          = stage_workspace/target/
+  env['TARGET_DIR']          = stage_workspace/build_output/   # per-stage name, e.g. build_output
 
   StageResolver.run('02-build', env)
     ← stage script reads from INPUT_ARTIFACTS_DIR (= stage_workspace/)
-    ← stage script writes to TARGET_DIR (= stage_workspace/target/)
+    ← stage script writes to TARGET_DIR (= stage_workspace/build_output/)
 
-  workspace_mgr.archive_stage_outputs('Build')
-    ← copies stage_workspace/target/** → build_artifacts/
+  workspace_mgr.archive_stage_outputs('Build', target_dir=stage_workspace/build_output/)
+    ← copies stage_workspace/build_output/** → build_artifacts/
 
   workspace_mgr.cleanup_stage_workspace('post')     ← optional
 ```
@@ -167,7 +167,7 @@ Each stage passes a glob pattern telling the restore step which files to copy fr
 
 - `WORKSPACE` points to `stage_workspace/` — the ephemeral scratch area. Stage scripts using `${WORKSPACE}` for temporary files (cloned repos, build scratch) get a clean directory on every run.
 - `INPUT_ARTIFACTS_DIR` and `WORKSPACE` **point to the same directory** (`stage_workspace/`). Restored inputs land at the workspace root, matching Jenkins where `copyArtifacts` restores into a sub-directory of `WORKSPACE`.
-- `TARGET_DIR` is `stage_workspace/target/` — a dedicated output sub-directory, **not** the workspace root. Outputs written here are archived to `build_artifacts/` and the directory is cleaned before the next stage.
+- `TARGET_DIR` is a stage-specific sub-directory of `stage_workspace/` (e.g. `stage_workspace/build_output/`) — matching Jenkins exactly. Outputs written here are archived to `build_artifacts/` and the directory is cleaned before the next stage.
 - `pipeline-config.json` is **restored** into `stage_workspace/` before each stage (like Jenkins' `copyArtifacts`). `CONFIG_FILE` therefore always points to `${WORKSPACE}/pipeline-config.json` in both systems.
 - `config-repo/` is cloned once at Initialize and is permanent at the pipeline root. It is not re-cloned for subsequent stages (unlike Jenkins, which sparse-checks out on every stage).
 - `build_artifacts/` is never automatically cleaned. To start fresh, use `--clean-workspace` (removes entire `pipeline_workspace/`).
@@ -274,7 +274,7 @@ artifacts from previous stages. Remove --clean-workspace to continue.
 | `WORKSPACE` points to | Jenkins workspace root | `<pipeline_workspace>/stage_workspace/` |
 | `CONFIG_FILE` points to | `${WORKSPACE}/pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` |
 | `INPUT_ARTIFACTS_DIR` | `${WORKSPACE}` (workspace root) | `${WORKSPACE}` (workspace root) |
-| `TARGET_DIR` | `${WORKSPACE}/<stage>_output/` (unique per stage) | `${WORKSPACE}/target/` |
+| `TARGET_DIR` | `${WORKSPACE}/<stage>_output/` (unique per stage) | `${WORKSPACE}/<stage>_output/` (same names as Jenkins) |
 | `INPUT_ARTIFACTS_DIR` == `TARGET_DIR`? | **No** — separate directories | **No** — separate directories |
 | Durable artifact store | Jenkins artifact store | `<pipeline_workspace>/build_artifacts/` |
 | "Archive" operation | `archiveArtifacts artifacts: "TARGET_DIR/**/*"` | `workspace_mgr.archive_stage_outputs()` |
@@ -328,7 +328,7 @@ The stage must call `archiveArtifacts` for its `TARGET_DIR` output, and the next
 
 ### Stage outputs not found by next stage (Local)
 
-`TARGET_DIR` is `stage_workspace/target/`. If outputs are missing in `build_artifacts/`, the stage script wrote to `WORKSPACE` (ephemeral) instead of `TARGET_DIR` (archived). Check the script uses `${TARGET_DIR}` for all output files.
+`TARGET_DIR` is a stage-specific sub-directory such as `stage_workspace/build_output/`. If outputs are missing in `build_artifacts/`, the stage script wrote to `WORKSPACE` (ephemeral) instead of `TARGET_DIR` (archived). Check the script uses `${TARGET_DIR}` for all output files.
 
 ### Disk space full (local)
 
