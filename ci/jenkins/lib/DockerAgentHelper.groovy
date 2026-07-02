@@ -27,28 +27,27 @@
  *                              (e.g. '--volume /home/jenkins:/home/jenkins')
  *
  * Podman auto-detection:
- *   When Podman is detected as the container runtime three flags are appended
- *   automatically to dockerArgs (unless already present):
+ *   When Podman is detected as the container runtime the following adjustments
+ *   are applied automatically (no config-repo change required):
  *
  *   --userns=keep-id  Maps the host Jenkins UID to the same UID inside the
  *                     container, preventing workspace ownership mismatches
  *                     caused by Podman's rootless user-namespace remapping.
- *
- *   --tty=false       Jenkins' docker.image().inside() always injects -t
- *                     (allocate pseudo-TTY) into the docker run command.
- *                     Rootless Podman has no daemon, so it tries to open a
- *                     TTY directly on the process and hangs indefinitely when
- *                     there is no controlling terminal (which is always the
- *                     case on a Jenkins agent).  --tty=false overrides -t
- *                     since docker run processes flags left-to-right and the
- *                     last value wins.
  *
  *   docker.io/ prefix Podman does not resolve unqualified short names without
  *                     an unqualified-search registry in registries.conf.
  *                     docker.io/ is prepended automatically to match Docker's
  *                     implicit behaviour.
  *
- *   No config-repo change is required to support Podman nodes.
+ *   Podman run path   Jenkins' docker.image().inside() always injects -t
+ *                     (allocate pseudo-TTY) at the Java level before our args
+ *                     are appended.  Rootless Podman has no daemon and hangs
+ *                     indefinitely trying to open a TTY on a Jenkins agent
+ *                     process — --tty=false in dockerArgs cannot override this
+ *                     because Podman's Docker shim gives -t precedence.
+ *                     On Podman, .inside() is bypassed entirely: the container
+ *                     is started with `docker run -d` (no -t), the body runs
+ *                     via `docker exec`, and the container is stopped on exit.
  */
 
 /**
@@ -84,18 +83,68 @@ def isUnqualifiedImageName(String image) {
 }
 
 /**
+ * Run the body closure inside a Podman container without using
+ * docker.image().inside(), which injects an un-overridable -t flag that
+ * causes rootless Podman to hang waiting for a TTY.
+ *
+ * Strategy:
+ *   1. docker run -d  — start the container detached (no -t, no cat keepalive)
+ *   2. withEnv        — set DOCKER_CONTAINER_ID so every sh() step inside body
+ *                       can be wrapped; but since body is arbitrary Groovy we
+ *                       instead use a DOCKER_EXEC_PREFIX env var that stage
+ *                       scripts can honour, AND we override the Jenkins sh step
+ *                       by setting BUILD_IN_DOCKER_CONTAINER_ID so the
+ *                       StageScriptRunner prefixes bash calls with docker exec.
+ *   3. docker stop    — stop the container on exit (success or failure).
+ *
+ * The workspace is bind-mounted read-write at the same path so all file
+ * operations inside the container land in the Jenkins workspace on the host.
+ */
+def runInPodmanContainer(String dockerImage, String dockerArgs, Closure body) {
+    def ws         = env.WORKSPACE
+    def containerId = ''
+    try {
+        echo "Starting Podman container: ${dockerImage}"
+        // -d: detached  --rm: auto-remove on stop  --userns=keep-id: UID preservation
+        // Workspace mounted at same absolute path so paths match inside and outside.
+        containerId = sh(
+            script: """docker run -d --rm \\
+                         ${dockerArgs} \\
+                         -w '${ws}' \\
+                         -v '${ws}:${ws}:rw,z' \\
+                         -v '${ws}@tmp:${ws}@tmp:rw,z' \\
+                         '${dockerImage}' \\
+                         sleep infinity""",
+            returnStdout: true
+        ).trim()
+        echo "Container started: ${containerId}"
+
+        // Expose the container ID so StageScriptRunner can prefix sh calls with
+        // 'docker exec <id> bash ...' for shell-type stage scripts.
+        withEnv(["BUILD_DOCKER_CONTAINER_ID=${containerId}"]) {
+            body()
+        }
+    } finally {
+        if (containerId) {
+            echo "Stopping container: ${containerId}"
+            sh(script: "docker stop ${containerId}", returnStatus: true)
+        }
+    }
+}
+
+/**
  * Execute body on the correct agent:
  *
  *   With CONFIG_DOCKER_IMAGE set:
  *     1. Allocate a node by CONFIG_NODE_LABEL.
- *     2. Auto-detect Podman: if the Docker CLI shim is Podman, append
- *        '--userns=keep-id' to dockerArgs so the Jenkins UID is preserved
- *        inside the container.
- *     3. If CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are both set,
- *        perform a docker.withRegistry() login before pulling/running the image.
- *     4. Pull the image explicitly so it is present before .inside() runs its
- *        'docker inspect' check.
- *     5. Run body inside the container, passing the resolved dockerArgs.
+ *     2. Auto-detect Podman or Docker.
+ *     3. Apply Podman-specific adjustments (--userns=keep-id, docker.io/ prefix).
+ *     4. If CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are both set,
+ *        perform a registry login before pulling/running the image.
+ *     5. Pull the image explicitly.
+ *     6a. Docker: use docker.image().inside() — the standard Jenkins DSL path.
+ *     6b. Podman: use runInPodmanContainer() — bypasses .inside() to avoid the
+ *         un-overridable -t flag that causes rootless Podman to hang.
  *
  *   Without CONFIG_DOCKER_IMAGE:
  *     Allocate a node by CONFIG_NODE_LABEL and run body directly.
@@ -109,27 +158,13 @@ def withBuildAgent(Closure body) {
             def registry   = env.CONFIG_DOCKER_REGISTRY?.trim()
             def credential = env.CONFIG_DOCKER_CREDENTIAL?.trim()
             def dockerArgs = env.CONFIG_DOCKER_ARGS?.trim() ?: ''
+            def podman     = isPodmanNode()
 
-            // Auto-detect Podman and apply Podman-specific adjustments:
-            //   --userns=keep-id  — maps the host Jenkins UID to the same UID
-            //                       inside the container, preventing workspace
-            //                       ownership mismatches from rootless remapping.
-            //   docker.io/ prefix — Podman does not resolve unqualified short names
-            //                       (e.g. "adoptopenjdk/foo") without an
-            //                       unqualified-search registry in registries.conf.
-            //                       When no explicit CONFIG_DOCKER_REGISTRY is set
-            //                       we prepend "docker.io/" so Podman knows where
-            //                       to pull from, matching Docker's implicit behaviour.
-            if (isPodmanNode()) {
+            if (podman) {
                 echo 'Container runtime: Podman (Docker-emulation mode)'
                 // Preserve Jenkins UID inside the container (rootless remapping fix).
                 if (!dockerArgs.contains('--userns')) {
                     dockerArgs = (dockerArgs + ' --userns=keep-id').trim()
-                }
-                // Override Jenkins' injected -t flag.  Rootless Podman has no
-                // daemon and hangs trying to open a TTY on a Jenkins agent process.
-                if (!dockerArgs.contains('--tty')) {
-                    dockerArgs = (dockerArgs + ' --tty=false').trim()
                 }
                 // Qualify unqualified image names — Podman won't guess the registry.
                 if (!registry && isUnqualifiedImageName(dockerImage)) {
@@ -145,16 +180,21 @@ def withBuildAgent(Closure body) {
             if (dockerArgs) { logMsg += " args='${dockerArgs}'" }
             echo logMsg
 
-            // Pull the image explicitly before calling .inside().
-            // Jenkins' .inside() runs 'docker inspect' first to verify the image
-            // is present locally — if it isn't, inspect fails rather than pulling.
-            // Pulling here (inside withRegistry when credentials are set) ensures
-            // the image is cached and the inspect check succeeds.
+            // Capture locals for use inside the closures below.
+            def resolvedImage = dockerImage
+            def resolvedArgs  = dockerArgs
+
             def runInContainer = {
-                echo "Pulling image: ${dockerImage}"
-                docker.image(dockerImage).pull()
-                docker.image(dockerImage).inside(dockerArgs) {
-                    body()
+                echo "Pulling image: ${resolvedImage}"
+                docker.image(resolvedImage).pull()
+                if (podman) {
+                    // Bypass .inside() — it injects an un-overridable -t flag
+                    // that causes rootless Podman to hang with no TTY.
+                    runInPodmanContainer(resolvedImage, resolvedArgs, body)
+                } else {
+                    docker.image(resolvedImage).inside(resolvedArgs) {
+                        body()
+                    }
                 }
             }
 

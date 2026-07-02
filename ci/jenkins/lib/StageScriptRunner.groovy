@@ -57,6 +57,14 @@ def run(String scriptStem, def config = null) {
 
     switch (found.type) {
         case 'sh':
+            // If running inside a Podman container started by DockerAgentHelper,
+            // execute the script inside that container via docker exec rather than
+            // directly on the host.  BUILD_DOCKER_CONTAINER_ID is set by
+            // runInPodmanContainer() and is empty on Docker/.inside() builds.
+            def containerId = env.BUILD_DOCKER_CONTAINER_ID?.trim()
+            if (containerId) {
+                return sh(script: "docker exec ${containerId} bash '${found.path}'", returnStatus: true)
+            }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
             def script = load(found.path)
