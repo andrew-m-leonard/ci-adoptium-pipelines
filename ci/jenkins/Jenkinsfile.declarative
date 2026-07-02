@@ -405,9 +405,10 @@ pipeline {
                     pipelineHelper.executeStageWithTracking('Reproducible Compare Build') {
                         def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
-                        env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"
-                        env.SCM_REF    = params.SCM_REF
-                        env.RELEASE    = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
+                        env.TARGET_DIR    = "${WORKSPACE}/reproducible_compare_output"
+                        env.PIPELINE_ROOT = "${WORKSPACE}"
+                        env.SCM_REF       = params.SCM_REF
+                        env.RELEASE       = (params.RELEASE_TYPE == 'RELEASE') ? 'true' : 'false'
 
                         def comparisonExitCode = stageRunner.run('20-reproducible-compare', config)
 
@@ -418,7 +419,7 @@ pipeline {
                         }
 
                         if (comparisonExitCode != 0) {
-                            currentBuild.result = 'UNSTABLE'
+                            error("Reproducible compare script failed with exit code ${comparisonExitCode}")
                         }
 
                         pipelineHelper.finalizeStage('Reproducible Compare Build')
