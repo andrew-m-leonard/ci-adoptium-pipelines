@@ -47,6 +47,26 @@ def isPodmanNode() {
 }
 
 /**
+ * Return true when the image name has no registry host prefix.
+ *
+ * Podman refuses to pull short names like "adoptopenjdk/centos7_build_image"
+ * without an unqualified-search registry configured, whereas Docker implicitly
+ * prepends "docker.io/".  A name is considered qualified when the portion
+ * before the first '/' (or the whole name if there is no '/') contains a '.'
+ * or ':', which are only valid in hostnames and host:port pairs respectively.
+ *
+ * Examples:
+ *   "adoptopenjdk/centos7_build_image"        → unqualified (no host)
+ *   "ubuntu"                                  → unqualified (no host, no slash)
+ *   "docker.io/adoptopenjdk/centos7_build_image" → qualified
+ *   "registry.example.com:5000/myimage"       → qualified
+ */
+def isUnqualifiedImageName(String image) {
+    def prefix = image.contains('/') ? image.split('/')[0] : image
+    return !prefix.contains('.') && !prefix.contains(':')
+}
+
+/**
  * Execute body on the correct agent:
  *
  *   With CONFIG_DOCKER_IMAGE set:
@@ -73,13 +93,24 @@ def withBuildAgent(Closure body) {
             def credential = env.CONFIG_DOCKER_CREDENTIAL?.trim()
             def dockerArgs = env.CONFIG_DOCKER_ARGS?.trim() ?: ''
 
-            // Auto-detect Podman and add --userns=keep-id when needed.
-            // This prevents rootless Podman remapping the Jenkins UID inside
-            // the container, which would cause workspace ownership mismatches.
+            // Auto-detect Podman and apply Podman-specific adjustments:
+            //   --userns=keep-id  — maps the host Jenkins UID to the same UID
+            //                       inside the container, preventing workspace
+            //                       ownership mismatches from rootless remapping.
+            //   docker.io/ prefix — Podman does not resolve unqualified short names
+            //                       (e.g. "adoptopenjdk/foo") without an
+            //                       unqualified-search registry in registries.conf.
+            //                       When no explicit CONFIG_DOCKER_REGISTRY is set
+            //                       we prepend "docker.io/" so Podman knows where
+            //                       to pull from, matching Docker's implicit behaviour.
             if (isPodmanNode()) {
                 echo 'Container runtime: Podman (Docker-emulation mode)'
                 if (!dockerArgs.contains('--userns')) {
                     dockerArgs = (dockerArgs + ' --userns=keep-id').trim()
+                }
+                if (!registry && isUnqualifiedImageName(dockerImage)) {
+                    dockerImage = 'docker.io/' + dockerImage
+                    echo "Resolved image to fully-qualified name: ${dockerImage}"
                 }
             } else {
                 echo 'Container runtime: Docker'
