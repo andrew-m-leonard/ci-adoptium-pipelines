@@ -27,11 +27,28 @@
  *                              (e.g. '--volume /home/jenkins:/home/jenkins')
  *
  * Podman auto-detection:
- *   When Podman is detected as the container runtime, '--userns=keep-id' is
- *   appended automatically to dockerArgs (unless already present).  This maps
- *   the host Jenkins UID to the same UID inside the container, preventing
- *   workspace ownership mismatches caused by Podman's rootless user-namespace
- *   remapping.  No config-repo change is required to support Podman nodes.
+ *   When Podman is detected as the container runtime three flags are appended
+ *   automatically to dockerArgs (unless already present):
+ *
+ *   --userns=keep-id  Maps the host Jenkins UID to the same UID inside the
+ *                     container, preventing workspace ownership mismatches
+ *                     caused by Podman's rootless user-namespace remapping.
+ *
+ *   --tty=false       Jenkins' docker.image().inside() always injects -t
+ *                     (allocate pseudo-TTY) into the docker run command.
+ *                     Rootless Podman has no daemon, so it tries to open a
+ *                     TTY directly on the process and hangs indefinitely when
+ *                     there is no controlling terminal (which is always the
+ *                     case on a Jenkins agent).  --tty=false overrides -t
+ *                     since docker run processes flags left-to-right and the
+ *                     last value wins.
+ *
+ *   docker.io/ prefix Podman does not resolve unqualified short names without
+ *                     an unqualified-search registry in registries.conf.
+ *                     docker.io/ is prepended automatically to match Docker's
+ *                     implicit behaviour.
+ *
+ *   No config-repo change is required to support Podman nodes.
  */
 
 /**
@@ -105,9 +122,16 @@ def withBuildAgent(Closure body) {
             //                       to pull from, matching Docker's implicit behaviour.
             if (isPodmanNode()) {
                 echo 'Container runtime: Podman (Docker-emulation mode)'
+                // Preserve Jenkins UID inside the container (rootless remapping fix).
                 if (!dockerArgs.contains('--userns')) {
                     dockerArgs = (dockerArgs + ' --userns=keep-id').trim()
                 }
+                // Override Jenkins' injected -t flag.  Rootless Podman has no
+                // daemon and hangs trying to open a TTY on a Jenkins agent process.
+                if (!dockerArgs.contains('--tty')) {
+                    dockerArgs = (dockerArgs + ' --tty=false').trim()
+                }
+                // Qualify unqualified image names — Podman won't guess the registry.
                 if (!registry && isUnqualifiedImageName(dockerImage)) {
                     dockerImage = 'docker.io/' + dockerImage
                     echo "Resolved image to fully-qualified name: ${dockerImage}"
