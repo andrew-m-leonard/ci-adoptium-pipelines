@@ -55,8 +55,10 @@ def isPodmanNode() {
  *        '--userns=keep-id' to dockerArgs so the Jenkins UID is preserved
  *        inside the container.
  *     3. If CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are both set,
- *        perform a docker.withRegistry() login before pulling the image.
- *     4. Run body inside the container, passing the resolved dockerArgs.
+ *        perform a docker.withRegistry() login before pulling/running the image.
+ *     4. Pull the image explicitly so it is present before .inside() runs its
+ *        'docker inspect' check.
+ *     5. Run body inside the container, passing the resolved dockerArgs.
  *
  *   Without CONFIG_DOCKER_IMAGE:
  *     Allocate a node by CONFIG_NODE_LABEL and run body directly.
@@ -88,7 +90,14 @@ def withBuildAgent(Closure body) {
             if (dockerArgs) { logMsg += " args='${dockerArgs}'" }
             echo logMsg
 
+            // Pull the image explicitly before calling .inside().
+            // Jenkins' .inside() runs 'docker inspect' first to verify the image
+            // is present locally — if it isn't, inspect fails rather than pulling.
+            // Pulling here (inside withRegistry when credentials are set) ensures
+            // the image is cached and the inspect check succeeds.
             def runInContainer = {
+                echo "Pulling image: ${dockerImage}"
+                docker.image(dockerImage).pull()
                 docker.image(dockerImage).inside(dockerArgs) {
                     body()
                 }
