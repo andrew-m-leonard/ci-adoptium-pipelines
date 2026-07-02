@@ -16,11 +16,11 @@ Every stage script receives the same five environment variables regardless of wh
 |---|---|---|---|
 | `WORKSPACE` | Ephemeral scratch directory for this stage | Jenkins workspace root (cleaned by `cleanWs()`) | `<pipeline_workspace>/stage_workspace/` |
 | `CONFIG_FILE` | Path to `pipeline-config.json` | `${INPUT_ARTIFACTS_DIR}/pipeline-config.json` | `${WORKSPACE}/pipeline-config.json` (restored from `build_artifacts/`) |
-| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}/stage_input_artifacts/` | `${WORKSPACE}` (same as `WORKSPACE`; inputs are restored into the workspace root) |
-| `TARGET_DIR` | Directory where this stage writes its output artifacts | `${WORKSPACE}/<stage>_output/` (e.g. `build_output`) | `${WORKSPACE}/target/` |
+| `INPUT_ARTIFACTS_DIR` | Directory containing artifacts from previous stages | `${WORKSPACE}/stage_input_artifacts/` for stages that pass an explicit input dir (Validate SBOM, Smoke Tests, Reproducible Compare); `${WORKSPACE}` for all others | `${WORKSPACE}` (inputs are restored into the workspace root) |
+| `TARGET_DIR` | Directory where this stage writes its output artifacts | Set explicitly per-stage to `${WORKSPACE}/<stage>_output/` (e.g. `build_output`, `smoke_test_output`); defaults to `${WORKSPACE}/target` via `validate_standard_environment()` for stages that do not set it | `${WORKSPACE}/target/` (always) |
 | `BUILD_NUMBER` | Build identifier | Jenkins build number | `local-<YYYYMMDD-HHMMSS>` |
 
-`validate_standard_environment()` in [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) checks `WORKSPACE` and `CONFIG_FILE`, and sets `TARGET_DIR` to `${WORKSPACE}/target` if not already provided by the orchestration layer.
+`validate_standard_environment()` in [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) checks `WORKSPACE` and `CONFIG_FILE`, and defaults `TARGET_DIR` to `${WORKSPACE}/target` if not already set by the orchestration layer.
 
 ---
 
@@ -158,10 +158,10 @@ Each stage passes a glob pattern telling the restore step which files to copy fr
 |---|---|
 | Build | `pipeline-config.json` |
 | Validate SBOM | `pipeline-config.json,*sbom*.json` |
-| Sign Artifacts | `pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*` |
-| Build Installers | `pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*` |
-| Smoke Tests | `pipeline-config.json,**/*.tar.gz,**/*.zip` |
-| Reproducible Compare | `pipeline-config.json,**/*.tar.gz,**/*.zip` |
+| Post-Build Code Sign | `pipeline-config.json,*.tar.gz,*.zip,metadata/**/*` |
+| Build Installers | `pipeline-config.json,*.tar.gz,*.zip,metadata/**/*` |
+| Smoke Tests | `pipeline-config.json,*.tar.gz,*.zip` |
+| Reproducible Compare | `pipeline-config.json,*.tar.gz,*.zip` |
 
 ### Local-runner-specific notes
 
@@ -349,7 +349,7 @@ python3 run-pipeline.py --jdk-version jdk21u ... --clean-workspace
 
 ## Related Documentation
 
-- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](./LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) — local runner workspace validation rules and error messages
+- [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) — local runner CLI reference including workspace validation rules
 - [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) — artifact flow diagram (Jenkins `copyArtifacts` ↔ `archiveArtifacts`)
 - [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) — stage script template using these env vars
 - [`scripts/lib/config-utils.sh`](../scripts/lib/config-utils.sh) — `validate_standard_environment()` implementation

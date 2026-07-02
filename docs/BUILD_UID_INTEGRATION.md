@@ -142,13 +142,14 @@ After all stages complete:
 |---|---|
 | Initialize | _(none)_ |
 | Build | Initialize |
-| Internal Sign | Build |
-| Assemble | Build |
-| Sign Artifacts | Assemble |
+| Internal Code Sign | Build |
+| Assemble Images | Build |
+| Post-Build Code Sign | Assemble Images |
 | Build Installers | Build |
-| Sign Installers | Build Installers |
-| GPG Sign | Sign Artifacts |
-| Verify Signing | GPG Sign |
+| Code Sign Installer | Build Installers |
+| SBOM Sign | Post-Build Code Sign |
+| Digital Artifact Sign | Post-Build Code Sign |
+| Verify Signing | Digital Artifact Sign |
 | Validate SBOM | Build |
 | Smoke Tests | Build |
 | Reproducible Compare Build | Build |
