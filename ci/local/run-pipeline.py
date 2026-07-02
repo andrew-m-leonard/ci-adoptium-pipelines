@@ -1,26 +1,10 @@
 #!/usr/bin/env python3
 """
-Local Pipeline Runner
-
-Run the complete OpenJDK build pipeline locally from the command line.
-This script orchestrates all stages: initialize, build, sign, installer, and tests.
+Local Pipeline Runner — orchestrates OpenJDK build pipeline stages locally.
 
 Usage:
-    python3 run-pipeline.py \
-        --jdk-version jdk21u \
-        --target-os mac \
-        --architecture aarch64 \
-        --workspace ~/openjdk-build
-
-Example:
-    # Full build with all stages
-    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64
-
-    # Build only (skip tests and installers)
-    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64 --no-tests --no-installers
-
-    # Build with custom branch
-    python3 run-pipeline.py --jdk-version jdk21u --target-os mac --architecture aarch64 --build-ref develop
+    python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64
+    python3 run-pipeline.py --help
 """
 
 import argparse
@@ -28,6 +12,7 @@ import os
 import sys
 import subprocess
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 from workspace_manager import WorkspaceManager
@@ -40,7 +25,7 @@ class PipelineRunner:
 
     def __init__(self, args):
         self.args = args
-        self.script_dir = Path(__file__).parent.parent.parent.resolve()  # Go up to ci-adoptium-pipelines root
+        self.script_dir = Path(__file__).parent.parent.parent.resolve()  # ci-adoptium-pipelines root
 
         # Initialize workspace manager
         pipeline_workspace = Path(args.workspace).expanduser().resolve()
@@ -57,17 +42,16 @@ class PipelineRunner:
 
         # StageResolver is initialised lazily after stage_initialize() has
         # cloned the config repo.  _make_resolver() is called at the start
-        # of each stage_*() method to ensure it is always up-to-date.
+        # of each _run_stage() call to ensure it is always up-to-date.
         self._resolver: StageResolver | None = None
 
         # Validate reproducible compare parameters
-        if args.compare_build:
-            if not args.scm_ref:
-                raise ValueError(
-                    "ERROR: --compare-build requires --scm-ref to be specified.\n"
-                    "The SCM reference is needed to download the production binary from Adoptium API.\n"
-                    "Example: --scm-ref jdk-21.0.2+13 --compare-build"
-                )
+        if args.compare_build and not args.scm_ref:
+            raise ValueError(
+                "ERROR: --compare-build requires --scm-ref to be specified.\n"
+                "The SCM reference is needed to download the production binary from Adoptium API.\n"
+                "Example: --scm-ref jdk-21.0.2+13 --compare-build"
+            )
 
         # Determine which stages to run
         if args.start_from_stage:
@@ -84,9 +68,6 @@ class PipelineRunner:
         """
         Return a StageResolver, (re-)creating it if the config repo has
         been cloned since the last call (i.e. after stage_initialize()).
-
-        The resolver reads parameters from pipeline-config.json (CONFIG_FILE)
-        to gate stages (enableTests, enableSigner, etc.).
         """
         config_repo_root = None
         if self.args.config_repo_url:
@@ -98,38 +79,99 @@ class PipelineRunner:
             config_repo_root is not None
             and self._resolver.config_repo_root != config_repo_root
         ):
-            self._resolver = StageResolver(
-                self.script_dir, config_repo_root, self.config_file
-            )
+            self._resolver = StageResolver(self.script_dir, config_repo_root, self.config_file)
             src = str(config_repo_root) if config_repo_root else 'defaults only'
             print(f"ℹ️  StageResolver initialised (config repo: {src})")
 
         return self._resolver
 
-    def _load_adoptium_pipeline_config(self, config_repo_dir: Path) -> dict:
+    def _stage_env(self, extra: dict | None = None) -> dict:
         """
-        Load adoptium_pipeline_config.json from the config repo directory.
+        Build the standard environment dict passed to every stage script.
+        Mirrors PipelineHelper.initializeStage() in Jenkins.
 
-        Returns the parsed dict, or {} if the file does not exist (graceful
-        fallback for repos that haven't adopted the split yet).
+        All five standard variables are set:
+          WORKSPACE, CONFIG_FILE, INPUT_ARTIFACTS_DIR, TARGET_DIR, BUILD_NUMBER
+        plus PIPELINE_ROOT for vendor scripts that source shared lib utilities.
         """
+        env = os.environ.copy()
+        env['WORKSPACE']            = str(self.stage_workspace)
+        env['PIPELINE_ROOT']        = str(self.script_dir)
+        env['CONFIG_FILE']          = str(self.stage_workspace / 'pipeline-config.json')
+        env['INPUT_ARTIFACTS_DIR']  = str(self.stage_workspace)
+        env['TARGET_DIR']           = str(self.stage_workspace / 'target')
+        env['BUILD_NUMBER']         = self.build_number
+        if extra:
+            env.update(extra)
+        return env
+
+    def _run_stage(self, stage_label: str, stem: str, artifact_filter: str,
+                   extra_env: dict | None = None, unstable_ok: bool = False) -> int:
+        """
+        Execute one pipeline stage — the local equivalent of a Jenkins stage block.
+
+        Mirrors the Jenkins pattern exactly:
+          1. Pre-cleanup  (≈ cleanWs)
+          2. Restore inputs from build_artifacts/ (≈ copyArtifacts)
+          3. Build standard environment
+          4. Run stage script via StageResolver
+          5. Archive outputs from stage_workspace/target/ (≈ archiveArtifacts)
+          6. Post-cleanup (≈ finalizeStage cleanWs)
+
+        Args:
+            stage_label:   Human-readable name for log output.
+            stem:          Stage script stem (e.g. '02-build').
+            artifact_filter: Comma-separated glob patterns for restore_stage_inputs.
+            extra_env:     Additional env vars beyond the standard set.
+            unstable_ok:   If True, non-zero exit code is printed as a warning
+                           rather than raising (UNSTABLE-equivalent, like Jenkins).
+
+        Returns:
+            exit code of the stage script (0 on success or disabled/no-op).
+        """
+        print(f"\n{'=' * 80}")
+        print(f"STAGE: {stage_label}")
+        print('=' * 80)
+
+        self.workspace_mgr.cleanup_stage_workspace('pre')
+        self.workspace_mgr.restore_stage_inputs(stage_label, artifact_filter)
+
+        exit_code = self._make_resolver().run(stem, self._stage_env(extra_env))
+
+        self.workspace_mgr.archive_stage_outputs(stage_label)
+        self.workspace_mgr.cleanup_stage_workspace('post')
+
+        if exit_code != 0:
+            if unstable_ok:
+                print(f"\n⚠️  {stage_label} completed with warnings (exit code: {exit_code})")
+            else:
+                raise subprocess.CalledProcessError(exit_code, stem)
+
+        return exit_code
+
+    def _load_adoptium_pipeline_config(self, config_repo_dir: Path) -> dict:
+        """Load adoptium_pipeline_config.json from the config repo directory."""
         cfg_path = config_repo_dir / 'adoptium_pipeline_config.json'
         if not cfg_path.exists():
-            print(f"ℹ️  adoptium_pipeline_config.json not found in config repo — using defaults")
+            print("ℹ️  adoptium_pipeline_config.json not found in config repo — using defaults")
             return {}
 
         with open(cfg_path, 'r') as f:
             cfg = json.load(f)
 
-        print(f"✅ Loaded adoptium_pipeline_config.json")
+        print("✅ Loaded adoptium_pipeline_config.json")
         print(f"   Default variant: {cfg.get('defaultVariant', 'temurin')}")
         active = [v['version'] for v in cfg.get('activeJdkVersions', []) if v.get('enabled')]
         if active:
             print(f"   Active JDK versions: {', '.join(active)}")
         return cfg
 
+    # ------------------------------------------------------------------
+    # Pipeline entry point
+    # ------------------------------------------------------------------
+
     def run(self):
-        """Run the complete pipeline"""
+        """Run the complete pipeline."""
         print("=" * 80)
         print("OpenJDK Build Pipeline - Local Runner")
         print("=" * 80)
@@ -137,7 +179,6 @@ class PipelineRunner:
         print(f"Build Number: {self.build_number}")
         print()
 
-        # Validate and setup workspace using WorkspaceManager
         self.workspace_mgr.validate_and_setup(
             is_restarting=self.args.start_from_stage is not None,
             clean_requested=self.args.clean_workspace,
@@ -145,74 +186,72 @@ class PipelineRunner:
         )
 
         try:
-            # Stage 1: Initialize (generate configuration)
             if 'initialize' in self.stages_to_run:
                 self.stage_initialize()
 
-            # Stage 2: Build
-            if 'build' in self.stages_to_run and not self.args.skip_build:
-                self.stage_build()
+            if 'build' in self.stages_to_run:
+                self._run_stage('Build', '02-build', 'pipeline-config.json')
 
-            # Stage 3: Validate SBOM (if SBOM generation is enabled)
-            if 'validate-sbom' in self.stages_to_run and not self.args.skip_build:
-                self.stage_validate_sbom()
+            if 'validate-sbom' in self.stages_to_run:
+                self._run_stage('Validate SBOM', '12-validate-sbom', 'pipeline-config.json,*sbom*.json')
 
-            # Stage 4: Sign (enablement gated by pipeline-config.json parameters.enableSigner)
-            if 'sign' in self.stages_to_run and not self.args.skip_build:
-                self.stage_sign()
+            if 'sign' in self.stages_to_run:
+                self._run_stage('Post-Build Code Sign', '06-post-build-code-sign',
+                                'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            # Stage 5: Build Installers (enablement gated by pipeline-config.json parameters.enableInstallers)
-            if 'installer' in self.stages_to_run and not self.args.skip_build:
-                self.stage_installer()
+            if 'installer' in self.stages_to_run:
+                self._run_stage('Build Installer', '07-installer',
+                                'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            # Stage 6: Smoke Tests (enablement gated by pipeline-config.json parameters.enableTests)
-            if 'smoke-tests' in self.stages_to_run and not self.args.skip_build:
-                self.stage_smoke_tests()
+            if 'smoke-tests' in self.stages_to_run:
+                self._run_stage('Smoke Tests', '13-smoke-tests',
+                                'pipeline-config.json,*.tar.gz,*.zip')
 
-            # Stage 7: Reproducible Compare (enablement gated by pipeline-config.json parameters.compareBuild)
-            if 'reproducible-compare' in self.stages_to_run and not self.args.skip_build:
-                self.stage_reproducible_compare()
+            if 'reproducible-compare' in self.stages_to_run:
+                release_type = (self.args.release_type or 'NIGHTLY').upper()
+                self._run_stage('Reproducible Compare', '20-reproducible-compare',
+                                'pipeline-config.json,*.tar.gz,*.zip',
+                                extra_env={
+                                    'SCM_REF':        self.args.scm_ref,
+                                    'RELEASE':        'true' if release_type == 'RELEASE' else 'false',
+                                    **({'BUILD_REPO_URL': self.args.build_repo_url} if self.args.build_repo_url else {}),
+                                    **({'BUILD_REF':      self.args.build_ref}       if self.args.build_ref      else {}),
+                                },
+                                unstable_ok=True)
 
             print()
             print("=" * 80)
             print("✅ Pipeline completed successfully!")
             print("=" * 80)
             print(f"\n📦 All artifacts in: {self.build_artifacts_dir}")
-            print(f"   - JDK tarballs")
-            print(f"   - Signed artifacts")
-            print(f"   - Installers")
-            print(f"   - Test results")
-            if self.args.compare_build:
-                print(f"   - Reproducible build comparison results")
-
             return 0
 
         except subprocess.CalledProcessError as e:
             print()
             print("=" * 80)
-            print(f"❌ Pipeline failed at stage: {e.cmd[0] if e.cmd else 'unknown'}")
-            print(f"Exit code: {e.returncode}")
+            print(f"❌ Pipeline failed: {e.cmd} (exit code {e.returncode})")
             print("=" * 80)
             return e.returncode
         except Exception as e:
             print()
             print("=" * 80)
-            print(f"❌ Pipeline failed with error: {e}")
+            print(f"❌ Pipeline failed: {e}")
             print("=" * 80)
             return 1
 
+    # ------------------------------------------------------------------
+    # Initialize stage (unique logic — not reducible to _run_stage)
+    # ------------------------------------------------------------------
+
     def stage_initialize(self):
-        """Stage 1: Generate pipeline configuration"""
+        """Stage 1: Generate pipeline configuration."""
         print("\n" + "=" * 80)
-        print("STAGE 1: Initialize - Generate Configuration")
+        print("STAGE: Initialize - Generate Configuration")
         print("=" * 80)
 
-        # Pre-cleanup: Always clean stage_workspace before stage
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
-        # Determine configuration directory
         if self.args.config_repo_url:
-            # Clone external configuration repository
             config_repo_dir = self.workspace / 'config-repo'
             if config_repo_dir.exists():
                 print(f"ℹ️  Configuration repository already exists: {config_repo_dir}")
@@ -221,23 +260,17 @@ class PipelineRunner:
                 print(f"📥 Cloning configuration repository...")
                 print(f"   URL: {self.args.config_repo_url}")
                 print(f"   Branch: {self.args.config_repo_branch}")
-
-                clone_cmd = [
+                subprocess.run([
                     'git', 'clone',
                     '--branch', self.args.config_repo_branch,
                     '--depth', '1',
                     self.args.config_repo_url,
                     str(config_repo_dir)
-                ]
-                subprocess.run(clone_cmd, check=True)
+                ], check=True)
                 print("✅ Configuration repository cloned")
 
-            # Load adoptium_pipeline_config.json (CI-agnostic defaults)
             adoptium_cfg = self._load_adoptium_pipeline_config(config_repo_dir)
-
-            # Use configFilePrefix from adoptium_pipeline_config.json to locate configs
             config_prefix = adoptium_cfg.get('configFilePrefix', 'configurations/')
-            # Strip trailing slash for path joining
             config_dir = config_repo_dir / config_prefix.rstrip('/')
             if not config_dir.exists():
                 raise FileNotFoundError(
@@ -246,7 +279,6 @@ class PipelineRunner:
                 )
         else:
             adoptium_cfg = {}
-            # Use local configurations directory
             config_dir = self.script_dir / 'configurations'
             if not config_dir.exists():
                 raise FileNotFoundError(
@@ -256,63 +288,52 @@ class PipelineRunner:
 
         print(f"📁 Using configuration directory: {config_dir}")
 
-        # Resolve variant from adoptium_pipeline_config.json (CLI override removed)
         variant = adoptium_cfg.get('defaultVariant', 'temurin')
         print(f"   Variant: {variant}")
 
-        # Build command for load-json-config.py
-        cmd = [
-            'python3',
-            str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
-            '--jdk-version', self.args.jdk_version,
-            '--variant', variant,
-            '--target-os', self.args.target_os,
-            '--architecture', self.args.architecture,
-            '--config-dir', str(config_dir),
-            '--output-dir', str(self.workspace)
-        ]
-
-        # Add optional parameters
-        if self.args.release_type:
-            # Convert to uppercase for case-insensitive handling
-            release_type = self.args.release_type.upper()
-            
-            # Validate release type
-            valid_release_types = ['NIGHTLY', 'WEEKLY', 'RELEASE']
-            if release_type not in valid_release_types:
-                raise ValueError(f"Invalid release type '{self.args.release_type}'. Must be one of: {', '.join(valid_release_types)} (case-insensitive)")
-            
-            cmd.extend(['--release-type', release_type])
-        if self.args.scm_ref:
-            cmd.extend(['--scm-ref', self.args.scm_ref])
-
-        # Resolve build/aqa refs and repo URLs from CLI override or adoptium_pipeline_config.json
+        # Resolve refs from CLI or adoptium_pipeline_config.json
         repo_cfg = adoptium_cfg.get('repository', {})
-        build_ref = self.args.build_ref or repo_cfg.get('buildBranch')
-        aqa_ref = self.args.aqa_ref or repo_cfg.get('aqaBranch')
+        build_ref      = self.args.build_ref      or repo_cfg.get('buildBranch')
+        aqa_ref        = self.args.aqa_ref        or repo_cfg.get('aqaBranch')
         build_repo_url = self.args.build_repo_url or repo_cfg.get('buildRepoUrl')
-        aqa_repo_url = self.args.aqa_repo_url or repo_cfg.get('aqaRepoUrl')
+        aqa_repo_url   = self.args.aqa_repo_url   or repo_cfg.get('aqaRepoUrl')
 
-        # These must be resolved — error if missing from both CLI and config
-        missing = []
-        if not build_ref:
-            missing.append('repository.buildBranch')
-        if not aqa_ref:
-            missing.append('repository.aqaBranch')
-        if not build_repo_url:
-            missing.append('repository.buildRepoUrl')
-        if not aqa_repo_url:
-            missing.append('repository.aqaRepoUrl')
+        missing = [k for k, v in {
+            'repository.buildBranch':  build_ref,
+            'repository.aqaBranch':    aqa_ref,
+            'repository.buildRepoUrl': build_repo_url,
+            'repository.aqaRepoUrl':   aqa_repo_url,
+        }.items() if not v]
         if missing:
             raise ValueError(
                 f"Required fields missing from adoptium_pipeline_config.json: {', '.join(missing)}\n"
                 f"These must be defined in the config repo or overridden via CLI args."
             )
 
-        cmd.extend(['--build-ref', build_ref])
-        cmd.extend(['--aqa-ref', aqa_ref])
-        cmd.extend(['--build-repo-url', build_repo_url])
-        cmd.extend(['--aqa-repo-url', aqa_repo_url])
+        cmd = [
+            'python3', str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
+            '--jdk-version',   self.args.jdk_version,
+            '--variant',       variant,
+            '--target-os',     self.args.target_os,
+            '--architecture',  self.args.architecture,
+            '--config-dir',    str(config_dir),
+            '--output-dir',    str(self.workspace),
+            '--build-ref',     build_ref,
+            '--aqa-ref',       aqa_ref,
+            '--build-repo-url', build_repo_url,
+            '--aqa-repo-url',  aqa_repo_url,
+        ]
+
+        if self.args.release_type:
+            release_type = self.args.release_type.upper()
+            valid = ['NIGHTLY', 'WEEKLY', 'RELEASE']
+            if release_type not in valid:
+                raise ValueError(
+                    f"Invalid release type '{self.args.release_type}'. Must be one of: {', '.join(valid)}"
+                )
+            cmd.extend(['--release-type', release_type])
+        if self.args.scm_ref:
+            cmd.extend(['--scm-ref', self.args.scm_ref])
         if not self.args.enable_tests:
             cmd.append('--no-tests')
         if not self.args.enable_installers:
@@ -327,14 +348,11 @@ class PipelineRunner:
         print(f"Running: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
 
-        # Verify configuration was created
         if not self.config_file.exists():
             raise FileNotFoundError(f"Configuration file not created: {self.config_file}")
 
-        # Display configuration
         with open(self.config_file, 'r') as f:
             config = json.load(f)
-
         print("\nGenerated Configuration:")
         print(json.dumps(config, indent=2))
 
@@ -342,288 +360,6 @@ class PipelineRunner:
         self.workspace_mgr.archive_file(self.config_file, 'Initialize')
 
         print("\n✅ Initialize stage complete")
-
-        # Post-stage cleanup (config now exists, so cleanup can read it)
-        self.workspace_mgr.cleanup_stage_workspace('post')
-
-    def stage_build(self):
-        """Stage 2: Build OpenJDK"""
-        print("\n" + "=" * 80)
-        print("STAGE 2: Build OpenJDK")
-        print("=" * 80)
-
-        # Pre-stage cleanup (wipes stage_workspace/, recreates stage_workspace/target/)
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs from build_artifacts/ → stage_workspace/ (≈ Jenkins copyArtifacts)
-        self.workspace_mgr.restore_stage_inputs('Build', 'pipeline-config.json')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['BUILD_NUMBER'] = self.build_number
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-        # Build is first substantive stage — no INPUT_ARTIFACTS_DIR needed
-
-        exit_code = self._make_resolver().run('02-build', env)
-        if exit_code != 0:
-            raise subprocess.CalledProcessError(exit_code, '02-build')
-
-        # Archive outputs stage_workspace/target/ → build_artifacts/ (≈ Jenkins archiveArtifacts)
-        self.workspace_mgr.archive_stage_outputs('Build')
-
-        print("\n✅ Build stage complete")
-        print(f"   Artifacts in: {self.build_artifacts_dir}")
-
-        # Post-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('post')
-    
-    def stage_validate_sbom(self):
-        """Stage 3: Validate SBOM files (if SBOM generation is enabled)"""
-        # Check if SBOM generation is enabled by reading the archived config
-        archived_config = self.build_artifacts_dir / 'pipeline-config.json'
-        try:
-            with open(archived_config, 'r') as f:
-                config = json.load(f)
-                build_args = config.get('buildConfig', {}).get('BUILD_ARGS', '')
-
-                if '--create-sbom' not in build_args:
-                    print("\nℹ️  Skipping SBOM validation (--create-sbom not in BUILD_ARGS)")
-                    return
-        except Exception as e:
-            print(f"\n⚠️  Warning: Could not read config file to check SBOM status: {e}")
-            print("   Skipping SBOM validation")
-            return
-
-        print("\n" + "=" * 80)
-        print("STAGE 3: Validate SBOM")
-        print("=" * 80)
-
-        # Pre-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs: pipeline-config.json + SBOM json files
-        self.workspace_mgr.restore_stage_inputs('Validate SBOM', 'pipeline-config.json,*sbom*.json')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-
-        exit_code = self._make_resolver().run('12-validate-sbom', env)
-        if exit_code != 0:
-            print(f"\n❌ SBOM validation failed with exit code {exit_code}")
-            raise subprocess.CalledProcessError(exit_code, '12-validate-sbom')
-
-        # Archive any validation outputs
-        self.workspace_mgr.archive_stage_outputs('Validate SBOM')
-
-        print("\n✅ SBOM validation stage complete")
-
-        # Post-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('post')
-
-    def stage_sign(self):
-        """Stage 3: Sign artifacts"""
-        print("\n" + "=" * 80)
-        print("STAGE 3: Sign Artifacts")
-        print("=" * 80)
-
-        # Pre-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs: config + tarballs/zips + metadata
-        self.workspace_mgr.restore_stage_inputs('Sign Artifacts',
-            'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-
-        exit_code = self._make_resolver().run('06-post-build-code-sign', env)
-        if exit_code != 0:
-            raise subprocess.CalledProcessError(exit_code, '06-post-build-code-sign')
-
-        # Archive signed outputs
-        self.workspace_mgr.archive_stage_outputs('Sign Artifacts')
-
-        print("\n✅ Sign stage complete")
-
-        # Post-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('post')
-
-    def stage_installer(self):
-        """Stage 4: Build installers"""
-        print("\n" + "=" * 80)
-        print("STAGE 4: Build Installers")
-        print("=" * 80)
-
-        # Pre-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs: config + tarballs/zips + metadata
-        self.workspace_mgr.restore_stage_inputs('Build Installers',
-            'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-
-        exit_code = self._make_resolver().run('07-installer', env)
-        if exit_code != 0:
-            raise subprocess.CalledProcessError(exit_code, '07-installer')
-
-        # Archive installer outputs
-        self.workspace_mgr.archive_stage_outputs('Build Installers')
-
-        print("\n✅ Installer stage complete")
-
-        # Post-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('post')
-
-    def stage_smoke_tests(self):
-        """Stage 5: Run smoke tests"""
-        print("\n" + "=" * 80)
-        print("STAGE 5: Smoke Tests")
-        print("=" * 80)
-
-        # Pre-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs: config + tarballs/zips
-        self.workspace_mgr.restore_stage_inputs('Smoke Tests',
-            'pipeline-config.json,*.tar.gz,*.zip')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-
-        exit_code = self._make_resolver().run('13-smoke-tests', env)
-        if exit_code != 0:
-            raise subprocess.CalledProcessError(exit_code, '13-smoke-tests')
-
-        # Archive test result outputs
-        self.workspace_mgr.archive_stage_outputs('Smoke Tests')
-
-        print("\n✅ Smoke tests complete")
-
-        # Post-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('post')
-
-    def stage_reproducible_compare(self):
-        """Stage 6: Reproducible build comparison"""
-        print("\n" + "=" * 80)
-        print("STAGE 6: Reproducible Build Comparison")
-        print("=" * 80)
-
-        # Pre-stage cleanup
-        self.workspace_mgr.cleanup_stage_workspace('pre')
-
-        # Restore inputs: config + tarballs/zips
-        self.workspace_mgr.restore_stage_inputs('Reproducible Compare',
-            'pipeline-config.json,*.tar.gz,*.zip')
-
-        env = os.environ.copy()
-        env['WORKSPACE'] = str(self.stage_workspace)
-        env['PIPELINE_ROOT'] = str(self.script_dir)
-        env['CONFIG_FILE'] = str(self.stage_workspace / 'pipeline-config.json')
-        env['BUILD_NUMBER'] = self.build_number
-        env['INPUT_ARTIFACTS_DIR'] = str(self.stage_workspace)
-        env['TARGET_DIR'] = str(self.stage_workspace / 'target')
-        env['SCM_REF'] = self.args.scm_ref
-        # Set RELEASE based on release_type (true if RELEASE, false otherwise)
-        release_type = (self.args.release_type or 'NIGHTLY').upper()
-        env['RELEASE'] = 'true' if release_type == 'RELEASE' else 'false'
-
-        # Optional: BUILD_REPO_URL and BUILD_REF
-        if self.args.build_repo_url:
-            env['BUILD_REPO_URL'] = self.args.build_repo_url
-        if self.args.build_ref:
-            env['BUILD_REF'] = self.args.build_ref
-
-        print(f"  Note: Compares locally built JDK against production Adoptium binary")
-
-        # Capture exit code without raising — result drives UNSTABLE-equivalent behaviour
-        comparison_exit_code = self._make_resolver().run('20-reproducible-compare', env)
-
-        # Check for comparison results in stage_workspace/target/
-        comparison_report = self.stage_workspace / 'target' / 'comparison-report.txt'
-        reprotest_diff = self.stage_workspace / 'target' / 'reprotest.diff'
-        reproducible_percent = self.stage_workspace / 'target' / 'ReproduciblePercent'
-        reproducible_log = self.stage_workspace / 'target' / 'reproducible_evidence.log'
-
-        print(f"\nComparison exit code: {comparison_exit_code}")
-
-        # Display results
-        if comparison_exit_code == 0:
-            print("✅ SUCCESS: Build is 100% reproducible")
-
-            # Show reproducibility percentage if available
-            if reproducible_percent.exists():
-                percent = reproducible_percent.read_text().strip()
-                print(f"   Reproducibility: {percent}%")
-        else:
-            print(f"❌ FAILED: Reproducible build comparison failed (exit code: {comparison_exit_code})")
-
-            # Show comparison report if available
-            if comparison_report.exists():
-                print("\n📄 Comparison Report:")
-                print(comparison_report.read_text())
-
-            # Show reprotest.diff if available
-            if reprotest_diff.exists():
-                print("\n📄 Differences (reprotest.diff):")
-                diff_content = reprotest_diff.read_text()
-                # Show first 50 lines to avoid overwhelming output
-                diff_lines = diff_content.split('\n')
-                if len(diff_lines) > 50:
-                    print('\n'.join(diff_lines[:50]))
-                    print(f"\n... ({len(diff_lines) - 50} more lines, see {reprotest_diff})")
-                else:
-                    print(diff_content)
-
-            # Show reproducibility percentage if available
-            if reproducible_percent.exists():
-                percent = reproducible_percent.read_text().strip()
-                print(f"\n   Reproducibility: {percent}%")
-
-        # Archive comparison outputs
-        self.workspace_mgr.archive_stage_outputs('Reproducible Compare')
-
-        # List all comparison artifacts
-        print(f"\n📁 Comparison artifacts saved to: {self.stage_workspace / 'target'}")
-        if comparison_report.exists():
-            print(f"   - comparison-report.txt")
-        if reprotest_diff.exists():
-            print(f"   - reprotest.diff")
-        if reproducible_percent.exists():
-            print(f"   - ReproduciblePercent")
-        if reproducible_log.exists():
-            print(f"   - reproducible_evidence.log")
-
-        # Fail the stage if comparison failed
-        if comparison_exit_code != 0:
-            print("\n⚠️  Stage failed due to reproducibility issues")
-            raise subprocess.CalledProcessError(comparison_exit_code, cmd)
-
-        print("\n✅ Reproducible build comparison complete")
-
-        # Post-stage cleanup
         self.workspace_mgr.cleanup_stage_workspace('post')
 
 
@@ -633,65 +369,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full build with all stages (variant from config repo)
-  python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os mac \\
-      --architecture aarch64
+  # Standard build
+  python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64
 
-  # Build only (skip tests and installers)
+  # Release build, resume from sign stage, with reproducible comparison
   python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --no-tests \\
-      --no-installers
-
-  # Release build with custom refs
-  python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os linux \\
-      --architecture x64 \\
-      --release-type RELEASE \\
-      --scm-ref jdk-21.0.2+13 \\
-      --build-ref develop
-
-  # Build with custom workspace
-  python3 run-pipeline.py \\
-      --jdk-version jdk17u \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --workspace ~/my-custom-workspace
-
-  # Resume from a specific stage (e.g., after build failure)
-  python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --start-from-stage smoke-tests
-
-  # Re-run just the installer stage
-  python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --start-from-stage installer \\
-      --no-tests
-
-  # Build with reproducible comparison
-  python3 run-pipeline.py \\
-      --jdk-version jdk21u \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --scm-ref jdk-21.0.2+13 \\
-      --release-type RELEASE \\
-      --compare-build
+      --jdk-version jdk21 --target-os linux --architecture x64 \\
+      --release-type RELEASE --scm-ref jdk-21.0.2+13 --compare-build \\
+      --start-from-stage sign
         """
     )
 
     # Required arguments
     parser.add_argument('--jdk-version', required=True,
-                        help='JDK version to build (e.g., jdk21, jdk8). Must be in format jdkNN where NN is the version number.')
+                        help='JDK version to build (e.g., jdk21, jdk8). Format: jdkNN.')
     parser.add_argument('--target-os', required=True,
                         choices=['mac', 'linux', 'windows', 'aix'],
                         help='Target operating system')
@@ -704,10 +395,8 @@ Examples:
                         help='Workspace directory (default: ~/openjdk-build)')
     parser.add_argument('--build-number',
                         help='Build number (default: local-YYYYMMDD-HHMMSS)')
-
-    # Build type - case-insensitive (will be converted to uppercase)
     parser.add_argument('--release-type', type=str,
-                        help='Type of release build: NIGHTLY (default), WEEKLY (EA beta builds), or RELEASE (case-insensitive)')
+                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
 
     # Git refs
     parser.add_argument('--scm-ref',
@@ -737,13 +426,11 @@ Examples:
     parser.add_argument('--start-from-stage',
                         choices=['initialize', 'build', 'sign', 'installer', 'smoke-tests', 'reproducible-compare'],
                         help='Start pipeline from a specific stage (skips earlier stages)')
-    parser.add_argument('--skip-build', action='store_true',
-                        help='Skip build stage (only generate configuration)')
-    parser.add_argument('--no-tests', dest='enable_tests', action='store_false',
+    parser.add_argument('--no-tests',      dest='enable_tests',      action='store_false',
                         help='Disable tests')
-    parser.add_argument('--no-installers', dest='enable_installers', action='store_false',
+    parser.add_argument('--no-installers', dest='enable_installers',  action='store_false',
                         help='Disable installer building')
-    parser.add_argument('--no-signer', dest='enable_signer', action='store_false',
+    parser.add_argument('--no-signer',     dest='enable_signer',      action='store_false',
                         help='Disable artifact signing')
     parser.add_argument('--compare-build', action='store_true',
                         help='Enable reproducible build comparison against production Adoptium binaries (requires --scm-ref)')
@@ -752,17 +439,15 @@ Examples:
 
     args = parser.parse_args()
 
-    # Validate jdk-version format (must be jdkNN where NN is a number)
-    import re
     if not re.match(r'^jdk\d+$', args.jdk_version):
-        parser.error(f"Invalid --jdk-version format: '{args.jdk_version}'. Must be in format jdkNN where NN is the version number (e.g., jdk21, jdk8).")
+        parser.error(
+            f"Invalid --jdk-version format: '{args.jdk_version}'. "
+            f"Must be in format jdkNN where NN is the version number (e.g., jdk21, jdk8)."
+        )
 
-    # Run pipeline
     runner = PipelineRunner(args)
     return runner.run()
 
 
 if __name__ == '__main__':
     sys.exit(main())
-
-# Made with Bob

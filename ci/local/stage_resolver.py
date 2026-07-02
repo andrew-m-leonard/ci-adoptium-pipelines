@@ -11,10 +11,11 @@ Resolution order for a given stem (e.g. '13-smoke-tests'):
 Stage enablement is driven by parameters in pipeline-config.json (the same
 CONFIG_FILE used by stage scripts).  Mapping:
 
+  12-validate-sbom        → buildConfig.BUILD_ARGS contains '--create-sbom'
   06-post-build-code-sign → parameters.enableSigner
-  07-installer           → parameters.enableInstallers
-  13-smoke-tests         → parameters.enableTests
-  20-reproducible-compare→ parameters.compareBuild
+  07-installer            → parameters.enableInstallers
+  13-smoke-tests          → parameters.enableTests
+  20-reproducible-compare → parameters.compareBuild
 
 Stages without an explicit gate always run.
 Groovy is not supported locally (Jenkins-only).
@@ -32,13 +33,22 @@ import subprocess
 from pathlib import Path
 
 
-# Maps stage stems to the parameter key in pipeline-config.json that gates them.
-# Stages not listed here are always enabled.
+# Maps stage stems to the key in pipeline-config.json 'parameters' that gates them.
+# Stages not listed here are checked by _STAGE_CONDITION, or always run.
 _STAGE_PARAMETER_GATE = {
     '06-post-build-code-sign': 'enableSigner',
     '07-installer': 'enableInstallers',
     '13-smoke-tests': 'enableTests',
     '20-reproducible-compare': 'compareBuild',
+}
+
+# Stages gated by a condition evaluated against the full config (not just parameters).
+# Each entry is a callable(config_dict) -> (bool, reason_str).
+_STAGE_CONDITION = {
+    '12-validate-sbom': lambda cfg: (
+        '--create-sbom' in cfg.get('buildConfig', {}).get('BUILD_ARGS', ''),
+        "parameters: --create-sbom not in BUILD_ARGS"
+    ),
 }
 
 
@@ -62,22 +72,21 @@ class StageResolver:
         self.pipeline_root = pipeline_root
         self.config_repo_root = config_repo_root
         self._config_file = config_file
-        self._parameters: dict | None = None
+        self._config: dict | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load_parameters(self) -> dict:
-        """Load and cache the 'parameters' section from pipeline-config.json."""
-        if self._parameters is None:
+    def _load_config(self) -> dict:
+        """Load and cache the full pipeline-config.json."""
+        if self._config is None:
             if self._config_file and self._config_file.exists():
                 with open(self._config_file, 'r') as f:
-                    cfg = json.load(f)
-                self._parameters = cfg.get('parameters', {})
+                    self._config = json.load(f)
             else:
-                self._parameters = {}
-        return self._parameters
+                self._config = {}
+        return self._config
 
     # ------------------------------------------------------------------
     # Public API
@@ -85,19 +94,26 @@ class StageResolver:
 
     def is_enabled(self, stem: str) -> tuple[bool, str]:
         """
-        Check whether a stage is enabled based on pipeline-config.json parameters.
+        Check whether a stage is enabled based on pipeline-config.json.
 
         Returns:
             (enabled, reason) — if no gate exists for this stem, returns (True, '').
         """
-        param_key = _STAGE_PARAMETER_GATE.get(stem)
-        if param_key is None:
-            return True, ''
+        # Check _STAGE_CONDITION first (full-config predicates)
+        condition = _STAGE_CONDITION.get(stem)
+        if condition is not None:
+            enabled, reason = condition(self._load_config())
+            return enabled, ('' if enabled else reason)
 
-        params = self._load_parameters()
-        enabled = params.get(param_key, True)
-        reason = '' if enabled else f"parameters.{param_key} is false in pipeline-config.json"
-        return enabled, reason
+        # Check _STAGE_PARAMETER_GATE (parameters.* boolean flags)
+        param_key = _STAGE_PARAMETER_GATE.get(stem)
+        if param_key is not None:
+            params = self._load_config().get('parameters', {})
+            enabled = params.get(param_key, True)
+            reason = '' if enabled else f"parameters.{param_key} is false in pipeline-config.json"
+            return enabled, reason
+
+        return True, ''
 
     def resolve(self, stem: str) -> Path | None:
         """
