@@ -9,9 +9,9 @@
  * no 'steps.' prefix, no init(this) delegation.
  *
  * Public API:
- *   initializeStage(stageName, prerequisites=[], artifactFilter='pipeline-config.json', inputArtifactsDir=null)
+ *   initializeStage(stageName, prerequisites=[], artifactFilter='pipeline-config.json')
  *     → cleans workspace, checks out repos, initialises BUILD_UID, validates
- *       prerequisites, copies artifacts; returns parsed config Map (or [:] for Initialize)
+ *       prerequisites, copies artifacts into WORKSPACE root; returns parsed config Map (or [:] for Initialize)
  *
  *   finalizeStage(stageName)
  *     → optional cleanWs + completion log
@@ -49,7 +49,7 @@ def executeStageWithTracking(String stageName, Closure body) {
  * Returns the parsed pipeline-config.json for non-Initialize stages,
  * or an empty map for the Initialize stage.
  */
-def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json', String inputArtifactsDir = null) {
+def initializeStage(String stageName, List<String> prerequisites = [], String artifactFilter = 'pipeline-config.json') {
     echo "=== ${stageName} ==="
 
     // Pre-cleanup: Always clean workspace for restartability
@@ -93,24 +93,18 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
         buildUidHelper.validatePrerequisites(stageName, prerequisites)
     }
 
-    // Retrieve artifacts if filter specified (skip for Initialize stage)
+    // Retrieve artifacts into WORKSPACE root (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
-        def targetDir = inputArtifactsDir ?: '.'
-
-        if (inputArtifactsDir) {
-            sh "mkdir -p ${inputArtifactsDir}"
-        }
-
         try {
             copyArtifacts(
                 projectName: env.JOB_NAME,
                 selector: specific(env.BUILD_NUMBER),
                 filter: artifactFilter,
-                target: targetDir,
+                target: '.',
                 optional: false,
                 fingerprintArtifacts: true
             )
-            echo "✅ Successfully copied artifacts to ${targetDir}: ${artifactFilter}"
+            echo "✅ Successfully copied artifacts: ${artifactFilter}"
         } catch (Exception e) {
             error("Failed to copy artifacts '${artifactFilter}' from build ${env.BUILD_NUMBER}: ${e.message}")
         }
@@ -120,10 +114,9 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     if (stageName == 'Initialize') {
         return [:]
     } else {
-        env.WORKSPACE             = "${env.WORKSPACE}"
         env.BUILD_NUMBER          = "${env.BUILD_NUMBER}"
-        env.INPUT_ARTIFACTS_DIR   = inputArtifactsDir ?: "${env.WORKSPACE}"
-        env.CONFIG_FILE           = "${env.INPUT_ARTIFACTS_DIR}/pipeline-config.json"
+        env.INPUT_ARTIFACTS_DIR   = "${env.WORKSPACE}"
+        env.CONFIG_FILE           = "${env.WORKSPACE}/pipeline-config.json"
 
         def config = readJSON(file: env.CONFIG_FILE)
         ensureBuildDescriptionSet(config)

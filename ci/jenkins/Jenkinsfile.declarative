@@ -338,7 +338,7 @@ pipeline {
                 script {
                     ensureLibsLoaded()
                     pipelineHelper.executeStageWithTracking('Validate SBOM') {
-                        def config = pipelineHelper.initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json', "${WORKSPACE}/stage_input_artifacts")
+                        def config = pipelineHelper.initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json')
 
                         env.TARGET_DIR = "${WORKSPACE}/sbom_validation_output"
 
@@ -367,7 +367,7 @@ pipeline {
                 script {
                     ensureLibsLoaded()
                     pipelineHelper.executeStageWithTracking('Smoke Tests') {
-                        def config = pipelineHelper.initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+                        def config = pipelineHelper.initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
                         env.TARGET_DIR = "${WORKSPACE}/smoke_test_output"
 
@@ -403,7 +403,7 @@ pipeline {
                 script {
                     ensureLibsLoaded()
                     pipelineHelper.executeStageWithTracking('Reproducible Compare Build') {
-                        def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip', "${WORKSPACE}/stage_input_artifacts")
+                        def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
                         env.TARGET_DIR = "${WORKSPACE}/reproducible_compare_output"
                         env.SCM_REF    = params.SCM_REF
