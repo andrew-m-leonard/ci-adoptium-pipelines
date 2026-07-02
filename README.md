@@ -133,12 +133,12 @@ For each stage stem (e.g. `02-build`), `StageScriptRunner` searches in order:
 | 09 | SBOM Sign | `09-sbom-sign.sh` | `--create-sbom` in build args, signing enabled |
 | 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | Signing enabled, non-PR |
 | 11 | Verify Signing | `11-verify-signing.sh` | Signing enabled, non-PR |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | `--create-sbom` in build args |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | `--create-sbom` in build args (vendor impl required) |
 | 13 | Smoke Tests | `13-smoke-tests.sh` | Tests enabled |
 | 14 | AQA Tests | `14-aqa-tests.sh` | Tests enabled, smoke tests passed |
 | 15 | TCK Tests | `15-tck-tests.sh` | Temurin, TCK enabled, smoke tests passed |
 | 16 | Publish Artifacts | `16-publish.sh` | Publish enabled |
-| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `REPRODUCIBLE_COMPARE_BUILD=true` + `SCM_REF` set |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `REPRODUCIBLE_COMPARE_BUILD=true` + `SCM_REF` set (vendor impl required) |
 
 Each stage calls `initializeStage()` which: cleans the workspace, checks out this repo, clones the config repo (sparse), initialises/reuses `BUILD_UID`, validates prerequisites, and copies required artifacts from the current build.
 

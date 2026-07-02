@@ -153,12 +153,12 @@ The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the
 | 09 | SBOM Sign | `09-sbom-sign.sh` | Post-Build Code Sign | JSF-signed SBOM |
 | 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | SBOM Sign | `.sig` / `.asc` GPG signatures |
 | 11 | Verify Signing | `11-verify-signing.sh` | Digital Artifact Sign | Verification report |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | Build | SBOM validation report |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | Build | SBOM validation report (vendor impl required) |
 | 13 | Smoke Tests | `13-smoke-tests.sh` | Build | Test results (UNSTABLE on failure) |
 | 14 | AQA Tests | `14-aqa-tests.sh` | Smoke Tests | AQA test results |
 | 15 | TCK Tests | `15-tck-tests.sh` | Smoke Tests | TCK test results |
 | 16 | Publish Artifacts | `16-publish.sh` | Build | Publication confirmation |
-| 20 | Reproducible Compare | `20-reproducible-compare.sh` | Build | `comparison-report.txt`, `reprotest.diff` |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | Build | `comparison-report.txt`, `reprotest.diff` (vendor impl required) |
 
 Conditional stages only run when their guard condition is met (e.g. `PUBLISH_ARTIFACTS=true`, signing enabled, `REPRODUCIBLE_COMPARE_BUILD=true`). See [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md) for the full config schema.
 

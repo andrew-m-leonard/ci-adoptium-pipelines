@@ -157,13 +157,14 @@ Verifies that all necessary signing has been completed: Windows/macOS executable
 
 ---
 
-### `12-validate-sbom.sh` — Validate SBOM `REAL`
+### `12-validate-sbom.sh` — Validate SBOM `STUB`
 
-Clones `temurin-build`, invokes `tooling/validateSBOM.sh` against the SBOM JSON files produced by Build. Only runs when `--create-sbom` is present in `BUILD_ARGS`.
+Validates SBOM files produced during Build. Vendor-specific (tooling and acceptance criteria vary). Only runs when `--create-sbom` is present in `BUILD_ARGS`.
+
+The Temurin implementation clones `temurin-build` and invokes `tooling/validateSBOM.sh`. It lives in `ci-temurin-config/vendor-scripts/12-validate-sbom.sh`.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing `*sbom*.json`
 **Outputs:** `TARGET_DIR` containing validation results
-**Extra env (optional):** `TEMURIN_BUILD_REPO`, `TEMURIN_BUILD_BRANCH`
 
 ---
 
@@ -211,12 +212,14 @@ Publishes artifacts to a release repository. Vendor-specific.
 
 ---
 
-### `20-reproducible-compare.sh` — Reproducible Build Comparison `REAL`
+### `20-reproducible-compare.sh` — Reproducible Build Comparison `STUB`
 
-Downloads the corresponding Adoptium production binary via the Adoptium API, then compares it against the locally built JDK using `temurin-build/tooling/reproducible/repro_compare.sh`.
+Compares a locally built JDK against the vendor's published production binary to verify bit-for-bit reproducibility. The comparison tooling and binary source are vendor-specific.
+
+The Temurin implementation downloads from `api.adoptium.net` and uses `temurin-build/tooling/reproducible/repro_compare.sh`. It lives in `ci-temurin-config/vendor-scripts/20-reproducible-compare.sh`.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing built JDK tarballs
-**Outputs:** `${TARGET_DIR}/comparison-report.txt`, `reprotest.diff`, `ReproduciblePercent`, `reproducible_evidence.log`
+**Outputs:** `${TARGET_DIR}/comparison-report.txt`, `reprotest.diff`, `ReproduciblePercent`
 **Extra env:** `SCM_REF` (required), `RELEASE` (`true`/`false`), `BUILD_REPO_URL` (optional), `BUILD_REF` (optional)
 
 Exit codes: `0` = 100% reproducible, non-zero = differences found (pipeline marks build UNSTABLE, does not fail)

@@ -2,9 +2,11 @@
 
 ## Overview
 
-This document describes the reproducible build comparison capability in the CI Adoptium Pipelines. The system validates build reproducibility by comparing locally built JDKs against production Adoptium binaries using the proven `temurin-build/tooling/reproducible/repro_compare.sh` tool.
+This document describes the reproducible build comparison capability in the CI Adoptium Pipelines. The system validates build reproducibility by comparing locally built JDKs against production binaries.
 
-**Key Principle**: The comparison logic is **CI-agnostic** — implemented in a single shell script (`scripts/stages/20-reproducible-compare.sh`) that works across all CI platforms and local execution.
+**Key Principle**: The comparison logic is **CI-agnostic** — the stage contract (`scripts/stages/20-reproducible-compare.sh`) defines the interface; the vendor-specific implementation (comparison tooling, binary source, acceptance criteria) lives in the config repo.
+
+**Temurin implementation**: `ci-temurin-config/vendor-scripts/20-reproducible-compare.sh` — downloads from `api.adoptium.net` and delegates to `temurin-build/tooling/reproducible/repro_compare.sh`.
 
 ---
 
@@ -12,9 +14,9 @@ This document describes the reproducible build comparison capability in the CI A
 
 ### Core Component: Stage Script
 
-**Location**: [`scripts/stages/20-reproducible-compare.sh`](../scripts/stages/20-reproducible-compare.sh)
+**Default stub**: [`scripts/stages/20-reproducible-compare.sh`](../scripts/stages/20-reproducible-compare.sh) — no-op, exits 0.
 
-This shell script provides the complete reproducible build comparison functionality and can be executed from any CI system or locally.
+**Temurin vendor override**: `ci-temurin-config/vendor-scripts/20-reproducible-compare.sh` — provides the full implementation. The vendor script is resolved at runtime via [`StageScriptRunner`](../ci/jenkins/lib/StageScriptRunner.groovy) (Jenkins) or [`stage_resolver.py`](../ci/local/stage_resolver.py) (local).
 
 ### How It Works
 
