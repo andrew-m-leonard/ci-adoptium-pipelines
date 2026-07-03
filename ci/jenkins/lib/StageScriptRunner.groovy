@@ -24,22 +24,43 @@
  */
 
 /**
- * Write all current Jenkins environment variables to a KEY=VALUE file
- * suitable for `podman exec --env-file`.
+ * Build the -e flag string for `podman exec` containing all pipeline
+ * environment variables the stage scripts depend on.
  *
- * Iterates the Groovy env object directly — guaranteed to include WORKSPACE,
- * CONFIG_*, TARGET_DIR and every other var set by initializeStage/withEnv,
- * regardless of whether they are visible to printenv on the host shell.
- * Values containing newlines are skipped (they would corrupt the file format).
+ * Explicitly enumerates known variables — avoids sandbox violations from
+ * env.getEnvironment() and never exposes Jenkins credential secrets.
  */
-def writeEnvFile(String path) {
-    def lines = []
-    env.getEnvironment().each { k, v ->
-        if (v != null && !v.contains('\n') && !v.contains('\r')) {
-            lines << "${k}=${v}"
-        }
-    }
-    writeFile(file: path, text: lines.join('\n') + '\n')
+def podmanEnvFlags() {
+    // Core pipeline vars set by initializeStage() / Jenkinsfile
+    def vars = [
+        'WORKSPACE',
+        'CONFIG_FILE',
+        'TARGET_DIR',
+        'INPUT_ARTIFACTS_DIR',
+        'BUILD_NUMBER',
+        'BUILD_UID',
+        'GROUP_UID',
+        'JOB_NAME',
+        'BUILD_URL',
+        // CONFIG_* vars set by ConfigHelper.generatePipelineConfig()
+        'CONFIG_VARIANT',
+        'CONFIG_TARGET_OS',
+        'CONFIG_ARCHITECTURE',
+        'CONFIG_JAVA_TO_BUILD',
+        'CONFIG_NODE_LABEL',
+        'CONFIG_BUILD_ARGS',
+        'CONFIG_RUN_TESTS',
+        'CONFIG_ENABLE_INSTALLERS',
+        'CONFIG_SIGN_ARTIFACTS',
+        'CONFIG_ENABLE_TCK',
+        'CONFIG_PUBLISH_ARTIFACTS',
+        'AQA_REF',
+        'SMOKE_TESTS_PASSED',
+    ]
+    return vars
+        .findAll  { env[it] != null && env[it] != '' }
+        .collect  { "-e '${it}=${env[it]}'" }
+        .join(' ')
 }
 
 /**
@@ -86,17 +107,10 @@ def run(String scriptStem, def config = null) {
     switch (found.type) {
         case 'sh':
             if (podmanId) {
-                // podman exec does not inherit the Jenkins environment.
-                // Write a KEY=VALUE env file from the Groovy env object directly
-                // (guaranteed correct — avoids printenv format/encoding issues)
-                // and pass it via --env-file so the script sees WORKSPACE, CONFIG_*, etc.
-                def envFile = "${podmanWs}/.podman-env-${scriptStem}"
-                writeEnvFile(envFile)
-                try {
-                    return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
-                } finally {
-                    sh(script: "rm -f '${envFile}'", returnStatus: true)
-                }
+                // podman exec does not inherit the Jenkins environment — pass
+                // the known pipeline vars explicitly via -e flags.
+                def eFlags = podmanEnvFlags()
+                return sh(script: "podman exec ${eFlags} -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -118,13 +132,8 @@ def run(String scriptStem, def config = null) {
             return script(config) ?: 0
         case 'py':
             if (podmanId) {
-                def envFile = "${podmanWs}/.podman-env-${scriptStem}"
-                writeEnvFile(envFile)
-                try {
-                    return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
-                } finally {
-                    sh(script: "rm -f '${envFile}'", returnStatus: true)
-                }
+                def eFlags = podmanEnvFlags()
+                return sh(script: "podman exec ${eFlags} -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
