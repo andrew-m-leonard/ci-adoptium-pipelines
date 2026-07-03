@@ -49,11 +49,18 @@ def podmanEnvFlags() {
         'CONFIG_JAVA_TO_BUILD',
         'CONFIG_NODE_LABEL',
         'CONFIG_BUILD_ARGS',
+        'CONFIG_CONFIGURE_ARGS',
+        'CONFIG_BUILD_REF',
+        'CONFIG_BUILD_REPO_URL',
+        'CONFIG_CLEAN_WORKSPACE',
+        'CONFIG_EA_BETA_BUILD',
+        'CONFIG_COMPARE_BUILD',
         'CONFIG_RUN_TESTS',
         'CONFIG_ENABLE_INSTALLERS',
         'CONFIG_SIGN_ARTIFACTS',
         'CONFIG_ENABLE_TCK',
         'CONFIG_PUBLISH_ARTIFACTS',
+        'SCM_REF',
         'AQA_REF',
         'SMOKE_TESTS_PASSED',
     ]
@@ -70,10 +77,10 @@ def podmanEnvFlags() {
     flags << "-e 'SSH_ASKPASS='"
     flags << "-e 'GIT_TERMINAL_PROMPT=0'"
 
-    // The build image installs git under /usr/local, with helpers in
-    // /usr/local/libexec/git-core (including git-remote-https).  That
-    // directory is not on the default PATH so git cannot find its own HTTPS
-    // transport helper and fails with "Out of memory".  Prepend it explicitly.
+    // The build image installs tools under /usr/local — git helpers live in
+    // /usr/local/libexec/git-core (needed so git can find git-remote-https),
+    // and other build tools (jq, etc.) live in /usr/local/bin.
+    // Prepend both so all image-installed tools are found before system ones.
     flags << "-e 'PATH=/usr/local/libexec/git-core:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'"
 
     // podman exec starts with a minimal environment where HOME is unset or '/'.

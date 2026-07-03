@@ -53,13 +53,13 @@ get_config_value() {
     local config=$1
     local json_path=$2
     local default_value=${3:-}
+    local value
 
     # If config looks like a file path, read directly from file
     if [[ -f "${config}" ]]; then
-        local value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
+        value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
     else
-        # Otherwise treat as JSON string
-        local value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
+        value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
     fi
 
     if [[ "${value}" == "null" ]] || [[ -z "${value}" ]]; then
@@ -67,7 +67,7 @@ get_config_value() {
             echo "${default_value}"
         else
             log_error "Configuration value not found: ${json_path}"
-            exit 1
+            return 1
         fi
     else
         echo "${value}"
@@ -79,13 +79,13 @@ get_config_bool() {
     local config=$1
     local json_path=$2
     local default_value=${3:-false}
+    local value
 
     # If config looks like a file path, read directly from file
     if [[ -f "${config}" ]]; then
-        local value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
+        value=$(jq -r "${json_path}" "${config}" 2>/dev/null)
     else
-        # Otherwise treat as JSON string
-        local value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
+        value=$(echo "${config}" | jq -r "${json_path}" 2>/dev/null)
     fi
 
     if [[ "${value}" == "true" ]]; then

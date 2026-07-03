@@ -39,22 +39,26 @@ main() {
     # Validate environment
     validate_standard_environment
 
-    # Load configuration
-    log_info "Loading configuration from ${CONFIG_FILE}"
+    # Read build configuration from CONFIG_* environment variables set by the pipeline.
+    # These are always present — avoids a jq dependency in the build container.
+    local java_to_build="${CONFIG_JAVA_TO_BUILD:-}"
+    local target_os="${CONFIG_TARGET_OS:-}"
+    local architecture="${CONFIG_ARCHITECTURE:-}"
+    local variant="${CONFIG_VARIANT:-}"
+    local build_args="${CONFIG_BUILD_ARGS:-}"
+    local configure_args="${CONFIG_CONFIGURE_ARGS:-}"
+    local scm_ref="${SCM_REF:-}"
+    local build_ref="${CONFIG_BUILD_REF:-master}"
+    local build_repo_url="${CONFIG_BUILD_REPO_URL:-https://github.com/adoptium/temurin-build.git}"
+    local clean_workspace="${CONFIG_CLEAN_WORKSPACE:-false}"
+    local ea_beta_build="${CONFIG_EA_BETA_BUILD:-false}"
+    local compare_build="${CONFIG_COMPARE_BUILD:-false}"
 
-    # Extract build configuration (pass file path directly)
-    local java_to_build=$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")
-    local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
-    local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
-    local variant=$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")
-    local build_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.BUILD_ARGS" "")
-    local configure_args=$(get_config_value "${CONFIG_FILE}" ".buildConfig.CONFIGURE_ARGS" "")
-    local scm_ref=$(get_config_value "${CONFIG_FILE}" ".refs.scmRef" "")
-    local build_ref=$(get_config_value "${CONFIG_FILE}" ".refs.buildRef" "master")
-    local build_repo_url=$(get_config_value "${CONFIG_FILE}" ".refs.buildRepoUrl" "https://github.com/adoptium/temurin-build.git")
-    local clean_workspace=$(get_config_bool "${CONFIG_FILE}" ".parameters.cleanWorkspace" "false")
-    local ea_beta_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.eaBetaBuild" "false")
-    local compare_build=$(get_config_bool "${CONFIG_FILE}" ".parameters.compareBuild" "false")
+    # Validate required values
+    [[ -z "${java_to_build}" ]] && { log_error "CONFIG_JAVA_TO_BUILD not set"; exit 1; }
+    [[ -z "${target_os}" ]]     && { log_error "CONFIG_TARGET_OS not set"; exit 1; }
+    [[ -z "${architecture}" ]]  && { log_error "CONFIG_ARCHITECTURE not set"; exit 1; }
+    [[ -z "${variant}" ]]       && { log_error "CONFIG_VARIANT not set"; exit 1; }
 
     # If EA/Beta build is enabled, append --with-version-opt=ea to configure args
     if [[ "${ea_beta_build}" == "true" ]]; then
