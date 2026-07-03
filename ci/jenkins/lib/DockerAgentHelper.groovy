@@ -32,13 +32,16 @@
  *   CONFIG_DOCKER_ARGS       — extra arguments forwarded to `docker run` on Docker nodes
  *   CONFIG_PODMAN_ARGS       — extra arguments forwarded to `podman run` on Podman nodes,
  *                              used instead of CONFIG_DOCKER_ARGS when Podman is detected.
- *                              Set podmanArgs in the platform config for Podman-specific
- *                              flags, e.g: "--userns keep-id:uid=1002,gid=1003"
+ *                              The container uid:gid is set automatically from the host
+ *                              Jenkins user — do NOT add -u or --userns keep-id here.
+ *                              Use for extra flags only, e.g: "--security-opt label=disable"
  *
  * Podman auto-detection:
  *   When Podman is detected as the container runtime:
  *   - The `podman` binary is used directly (not the Docker shim) so Jenkins
  *     cannot inject the -t flag that causes rootless Podman to hang.
+ *   - The container is started with -u <hostUid>:<hostGid> so it runs as the
+ *     same uid as the Jenkins agent that owns the workspace bind-mount.
  *   - CONFIG_PODMAN_ARGS is used in place of CONFIG_DOCKER_ARGS (if set).
  *   - Unqualified image names (e.g. "adoptopenjdk/foo") are automatically
  *     prefixed with "docker.io/" — Podman does not resolve short names without
@@ -90,15 +93,25 @@ def isUnqualifiedImageName(String image) {
  *
  * By calling `podman run` directly via sh() we have full control of every flag.
  *
+ * UID matching:
+ *   The host Jenkins user (e.g. uid=1001) owns the workspace.  The image's
+ *   jenkins user is hardcoded at uid=1000 (adoptopenjdk/centos7_build_image et al).
+ *   Running the container as uid=1000 means it cannot write into a workspace
+ *   owned by uid=1001.  We detect the host uid at runtime and inject -u uid:gid
+ *   so the container process runs as the same uid that owns the workspace.
+ *   Any podmanArgs supplied via the config repo are appended after -u, allowing
+ *   overrides if needed (e.g. --userns keep-id for rootless user-namespace setups).
+ *
  * Strategy:
- *   1. podman pull        — pull the image explicitly.
- *   2. podman run -d --rm — start the container detached.
- *                           podmanArgs from the config repo are passed here
- *                           (e.g. "--userns keep-id:uid=1000,gid=1000").
- *                           Workspace is bind-mounted at the same absolute path.
- *   3. withEnv            — expose BUILD_PODMAN_CONTAINER_ID so StageScriptRunner
- *                           dispatches shell scripts via `podman exec bash -c 'cd ws && ...'`.
- *   4. finally            — podman stop cleans up the container on any exit.
+ *   1. podman pull           — pull the image explicitly.
+ *   2. detect host uid:gid   — id -u / id -g, runs as Jenkins agent user.
+ *   3. podman run -d --rm    — start the container detached, with -u <hostUid>:<hostGid>
+ *                              so the container process owns the workspace files.
+ *                              podmanArgs from the config repo are appended.
+ *                              Workspace is bind-mounted at the same absolute path.
+ *   4. withEnv               — expose BUILD_PODMAN_CONTAINER_ID so StageScriptRunner
+ *                              dispatches shell scripts via `podman exec bash -c 'cd ws && ...'`.
+ *   5. finally               — podman stop cleans up the container on any exit.
  *
  * We do NOT use `podman run -t` or `podman exec -w`: crun resolves the -w path
  * at exec-setup time and fails with "getcwd: No such file or directory" when the
@@ -114,9 +127,15 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         echo "Pulling image (podman): ${image}"
         sh "podman pull '${image}'"
 
-        echo "Starting Podman container: ${image}"
+        // Detect the host uid:gid so the container process runs as the same
+        // user that owns the workspace — avoids permission errors when the
+        // image's hardcoded jenkins uid (1000) differs from the host (e.g. 1001).
+        def hostUid = sh(script: 'id -u', returnStdout: true).trim()
+        def hostGid = sh(script: 'id -g', returnStdout: true).trim()
+        echo "Starting Podman container: ${image} (uid=${hostUid} gid=${hostGid})"
         containerId = sh(
             script: """podman run -d --rm \\
+                         -u '${hostUid}:${hostGid}' \\
                          ${podmanArgs} \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
