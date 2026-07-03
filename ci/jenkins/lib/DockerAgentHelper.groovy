@@ -157,7 +157,7 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        sh(script: "podman exec '${containerId}' bash -c 'cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || cat /sys/fs/cgroup/memory.max 2>/dev/null || echo no-cgroup-limit'", returnStatus: true)
+        sh(script: "podman exec '${containerId}' bash -c 'cat /etc/nsswitch.conf | grep hosts; getent hosts github.com 2>&1; GIT_CURL_VERBOSE=1 git ls-remote https://github.com/adoptium/temurin-build.git HEAD 2>&1 | head -30 || true'", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
