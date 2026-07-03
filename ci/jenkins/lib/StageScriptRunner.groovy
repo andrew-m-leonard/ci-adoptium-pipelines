@@ -70,6 +70,12 @@ def podmanEnvFlags() {
     flags << "-e 'SSH_ASKPASS='"
     flags << "-e 'GIT_TERMINAL_PROMPT=0'"
 
+    // The build image installs git under /usr/local, with helpers in
+    // /usr/local/libexec/git-core (including git-remote-https).  That
+    // directory is not on the default PATH so git cannot find its own HTTPS
+    // transport helper and fails with "Out of memory".  Prepend it explicitly.
+    flags << "-e 'PATH=/usr/local/libexec/git-core:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'"
+
     return flags.join(' ')
 }
 
