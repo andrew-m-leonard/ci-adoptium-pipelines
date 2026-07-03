@@ -68,9 +68,11 @@ def run(String scriptStem, def config = null) {
     }
 
     // Ensure TARGET_DIR exists inside the container before the script runs.
+    // TARGET_DIR is always an absolute path so -t/-w are not needed here —
+    // the bare exec form matches the workspace mkdir above.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            sh "podman exec -t -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
+            sh "podman exec '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
