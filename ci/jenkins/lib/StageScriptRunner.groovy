@@ -53,15 +53,14 @@ def run(String scriptStem, def config = null) {
     def podmanId = env.BUILD_PODMAN_CONTAINER_ID?.trim()
     def podmanWs = env.BUILD_PODMAN_WORKSPACE?.trim()
 
-    // On Podman builds all exec calls use 'podman exec ... bash -c <cmd>' with NO -w.
-    // podman exec -w fails with "crun: getcwd: No such file or directory" regardless
-    // of whether the directory exists — this is a crun/userns interaction issue with
-    // this Podman version.  Instead we always cd inside the container as the first
-    // instruction of the bash -c argument.
+    // On Podman builds, podman exec -w fails with "crun: getcwd: No such file or
+    // directory" regardless of whether the directory exists — a crun/userns
+    // interaction issue with this Podman version.  bash -c quoting is also
+    // unreliable across Jenkins' sh step shell layers.
     //
-    // The compound command is built as a Groovy string (variables substituted by
-    // Groovy before the host shell sees the line), then passed as a single
-    // single-quoted argument to bash -c so the host shell treats it as one token.
+    // The only reliable approach: write a small wrapper script into the workspace
+    // (which is bind-mounted at the same absolute path inside the container), then
+    // run that file directly with podman exec.  No -w, no bash -c quoting needed.
 
     // Recreate the workspace path inside the container — initializeStage() calls
     // cleanWs() which wipes and recreates the workspace after the container starts,
@@ -73,7 +72,11 @@ def run(String scriptStem, def config = null) {
     // Ensure TARGET_DIR exists inside the container before the script runs.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            sh "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && mkdir -p '${env.TARGET_DIR}'\""
+            def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+            writeFile file: wrapperPath, text: "#!/bin/bash\nexec mkdir -p '${env.TARGET_DIR}'\n"
+            sh "chmod +x '${wrapperPath}'"
+            sh "podman exec '${podmanId}' '${wrapperPath}'"
+            sh "rm -f '${wrapperPath}'"
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
@@ -81,10 +84,16 @@ def run(String scriptStem, def config = null) {
 
     switch (found.type) {
         case 'sh':
-            // Dispatch via podman exec with cd as first instruction.
-            // No -w — see note above.
+            // Write a wrapper into the workspace (bind-mounted at the same path
+            // inside the container) that cds to the workspace then runs the script.
+            // podman exec runs the wrapper file directly — no -w, no bash -c.
             if (podmanId) {
-                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && bash '${found.path}'\"", returnStatus: true)
+                def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+                writeFile file: wrapperPath, text: "#!/bin/bash\ncd '${podmanWs}'\nexec bash '${found.path}'\n"
+                sh "chmod +x '${wrapperPath}'"
+                def rc = sh(script: "podman exec '${podmanId}' '${wrapperPath}'", returnStatus: true)
+                sh "rm -f '${wrapperPath}'"
+                return rc
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -92,6 +101,7 @@ def run(String scriptStem, def config = null) {
             // they cannot be run inside a container via podman exec.
             // However, a Groovy script can issue its own podman exec calls using
             // the BUILD_PODMAN_CONTAINER_ID and BUILD_PODMAN_WORKSPACE env vars.
+            // Write a wrapper script to BUILD_PODMAN_WORKSPACE and podman exec it.
             if (podmanId) {
                 echo "⚠️  WARNING: Groovy stage script '${found.path}' is running on the host JVM " +
                      "while the build agent is a Podman container (BUILD_PODMAN_CONTAINER_ID=${podmanId}). " +
@@ -99,16 +109,21 @@ def run(String scriptStem, def config = null) {
                      "via podman exec. Any sh() calls inside this script will run on the host, not in the container. " +
                      "Options: " +
                      "(1) Convert to a .sh or .py script — these are dispatched into the container automatically. " +
-                     "(2) Issue podman exec calls directly within the Groovy script using: " +
-                     "BUILD_PODMAN_CONTAINER_ID and BUILD_PODMAN_WORKSPACE env vars. " +
-                     "Example: sh(\"podman exec '\${BUILD_PODMAN_CONTAINER_ID}' bash -c \\\"cd '\${BUILD_PODMAN_WORKSPACE}' && your-command\\\"\")"
+                     "(2) Write a wrapper script to BUILD_PODMAN_WORKSPACE and exec it directly: " +
+                     "writeFile(file: \"\${BUILD_PODMAN_WORKSPACE}/.wrapper.sh\", text: \"#!/bin/bash\\ncd '\${BUILD_PODMAN_WORKSPACE}'\\nyour-command\\n\"); " +
+                     "sh(\"podman exec '\${BUILD_PODMAN_CONTAINER_ID}' '\${BUILD_PODMAN_WORKSPACE}/.wrapper.sh'\")"
             }
             def script = load(found.path)
             return script(config) ?: 0
         case 'py':
             // Dispatch python scripts the same way as shell scripts.
             if (podmanId) {
-                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && python3 '${found.path}'\"", returnStatus: true)
+                def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+                writeFile file: wrapperPath, text: "#!/bin/bash\ncd '${podmanWs}'\nexec python3 '${found.path}'\n"
+                sh "chmod +x '${wrapperPath}'"
+                def rc = sh(script: "podman exec '${podmanId}' '${wrapperPath}'", returnStatus: true)
+                sh "rm -f '${wrapperPath}'"
+                return rc
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
