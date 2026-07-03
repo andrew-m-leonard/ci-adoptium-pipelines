@@ -92,13 +92,18 @@ def isUnqualifiedImageName(String image) {
  *
  * Strategy:
  *   1. podman pull        — pull the image explicitly.
- *   2. podman run -d --rm — start the container detached with no -t.
+ *   2. podman run -d --rm — start the container detached.
  *                           podmanArgs from the config repo are passed here
- *                           (e.g. "--userns keep-id:uid=1002,gid=1003").
+ *                           (e.g. "--userns keep-id:uid=1000,gid=1000").
  *                           Workspace is bind-mounted at the same absolute path.
  *   3. withEnv            — expose BUILD_PODMAN_CONTAINER_ID so StageScriptRunner
- *                           dispatches shell scripts via `podman exec -w`.
+ *                           dispatches shell scripts via `podman exec bash -c 'cd ws && ...'`.
  *   4. finally            — podman stop cleans up the container on any exit.
+ *
+ * We do NOT use `podman run -t` or `podman exec -w`: crun resolves the -w path
+ * at exec-setup time and fails with "getcwd: No such file or directory" when the
+ * workspace was (re)created on the host after the container started.  StageScriptRunner
+ * uses `bash -c 'cd <ws> && ...'` instead, which resolves the path at shell runtime.
  *
  * Must be called from within a node() block.
  */
@@ -110,11 +115,8 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         sh "podman pull '${image}'"
 
         echo "Starting Podman container: ${image}"
-        // -t allocates a pseudo-TTY for the container process.  Without it,
-        // crun cannot resolve the working directory in podman exec -w, causing
-        // "getcwd: No such file or directory" even when the path exists.
         containerId = sh(
-            script: """podman run -t -d --rm \\
+            script: """podman run -d --rm \\
                          ${podmanArgs} \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
@@ -125,11 +127,12 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         echo "Container started: ${containerId}"
 
         // Expose the container ID and workspace path so StageScriptRunner can
-        // dispatch stage scripts inside the container via podman exec -w.
+        // dispatch stage scripts inside the container via:
+        //   podman exec <id> bash -c 'cd <ws> && bash <script>'
         // NOTE: we do NOT mkdir -p the workspace here — initializeStage() calls
-        // cleanWs() which wipes and recreates the workspace after this point,
-        // invalidating any directory we create now.  StageScriptRunner ensures
-        // the workspace path exists inside the container before each exec.
+        // cleanWs() which wipes and recreates the workspace after this point.
+        // StageScriptRunner creates required directories on the host (as the
+        // Jenkins agent uid that owns the workspace) before each exec.
         withEnv([
             "BUILD_PODMAN_CONTAINER_ID=${containerId}",
             "BUILD_PODMAN_WORKSPACE=${ws}"
