@@ -105,11 +105,34 @@ def runInPodmanContainer(String dockerImage, String dockerArgs, Closure body) {
     def containerId = ''
     try {
         echo "Starting Podman container: ${dockerImage}"
+
+        // Resolve the Jenkins agent's host UID and GID.  We use the explicit
+        // keep-id:uid=<hostUid>,gid=<hostGid> form rather than plain keep-id.
+        //
+        // Plain --userns=keep-id maps the host UID to itself inside the container
+        // user namespace, but the container image was built with a fixed build-user
+        // UID/GID (e.g. uid=1002, gid=1003).  If the host Jenkins UID doesn't match
+        // that fixed UID, the process inside the container runs as a UID that doesn't
+        // own the workspace bind-mount, causing crun's chdir to fail with
+        // "Permission denied".
+        //
+        // keep-id:uid=<hostUid>,gid=<hostGid> tells Podman: map the host user to
+        // this specific UID/GID inside the container's user namespace, so the
+        // container process always runs as the UID/GID that owns the workspace.
+        def hostUid = sh(script: 'id -u', returnStdout: true).trim()
+        def hostGid = sh(script: 'id -g', returnStdout: true).trim()
+        echo "Host UID/GID: ${hostUid}/${hostGid}"
+
+        // Replace the generic --userns=keep-id we added earlier with the explicit
+        // uid/gid form.  If the caller already supplied a full keep-id:uid=... form
+        // via dockerArgs we leave it untouched.
+        if (dockerArgs.contains('--userns=keep-id') && !dockerArgs.contains('uid=')) {
+            dockerArgs = dockerArgs.replace('--userns=keep-id', "--userns=keep-id:uid=${hostUid},gid=${hostGid}")
+        }
+
         // -d: detached  --rm: auto-remove on stop
-        // -w is intentionally omitted here: crun resolves the working directory
-        // before the bind-mount is fully entered, causing a permission denied
-        // error under --userns=keep-id.  The working directory is set per-exec
-        // in StageScriptRunner via 'docker exec -w' instead.
+        // -w is intentionally omitted: crun resolves the working directory before
+        // the bind-mount is fully entered, so we set -w per-exec in StageScriptRunner.
         containerId = sh(
             script: """docker run -d --rm \\
                          ${dockerArgs} \\
