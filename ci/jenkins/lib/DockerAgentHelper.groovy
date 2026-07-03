@@ -157,7 +157,7 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        sh(script: "podman exec '${containerId}' bash -c 'strace -e trace=execve,openat -f git ls-remote https://github.com/adoptium/temurin-build.git HEAD 2>&1 | grep -E \"execve|ENOENT|ENOMEM|git-remote\" | head -20 || true'", returnStatus: true)
+        sh(script: "podman exec '${containerId}' bash -c 'echo GIT_EXEC_PATH=\$(git --exec-path); echo LD_LIBRARY_PATH=\$LD_LIBRARY_PATH; ldd \$(git --exec-path)/git-remote-https 2>&1 | head -10'", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
