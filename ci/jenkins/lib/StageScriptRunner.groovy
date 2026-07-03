@@ -54,11 +54,12 @@ def run(String scriptStem, def config = null) {
     def podmanWs = env.BUILD_PODMAN_WORKSPACE?.trim()
 
     // Ensure TARGET_DIR exists before the script runs (if set by the stage).
-    // On Podman builds this runs inside the container via podman exec so the
-    // directory exists in the containerised view of the workspace.
+    // On Podman builds this runs inside the container via podman exec.
+    // -w is NOT used on any podman exec call — crun fails to resolve the
+    // working directory under userns remapping.  We cd inside the shell instead.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            sh "podman exec -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
+            sh "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && mkdir -p '${env.TARGET_DIR}'\""
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
@@ -66,11 +67,11 @@ def run(String scriptStem, def config = null) {
 
     switch (found.type) {
         case 'sh':
-            // On Podman builds dispatch via podman exec so the script runs inside
-            // the container started by runInPodmanContainer().  -w sets the working
-            // directory so WORKSPACE-relative paths in the script resolve correctly.
+            // On Podman builds dispatch via podman exec into the container started
+            // by runInPodmanContainer().  cd into the workspace as the first
+            // command — do not use -w on podman exec (see note above).
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
+                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && bash '${found.path}'\"", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -88,7 +89,7 @@ def run(String scriptStem, def config = null) {
                      "(2) Issue podman exec calls directly from within the Groovy script using the available " +
                      "environment variables: BUILD_PODMAN_CONTAINER_ID='${podmanId}' and " +
                      "BUILD_PODMAN_WORKSPACE='${podmanWs}'. " +
-                     "Example: sh(\"podman exec -w '\${BUILD_PODMAN_WORKSPACE}' '\${BUILD_PODMAN_CONTAINER_ID}' bash -c 'your-command'\")"
+                     "Example: sh(\"podman exec '\${BUILD_PODMAN_CONTAINER_ID}' bash -c \\\"cd '\${BUILD_PODMAN_WORKSPACE}' && your-command\\\"\")"
             }
             def script = load(found.path)
             return script(config) ?: 0
@@ -96,7 +97,7 @@ def run(String scriptStem, def config = null) {
             // Python scripts are dispatched via podman exec on Podman builds,
             // same as shell scripts, so they run inside the container environment.
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
+                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && python3 '${found.path}'\"", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
