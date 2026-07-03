@@ -110,8 +110,11 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         sh "podman pull '${image}'"
 
         echo "Starting Podman container: ${image}"
+        // -t allocates a pseudo-TTY for the container process.  Without it,
+        // crun cannot resolve the working directory in podman exec -w, causing
+        // "getcwd: No such file or directory" even when the path exists.
         containerId = sh(
-            script: """podman run -d --rm \\
+            script: """podman run -t -d --rm \\
                          ${podmanArgs} \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
