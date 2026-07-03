@@ -133,6 +133,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.CONFIG_DOCKER_REGISTRY   = config.buildConfig.DOCKER_REGISTRY ?: ''
     env.CONFIG_DOCKER_CREDENTIAL = config.buildConfig.DOCKER_CREDENTIAL ?: ''
     env.CONFIG_DOCKER_ARGS       = config.buildConfig.DOCKER_ARGS ?: ''
+    env.CONFIG_PODMAN_ARGS       = config.buildConfig.PODMAN_ARGS ?: ''
     env.CONFIG_RUN_TESTS         = config.parameters.enableTests.toString()
     env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
     env.CONFIG_SIGN_ARTIFACTS    = config.parameters.enableSigner.toString()
@@ -159,6 +160,7 @@ def summarizePipelineConfig(config) {
     echo "  Docker Registry: ${config.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
     echo "  Docker Credential: ${config.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"
     echo "  Docker Args: ${config.buildConfig.DOCKER_ARGS ?: '(none)'}"
+    echo "  Podman Args: ${config.buildConfig.PODMAN_ARGS ?: '(none)'}"
     echo "  Tests: ${config.buildConfig.TEST_LIST}"
 }
 

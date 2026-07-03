@@ -154,6 +154,7 @@ def load_configuration(args):
     docker_file = extract_variant_value(platform_config.get('dockerFile'), variant)
     additional_node_labels = extract_variant_value(platform_config.get('additionalNodeLabels'), variant)
     additional_test_labels = extract_variant_value(platform_config.get('additionalTestLabels'), variant)
+    podman_args = platform_config.get('podmanArgs', '')
 
     # Determine test list based on build type
     test_list = get_test_list(platform_config.get('test'), is_release, is_weekly)
@@ -176,6 +177,7 @@ def load_configuration(args):
             'DOCKER_REGISTRY': platform_config.get('dockerRegistry', ''),
             'DOCKER_CREDENTIAL': platform_config.get('dockerCredential', ''),
             'DOCKER_ARGS': platform_config.get('dockerArgs', ''),
+            'PODMAN_ARGS': podman_args,
             'TEST_LIST': test_list,
             'ADDITIONAL_TEST_LABEL': additional_test_labels or ''
         },
