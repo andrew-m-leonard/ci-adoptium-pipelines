@@ -24,6 +24,25 @@
  */
 
 /**
+ * Write all current Jenkins environment variables to a KEY=VALUE file
+ * suitable for `podman exec --env-file`.
+ *
+ * Iterates the Groovy env object directly — guaranteed to include WORKSPACE,
+ * CONFIG_*, TARGET_DIR and every other var set by initializeStage/withEnv,
+ * regardless of whether they are visible to printenv on the host shell.
+ * Values containing newlines are skipped (they would corrupt the file format).
+ */
+def writeEnvFile(String path) {
+    def lines = []
+    env.getEnvironment().each { k, v ->
+        if (v != null && !v.contains('\n') && !v.contains('\r')) {
+            lines << "${k}=${v}"
+        }
+    }
+    writeFile(file: path, text: lines.join('\n') + '\n')
+}
+
+/**
  * Resolve and execute a stage script, returning an exit code.
  *
  * @param scriptStem  Script stem e.g. '13-smoke-tests'
@@ -68,11 +87,11 @@ def run(String scriptStem, def config = null) {
         case 'sh':
             if (podmanId) {
                 // podman exec does not inherit the Jenkins environment.
-                // Dump all single-line env vars to a file in the workspace
-                // (visible inside the container via the bind-mount) and pass
-                // it via --env-file so the script sees WORKSPACE, CONFIG_*, etc.
+                // Write a KEY=VALUE env file from the Groovy env object directly
+                // (guaranteed correct — avoids printenv format/encoding issues)
+                // and pass it via --env-file so the script sees WORKSPACE, CONFIG_*, etc.
                 def envFile = "${podmanWs}/.podman-env-${scriptStem}"
-                sh "printenv | grep -v '[\\n\\r]' > '${envFile}'"
+                writeEnvFile(envFile)
                 try {
                     return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
                 } finally {
@@ -100,7 +119,7 @@ def run(String scriptStem, def config = null) {
         case 'py':
             if (podmanId) {
                 def envFile = "${podmanWs}/.podman-env-${scriptStem}"
-                sh "printenv | grep -v '[\\n\\r]' > '${envFile}'"
+                writeEnvFile(envFile)
                 try {
                     return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
                 } finally {
