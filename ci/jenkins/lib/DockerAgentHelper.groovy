@@ -153,10 +153,10 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        // Diagnostics — log the uid inside the container and the ownership of
-        // the workspace as seen from inside, so we can debug uid/permission issues.
+        // Diagnostics — log the uid inside the container and the ownership/perms
+        // of each ancestor directory in the workspace path.
         sh(script: "podman exec '${containerId}' id", returnStatus: true)
-        sh(script: "podman exec '${containerId}' ls -lan '${ws}/..' 2>&1 || true", returnStatus: true)
+        sh(script: "podman exec '${containerId}' bash -c 'ls -land /home /home/jenkins /home/jenkins/workspace 2>&1; stat ${ws} 2>&1' || true", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
