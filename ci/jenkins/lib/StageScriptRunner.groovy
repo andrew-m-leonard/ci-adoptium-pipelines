@@ -55,15 +55,9 @@ def run(String scriptStem, def config = null) {
 
     // Ensure TARGET_DIR exists before the script runs (if set by the stage).
     // On Podman builds this runs inside the container via podman exec.
-    // -w is NOT used on podman exec — crun fails to resolve the working
-    // directory under userns remapping before the namespace is settled.
-    // We write the compound command to a temp script file and pass that to
-    // podman exec to avoid any shell quoting ambiguity with bash -c "...".
     if (env.TARGET_DIR) {
         if (podmanId) {
-            sh """podman exec '${podmanId}' bash << 'PODMAN_EOF'
-cd '${podmanWs}' && mkdir -p '${env.TARGET_DIR}'
-PODMAN_EOF"""
+            sh "podman exec -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
@@ -72,13 +66,10 @@ PODMAN_EOF"""
     switch (found.type) {
         case 'sh':
             // On Podman builds dispatch via podman exec into the container started
-            // by runInPodmanContainer().  We pipe a small wrapper script through
-            // stdin to avoid bash -c quoting issues — the heredoc is interpreted
-            // by the host shell and the result piped cleanly into the container.
+            // by runInPodmanContainer(), using -w to set the working directory so
+            // WORKSPACE-relative paths in the stage script resolve correctly.
             if (podmanId) {
-                return sh(script: """podman exec '${podmanId}' bash << 'PODMAN_EOF'
-cd '${podmanWs}' && bash '${found.path}'
-PODMAN_EOF""", returnStatus: true)
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -96,7 +87,7 @@ PODMAN_EOF""", returnStatus: true)
                      "(2) Issue podman exec calls directly from within the Groovy script using the available " +
                      "environment variables: BUILD_PODMAN_CONTAINER_ID='${podmanId}' and " +
                      "BUILD_PODMAN_WORKSPACE='${podmanWs}'. " +
-                     "Example: sh(script: \"\"\"podman exec '\${BUILD_PODMAN_CONTAINER_ID}' bash << 'PODMAN_EOF'\\ncd '\${BUILD_PODMAN_WORKSPACE}' && your-command\\nPODMAN_EOF\"\"\")"
+                     "Example: sh(\"podman exec -w '\${BUILD_PODMAN_WORKSPACE}' '\${BUILD_PODMAN_CONTAINER_ID}' bash -c 'your-command'\")"
             }
             def script = load(found.path)
             return script(config) ?: 0
@@ -104,9 +95,7 @@ PODMAN_EOF""", returnStatus: true)
             // Python scripts are dispatched via podman exec on Podman builds,
             // same as shell scripts, so they run inside the container environment.
             if (podmanId) {
-                return sh(script: """podman exec '${podmanId}' bash << 'PODMAN_EOF'
-cd '${podmanWs}' && python3 '${found.path}'
-PODMAN_EOF""", returnStatus: true)
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
