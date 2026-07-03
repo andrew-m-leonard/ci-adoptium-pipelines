@@ -58,8 +58,8 @@ def podmanEnvFlags() {
         'SMOKE_TESTS_PASSED',
     ]
     return vars
-        .findAll  { env[it] != null && env[it] != '' }
-        .collect  { "-e '${it}=${env[it]}'" }
+        .findAll  { env.getProperty(it) != null && env.getProperty(it) != '' }
+        .collect  { "-e '${it}=${env.getProperty(it)}'" }
         .join(' ')
 }
 
