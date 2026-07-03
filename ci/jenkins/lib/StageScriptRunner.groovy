@@ -53,29 +53,26 @@ def run(String scriptStem, def config = null) {
     def podmanId = env.BUILD_PODMAN_CONTAINER_ID?.trim()
     def podmanWs = env.BUILD_PODMAN_WORKSPACE?.trim()
 
-    // Podman exec uses -w to set the working directory inside the container.
-    // This requires the container to have been started with -t (pseudo-TTY) —
-    // without it, crun cannot resolve the working directory and fails with
-    // "getcwd: No such file or directory".  DockerAgentHelper.runInPodmanContainer
-    // always passes -t to podman run for this reason.
-
-    // Recreate the workspace path inside the container — initializeStage() calls
-    // cleanWs() which wipes and recreates the workspace on the host after the
-    // container starts, so the bind-mount directory entry must be refreshed
-    // before podman exec -w can resolve it.
+    // Directory setup for Podman builds.
+    //
+    // initializeStage() calls cleanWs() + checkout scm, which recreates the
+    // workspace on the host as the Jenkins agent user (e.g. uid 1001).
+    // The container runs as the image's jenkins user (e.g. uid 1000 via
+    // --userns keep-id:uid=1000,gid=1000), which is a DIFFERENT uid from the
+    // workspace owner.  Directories must therefore be created on the HOST
+    // (via the normal sh() step, running as uid 1001) so the container can
+    // see them through the bind-mount without hitting a permission error.
+    // Using `podman exec mkdir` would run as uid 1000 inside the container
+    // and fail to write into a uid-1001-owned directory.
     if (podmanId) {
-        sh "podman exec '${podmanId}' mkdir -p '${podmanWs}'"
+        // Ensure the workspace root exists on the host (cleanWs may have
+        // wiped it after the container started).
+        sh "mkdir -p '${podmanWs}'"
     }
 
-    // Ensure TARGET_DIR exists inside the container before the script runs.
-    // TARGET_DIR is always an absolute path so -t/-w are not needed here —
-    // the bare exec form matches the workspace mkdir above.
+    // Ensure TARGET_DIR exists on the host before the script runs.
     if (env.TARGET_DIR) {
-        if (podmanId) {
-            sh "podman exec '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
-        } else {
-            sh "mkdir -p ${env.TARGET_DIR}"
-        }
+        sh "mkdir -p '${env.TARGET_DIR}'"
     }
 
     switch (found.type) {
