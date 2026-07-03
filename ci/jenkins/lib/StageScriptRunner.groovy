@@ -73,8 +73,7 @@ def run(String scriptStem, def config = null) {
     // Ensure TARGET_DIR exists inside the container before the script runs.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            def cmd = "cd '${podmanWs}' && mkdir -p '${env.TARGET_DIR}'"
-            sh "podman exec '${podmanId}' bash -c '${cmd}'"
+            sh "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && mkdir -p '${env.TARGET_DIR}'\""
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
@@ -85,8 +84,7 @@ def run(String scriptStem, def config = null) {
             // Dispatch via podman exec with cd as first instruction.
             // No -w — see note above.
             if (podmanId) {
-                def cmd = "cd '${podmanWs}' && bash '${found.path}'"
-                return sh(script: "podman exec '${podmanId}' bash -c '${cmd}'", returnStatus: true)
+                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && bash '${found.path}'\"", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -110,8 +108,7 @@ def run(String scriptStem, def config = null) {
         case 'py':
             // Dispatch python scripts the same way as shell scripts.
             if (podmanId) {
-                def cmd = "cd '${podmanWs}' && python3 '${found.path}'"
-                return sh(script: "podman exec '${podmanId}' bash -c '${cmd}'", returnStatus: true)
+                return sh(script: "podman exec '${podmanId}' bash -c \"cd '${podmanWs}' && python3 '${found.path}'\"", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
