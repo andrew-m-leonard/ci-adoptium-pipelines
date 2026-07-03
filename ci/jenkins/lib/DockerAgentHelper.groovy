@@ -12,17 +12,18 @@
  * =========================================================================
  *
  * The standard Jenkins Docker plugin (docker.image().inside()) has two
- * hard-coded behaviours that break builds on standard Adoptium infrastructure
- * where the host Jenkins agent user is uid=1001 but the build images have
- * their jenkins user at uid=1000:
+ * hard-coded behaviours that break builds when the host Jenkins agent user uid
+ * does not match the uid baked into the build image.  The Adoptium build images
+ * have their jenkins user at uid=1000, which matches many Adoptium nodes — but
+ * not all.  Any vendor deploying infrastructure with a different uid (e.g. 1001,
+ * 1002, or any site-assigned uid) will hit these failures:
  *
  *   1. It always injects -u <hostUid>:<hostGid> into docker/podman run.
- *      The host uid (1001) does not match the image's jenkins user (1000),
- *      so the container process runs as uid 1001 — but all tools compiled
- *      into the image under /usr/local are owned by uid 1000 with mode 750,
- *      making them inaccessible.  The image's /home/jenkins is also mode 700
- *      owned by uid 1000, so uid 1001 cannot traverse into the workspace
- *      path at all (crun: chdir permission denied).
+ *      When the host uid differs from the image's jenkins user (uid=1000),
+ *      the container process cannot access tools compiled into the image under
+ *      /usr/local (owned by uid=1000 mode=750).  The image's /home/jenkins is
+ *      also mode=700 owned by uid=1000, so a different uid cannot traverse into
+ *      the workspace path at all (crun: chdir permission denied).
  *
  *   2. It always injects -t (allocate pseudo-TTY).  On rootless Podman
  *      there is no daemon — the runtime tries to open a TTY directly on
