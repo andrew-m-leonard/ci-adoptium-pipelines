@@ -67,7 +67,17 @@ def run(String scriptStem, def config = null) {
     switch (found.type) {
         case 'sh':
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
+                // podman exec does not inherit the Jenkins environment.
+                // Dump all single-line env vars to a file in the workspace
+                // (visible inside the container via the bind-mount) and pass
+                // it via --env-file so the script sees WORKSPACE, CONFIG_*, etc.
+                def envFile = "${podmanWs}/.podman-env-${scriptStem}"
+                sh "printenv | grep -v '[\\n\\r]' > '${envFile}'"
+                try {
+                    return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
+                } finally {
+                    sh(script: "rm -f '${envFile}'", returnStatus: true)
+                }
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -89,7 +99,13 @@ def run(String scriptStem, def config = null) {
             return script(config) ?: 0
         case 'py':
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
+                def envFile = "${podmanWs}/.podman-env-${scriptStem}"
+                sh "printenv | grep -v '[\\n\\r]' > '${envFile}'"
+                try {
+                    return sh(script: "podman exec --env-file '${envFile}' -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
+                } finally {
+                    sh(script: "rm -f '${envFile}'", returnStatus: true)
+                }
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
