@@ -57,10 +57,20 @@ def podmanEnvFlags() {
         'AQA_REF',
         'SMOKE_TESTS_PASSED',
     ]
-    return vars
-        .findAll  { env.getProperty(it) != null && env.getProperty(it) != '' }
-        .collect  { "-e '${it}=${env.getProperty(it)}'" }
-        .join(' ')
+    def flags = vars
+        .findAll { env.getProperty(it) != null && env.getProperty(it) != '' }
+        .collect { "-e '${it}=${env.getProperty(it)}'" }
+
+    // Jenkins sets GIT_ASKPASS / SSH_ASKPASS to agent-side binaries that do
+    // not exist inside the container.  git clone over HTTPS will try to fork
+    // them for credential prompting and fail with "Out of memory" (the kernel
+    // error when exec() of a missing binary is attempted inside a container).
+    // Explicitly unset them and disable terminal prompting so git never tries.
+    flags << "-e 'GIT_ASKPASS='"
+    flags << "-e 'SSH_ASKPASS='"
+    flags << "-e 'GIT_TERMINAL_PROMPT=0'"
+
+    return flags.join(' ')
 }
 
 /**

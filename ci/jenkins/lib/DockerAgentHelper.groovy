@@ -157,8 +157,6 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        // Diagnostics — verify network and DNS are functional inside the container.
-        sh(script: "podman exec '${containerId}' bash -c 'cat /etc/resolv.conf && curl -sI --max-time 5 https://github.com 2>&1 | head -5 || echo DNS/network check failed'", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
