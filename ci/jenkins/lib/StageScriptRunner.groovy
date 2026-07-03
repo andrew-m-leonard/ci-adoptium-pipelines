@@ -77,16 +77,8 @@ def run(String scriptStem, def config = null) {
 
     switch (found.type) {
         case 'sh':
-            // On Podman builds dispatch via podman exec.
-            // We do NOT use -w to set the working directory: crun resolves -w
-            // at exec-setup time inside the container's mount namespace, and
-            // fails with "getcwd: No such file or directory" when the workspace
-            // was (re)created on the host after the container started — even
-            // though the bind-mount is live.  Instead we let bash cd into the
-            // workspace itself, which happens after the process is already
-            // running and the mount is fully visible.
             if (podmanId) {
-                return sh(script: "podman exec '${podmanId}' bash -c 'cd \\'${podmanWs}\\' && bash \\'${found.path}\\''", returnStatus: true)
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -102,15 +94,13 @@ def run(String scriptStem, def config = null) {
                      "Options: " +
                      "(1) Convert to a .sh or .py script — these are dispatched into the container automatically. " +
                      "(2) Issue podman exec calls directly from within the Groovy script using: " +
-                     "BUILD_PODMAN_CONTAINER_ID='${podmanId}' and BUILD_PODMAN_WORKSPACE='${podmanWs}'. " +
-                     "Example: sh(\"podman exec '\${BUILD_PODMAN_CONTAINER_ID}' bash -c 'cd \\\\\\''\${BUILD_PODMAN_WORKSPACE}'\\\\\\' && your-command'\")"
+                     "BUILD_PODMAN_CONTAINER_ID and BUILD_PODMAN_WORKSPACE env vars."
             }
             def script = load(found.path)
             return script(config) ?: 0
         case 'py':
-            // Dispatch python scripts the same way as shell scripts.
             if (podmanId) {
-                return sh(script: "podman exec '${podmanId}' bash -c 'cd \\'${podmanWs}\\' && python3 \\'${found.path}\\''", returnStatus: true)
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
