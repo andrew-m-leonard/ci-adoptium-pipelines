@@ -70,7 +70,7 @@ def run(String scriptStem, def config = null) {
     // Ensure TARGET_DIR exists inside the container before the script runs.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            sh "podman exec -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
+            sh "podman exec --pty -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
         } else {
             sh "mkdir -p ${env.TARGET_DIR}"
         }
@@ -78,10 +78,12 @@ def run(String scriptStem, def config = null) {
 
     switch (found.type) {
         case 'sh':
-            // On Podman builds dispatch via podman exec -w so the script runs
-            // inside the container with the workspace as working directory.
+            // On Podman builds dispatch via podman exec --pty -w.
+            // --pty allocates a new pseudo-TTY for the exec process itself so
+            // crun can resolve the working directory (-w) even when the Jenkins
+            // agent process has no controlling TTY.
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
+                return sh(script: "podman exec --pty -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -98,14 +100,14 @@ def run(String scriptStem, def config = null) {
                      "(1) Convert to a .sh or .py script — these are dispatched into the container automatically. " +
                      "(2) Issue podman exec calls directly from within the Groovy script using: " +
                      "BUILD_PODMAN_CONTAINER_ID='${podmanId}' and BUILD_PODMAN_WORKSPACE='${podmanWs}'. " +
-                     "Example: sh(\"podman exec -w '\${BUILD_PODMAN_WORKSPACE}' '\${BUILD_PODMAN_CONTAINER_ID}' bash -c 'your-command'\")"
+                     "Example: sh(\"podman exec --pty -w '\${BUILD_PODMAN_WORKSPACE}' '\${BUILD_PODMAN_CONTAINER_ID}' bash -c 'your-command'\")"
             }
             def script = load(found.path)
             return script(config) ?: 0
         case 'py':
             // Dispatch python scripts the same way as shell scripts.
             if (podmanId) {
-                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
+                return sh(script: "podman exec --pty -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
