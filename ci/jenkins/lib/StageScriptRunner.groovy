@@ -72,7 +72,7 @@ def run(String scriptStem, def config = null) {
     // Ensure TARGET_DIR exists inside the container before the script runs.
     if (env.TARGET_DIR) {
         if (podmanId) {
-            def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+            def wrapperPath = "${podmanWs}/.podman-wrapper-${UUID.randomUUID()}.sh"
             writeFile file: wrapperPath, text: "#!/bin/bash\nexec mkdir -p '${env.TARGET_DIR}'\n"
             sh "chmod +x '${wrapperPath}'"
             sh "podman exec '${podmanId}' '${wrapperPath}'"
@@ -88,7 +88,7 @@ def run(String scriptStem, def config = null) {
             // inside the container) that cds to the workspace then runs the script.
             // podman exec runs the wrapper file directly — no -w, no bash -c.
             if (podmanId) {
-                def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+                def wrapperPath = "${podmanWs}/.podman-wrapper-${UUID.randomUUID()}.sh"
                 writeFile file: wrapperPath, text: "#!/bin/bash\ncd '${podmanWs}'\nexec bash '${found.path}'\n"
                 sh "chmod +x '${wrapperPath}'"
                 def rc = sh(script: "podman exec '${podmanId}' '${wrapperPath}'", returnStatus: true)
@@ -118,7 +118,7 @@ def run(String scriptStem, def config = null) {
         case 'py':
             // Dispatch python scripts the same way as shell scripts.
             if (podmanId) {
-                def wrapperPath = "${podmanWs}/.podman-wrapper-$$.sh"
+                def wrapperPath = "${podmanWs}/.podman-wrapper-${UUID.randomUUID()}.sh"
                 writeFile file: wrapperPath, text: "#!/bin/bash\ncd '${podmanWs}'\nexec python3 '${found.path}'\n"
                 sh "chmod +x '${wrapperPath}'"
                 def rc = sh(script: "podman exec '${podmanId}' '${wrapperPath}'", returnStatus: true)
