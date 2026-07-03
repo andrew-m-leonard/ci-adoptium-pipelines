@@ -1,154 +1,199 @@
 /**
- * DockerAgentHelper — runtime agent selection for build stages.
+ * DockerAgentHelper — container agent lifecycle for build stages.
  *
  * Loaded with:
  *   def dockerAgentHelper = load('ci/jenkins/lib/DockerAgentHelper.groovy')
  *
- * This file is a CpsScript. All pipeline steps (echo, sh, node, docker, etc.)
+ * This file is a CpsScript. All pipeline steps (echo, sh, node, etc.)
  * are called directly — no 'steps.' prefix.
+ *
+ * =========================================================================
+ * WHY WE USE A SCRIPTED CONTAINER APPROACH (not docker.image().inside())
+ * =========================================================================
+ *
+ * The standard Jenkins Docker plugin (docker.image().inside()) has two
+ * hard-coded behaviours that break builds on standard Adoptium infrastructure
+ * where the host Jenkins agent user is uid=1001 but the build images have
+ * their jenkins user at uid=1000:
+ *
+ *   1. It always injects -u <hostUid>:<hostGid> into docker/podman run.
+ *      The host uid (1001) does not match the image's jenkins user (1000),
+ *      so the container process runs as uid 1001 — but all tools compiled
+ *      into the image under /usr/local are owned by uid 1000 with mode 750,
+ *      making them inaccessible.  The image's /home/jenkins is also mode 700
+ *      owned by uid 1000, so uid 1001 cannot traverse into the workspace
+ *      path at all (crun: chdir permission denied).
+ *
+ *   2. It always injects -t (allocate pseudo-TTY).  On rootless Podman
+ *      there is no daemon — the runtime tries to open a TTY directly on
+ *      the calling process and hangs indefinitely when the Jenkins agent
+ *      has no controlling terminal.  This flag cannot be suppressed via
+ *      dockerArgs because Jenkins appends its own flags after ours.
+ *
+ * Our solution: call the container runtime directly via sh() so we have
+ * full control of every flag.  The container runs as the image's native
+ * uid (1000) which has access to all image-installed tools.  Workspace
+ * access for uid 1000 is granted by bind-mounting the host's home directory
+ * over the image's /home/jenkins (replacing the mode-700 image copy with
+ * the host's copy, which is traversable).
+ *
+ * This approach works identically for Docker and Podman.  The only
+ * Podman-specific addition is --userns keep-id, which maps the host uid
+ * into the container's user namespace so the workspace bind-mount appears
+ * with the correct ownership inside the container.
+ *
+ * =========================================================================
  *
  * Public API:
  *   withBuildAgent(body)
- *     → Allocates a node by CONFIG_NODE_LABEL and, when CONFIG_DOCKER_IMAGE is
- *       set, runs the body inside that container.  Falls back to a plain node
- *       when no docker image is configured.
- *
- *       Docker nodes  — uses docker.image().inside() (standard Jenkins DSL).
- *       Podman nodes  — uses `podman run` directly to avoid the un-overridable
- *                       -t flag that Jenkins' .inside() injects and that causes
- *                       rootless Podman to hang with no controlling TTY.
- *                       Stage scripts are dispatched via `podman exec`.
+ *     → Allocates a node by CONFIG_NODE_LABEL and, when CONFIG_DOCKER_IMAGE
+ *       is set, runs the body inside that container using the scripted
+ *       approach described above.  Falls back to a plain node when no
+ *       image is configured.
  *
  *   isPodmanNode()
- *     → Returns true when the Docker CLI on the current node is provided by
- *       Podman in Docker-emulation mode.  Must be called from within a node()
- *       block.
+ *     → Returns true when the container runtime on the current node is
+ *       Podman (detected via 'docker --version').  Must be called inside
+ *       a node() block.
  *
- * Docker/Podman config env vars (set by ConfigHelper.generatePipelineConfig):
- *   CONFIG_DOCKER_IMAGE      — image name/tag to run (e.g. adoptopenjdk/centos7_build_image)
+ * Config env vars (set by ConfigHelper.generatePipelineConfig):
+ *   CONFIG_DOCKER_IMAGE      — image to run (e.g. ghcr.io/adoptium/adoptium_build_image:centos7_linux-amd64)
  *   CONFIG_DOCKER_REGISTRY   — registry URL for login (optional)
- *   CONFIG_DOCKER_CREDENTIAL — Jenkins credential ID for registry login (optional,
- *                              only used when CONFIG_DOCKER_REGISTRY is also set)
- *   CONFIG_DOCKER_ARGS       — extra arguments forwarded to `docker run` on Docker nodes
- *   CONFIG_PODMAN_ARGS       — extra arguments forwarded to `podman run` on Podman nodes,
- *                              used instead of CONFIG_DOCKER_ARGS when Podman is detected.
- *                              --userns keep-id and -u hostUid:hostGid are injected
- *                              automatically — do NOT add them here.
- *                              Use for extra flags only, e.g: "--security-opt label=disable"
+ *   CONFIG_DOCKER_CREDENTIAL — Jenkins credential ID for registry login (optional)
+ *   CONFIG_DOCKER_ARGS       — extra args forwarded to `docker run`
+ *   CONFIG_PODMAN_ARGS       — extra args forwarded to `podman run` (overrides CONFIG_DOCKER_ARGS on Podman nodes)
+ *                              --userns keep-id and -u are injected automatically — do not add them here.
  *
- * Podman auto-detection:
- *   When Podman is detected as the container runtime:
- *   - The `podman` binary is used directly (not the Docker shim) so Jenkins
- *     cannot inject the -t flag that causes rootless Podman to hang.
- *   - The container is started with -u <hostUid>:<hostGid> so it runs as the
- *     same uid as the Jenkins agent that owns the workspace bind-mount.
- *   - CONFIG_PODMAN_ARGS is used in place of CONFIG_DOCKER_ARGS (if set).
- *   - Unqualified image names (e.g. "adoptopenjdk/foo") are automatically
- *     prefixed with "docker.io/" — Podman does not resolve short names without
- *     an unqualified-search registry configured in registries.conf.
- *   - BUILD_PODMAN_CONTAINER_ID is set in the environment so StageScriptRunner
- *     dispatches shell scripts via `podman exec` into the running container.
+ * Environment exposed to stage scripts:
+ *   BUILD_CONTAINER_ID        — running container ID (set for both Docker and Podman)
+ *   BUILD_CONTAINER_RUNTIME   — 'docker' or 'podman'
+ *   BUILD_CONTAINER_WORKSPACE — workspace path inside the container
  */
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Runtime detection
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Detect whether the Docker CLI on the current node is backed by Podman.
- * Must be called from within a node() block.
+ * Return true when the container runtime on the current node is Podman.
  *
- * 'docker --version' on a Podman shim prints e.g. "podman version 4.9.4".
- * On real Docker it prints "Docker version 24.0.5, build ...".
- * grep exit code 0 = match (Podman), 1 = no match (Docker).
+ * 'docker --version' on a Podman shim prints "podman version X.Y.Z".
+ * On real Docker it prints "Docker version X.Y.Z, build ...".
  */
 def isPodmanNode() {
-    return sh(script: 'docker --version | grep -i podman', returnStatus: true) == 0
+    return sh(script: 'docker --version 2>&1 | grep -qi podman', returnStatus: true) == 0
 }
 
 /**
  * Return true when the image name has no registry host prefix.
  *
- * Podman refuses to pull short names like "adoptopenjdk/centos7_build_image"
- * without an unqualified-search registry configured, whereas Docker implicitly
- * prepends "docker.io/".  A name is considered qualified when the portion
- * before the first '/' (or the whole name if there is no '/') contains a '.'
- * or ':', which are only valid in hostnames and host:port pairs respectively.
- *
- * Examples:
- *   "adoptopenjdk/centos7_build_image"           → unqualified (no host)
- *   "ubuntu"                                     → unqualified (no host, no slash)
- *   "docker.io/adoptopenjdk/centos7_build_image" → qualified
- *   "registry.example.com:5000/myimage"          → qualified
+ * Podman requires fully-qualified image names — it will not implicitly
+ * prepend "docker.io/" the way Docker does.  A name is unqualified when
+ * the part before the first '/' contains no '.' or ':' (host indicators).
  */
 def isUnqualifiedImageName(String image) {
     def prefix = image.contains('/') ? image.split('/')[0] : image
     return !prefix.contains('.') && !prefix.contains(':')
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Scripted container execution (Docker)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Run body inside a Podman container using the `podman` binary directly.
+ * Run body with a Docker container started via `docker run` directly.
  *
- * Jenkins' docker.image().inside() always injects -t (allocate pseudo-TTY)
- * at the Java level.  Rootless Podman has no daemon — it tries to open a TTY
- * directly on the calling process and hangs indefinitely when there is no
- * controlling terminal on a Jenkins agent.  There is no way to suppress -t
- * from inside dockerArgs because Jenkins appends our args after its own.
+ * See the module-level comment for the full rationale.  Key points:
  *
- * By calling `podman run` directly via sh() we have full control of every flag.
+ *   - No -u flag: the container runs as the image's native user (uid=1000),
+ *     which has access to all image-installed tools under /usr/local.
  *
- * UID matching:
- *   Rootless Podman uses subuid/subgid mappings by default — the host Jenkins
- *   uid (e.g. 1001) maps to a high, unmapped uid inside the container's user
- *   namespace, so the bind-mounted workspace appears unowned inside the container
- *   and crun refuses to chdir into it.
+ *   - Host home bind-mount: the host's $HOME (/home/jenkins, owned by uid=1001)
+ *     is mounted over the image's /home/jenkins (uid=1000 mode=700).  This
+ *     makes the workspace path traversable because the workspace lives under
+ *     /home/jenkins/workspace and uid=1000 can now enter that directory tree.
  *
- *   Fix: --userns keep-id maps the calling process uid (1001 on host) to the
- *   same uid 1001 INSIDE the container, so the workspace bind-mount appears
- *   owned by the same uid the process runs as.  We also pass -u hostUid:hostGid
- *   to make the container process uid match explicitly (regardless of what
- *   /etc/passwd says in the image).
+ *   - Workspace bind-mount: the Jenkins workspace is mounted at the same
+ *     absolute path inside the container so stage scripts see identical paths.
  *
- * Strategy:
- *   1. podman pull           — pull the image explicitly.
- *   2. detect host uid:gid   — id -u / id -g, runs as Jenkins agent user.
- *   3. podman run -d --rm    — start the container detached with:
- *                                --userns keep-id  (maps host uid→same uid inside)
- *                                -u hostUid:hostGid (run process as that uid)
- *                              podmanArgs from the config repo are appended.
- *                              Workspace is bind-mounted at the same absolute path.
- *   4. withEnv               — expose BUILD_PODMAN_CONTAINER_ID so StageScriptRunner
- *                              dispatches shell scripts via `podman exec bash -c 'cd ws && ...'`.
- *   5. finally               — podman stop cleans up the container on any exit.
- *
- * We do NOT use `podman run -t` or `podman exec -w`: crun resolves the -w path
- * at exec-setup time and fails with "getcwd: No such file or directory" when the
- * workspace was (re)created on the host after the container started.  StageScriptRunner
- * uses `bash -c 'cd <ws> && ...'` instead, which resolves the path at shell runtime.
+ *   - BUILD_CONTAINER_ID / BUILD_CONTAINER_WORKSPACE are set in the environment
+ *     so StageScriptRunner can dispatch scripts via `docker exec`.
  *
  * Must be called from within a node() block.
  */
-def runInPodmanContainer(String image, String podmanArgs, Closure body) {
+def runInDockerContainer(String image, String extraArgs, Closure body) {
     def ws          = env.WORKSPACE
+    def hostHome    = sh(script: 'echo $HOME', returnStdout: true).trim()
+    def containerId = ''
+    try {
+        echo "Pulling image (docker): ${image}"
+        sh "docker pull '${image}'"
+
+        echo "Starting Docker container: ${image}"
+        containerId = sh(
+            script: """docker run -d --rm \\
+                         ${extraArgs} \\
+                         -v '${hostHome}:${hostHome}:rw' \\
+                         -v '${ws}:${ws}:rw' \\
+                         -v '${ws}@tmp:${ws}@tmp:rw' \\
+                         '${image}' \\
+                         sleep infinity""",
+            returnStdout: true
+        ).trim()
+        echo "Container started: ${containerId}"
+
+        withEnv([
+            "BUILD_CONTAINER_ID=${containerId}",
+            "BUILD_CONTAINER_RUNTIME=docker",
+            "BUILD_CONTAINER_WORKSPACE=${ws}",
+        ]) {
+            body()
+        }
+    } finally {
+        if (containerId) {
+            echo "Stopping Docker container: ${containerId}"
+            sh(script: "docker stop '${containerId}'", returnStatus: true)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scripted container execution (Podman)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run body with a Podman container started via `podman run` directly.
+ *
+ * See the module-level comment for the full rationale.  Podman-specific
+ * additions on top of the Docker approach:
+ *
+ *   - --userns keep-id: rootless Podman uses subuid/subgid mappings by
+ *     default, which maps the host Jenkins uid (1001) to a high unmapped
+ *     uid inside the container's user namespace.  The workspace bind-mount
+ *     then appears unowned and crun refuses to enter it.  --userns keep-id
+ *     maps the calling process uid (1001) to the same uid inside the
+ *     container's user namespace, so bind-mounted paths appear with their
+ *     real host ownership.
+ *
+ *   - Unqualified image names are prefixed with "docker.io/" because Podman
+ *     requires fully-qualified names without a configured unqualified-search
+ *     registry.
+ *
+ * Must be called from within a node() block.
+ */
+def runInPodmanContainer(String image, String extraArgs, Closure body) {
+    def ws          = env.WORKSPACE
+    def hostHome    = sh(script: 'echo $HOME', returnStdout: true).trim()
     def containerId = ''
     try {
         echo "Pulling image (podman): ${image}"
         sh "podman pull '${image}'"
 
-        // The image has /home/jenkins owned by uid=1000 mode=700.  When the host
-        // Jenkins user is uid=1001, that directory is not traversable by the container
-        // process — nothing under /home/jenkins/workspace is reachable even though
-        // the workspace itself is bind-mounted.  Fix: bind-mount the host's
-        // /home/jenkins (owned by uid=1001) over the image's /home/jenkins so the
-        // container sees the correct owner and permissions.
-        //
-        // --userns keep-id maps the host uid to the same uid inside the container.
-        // -u hostUid:hostGid makes the container process run as that uid.
-        def hostUid  = sh(script: 'id -u',   returnStdout: true).trim()
-        def hostGid  = sh(script: 'id -g',   returnStdout: true).trim()
-        def hostHome = sh(script: 'echo $HOME', returnStdout: true).trim()
-        echo "Starting Podman container: ${image} (uid=${hostUid} gid=${hostGid} home=${hostHome})"
+        echo "Starting Podman container: ${image}"
         containerId = sh(
             script: """podman run -d --rm \\
                          --userns keep-id \\
-                         -u '${hostUid}:${hostGid}' \\
-                         ${podmanArgs} \\
+                         ${extraArgs} \\
                          -v '${hostHome}:${hostHome}:rw,z' \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
@@ -158,98 +203,79 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         ).trim()
         echo "Container started: ${containerId}"
 
-        // Expose the container ID and workspace path so StageScriptRunner can
-        // dispatch stage scripts inside the container via:
-        //   podman exec <id> bash -c 'cd <ws> && bash <script>'
-        // NOTE: we do NOT mkdir -p the workspace here — initializeStage() calls
-        // cleanWs() which wipes and recreates the workspace after this point.
-        // StageScriptRunner creates required directories on the host (as the
-        // Jenkins agent uid that owns the workspace) before each exec.
         withEnv([
-            "BUILD_PODMAN_CONTAINER_ID=${containerId}",
-            "BUILD_PODMAN_WORKSPACE=${ws}"
+            "BUILD_CONTAINER_ID=${containerId}",
+            "BUILD_CONTAINER_RUNTIME=podman",
+            "BUILD_CONTAINER_WORKSPACE=${ws}",
         ]) {
             body()
         }
     } finally {
         if (containerId) {
-            echo "Stopping container: ${containerId}"
+            echo "Stopping Podman container: ${containerId}"
             sh(script: "podman stop '${containerId}'", returnStatus: true)
         }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Public entry point
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Execute body on the correct agent:
+ * Allocate a node and optionally run inside a container.
  *
- *   With CONFIG_DOCKER_IMAGE set:
- *     1. Allocate a node by CONFIG_NODE_LABEL.
- *     2. Detect Podman or Docker.
- *     3. On Podman: use runInPodmanContainer() with CONFIG_PODMAN_ARGS (or
- *        CONFIG_DOCKER_ARGS as fallback), qualifying unqualified image names.
- *        On Docker: pull then docker.image().inside() with CONFIG_DOCKER_ARGS.
- *     4. Registry login (docker.withRegistry) applied on both paths if
- *        CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are set.
+ * With CONFIG_DOCKER_IMAGE set:
+ *   1. Allocates a node by CONFIG_NODE_LABEL.
+ *   2. Detects the container runtime (Docker or Podman).
+ *   3. Performs registry login if CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are set.
+ *   4. Starts the container via runInDockerContainer or runInPodmanContainer.
+ *      Both use the scripted approach — see the module-level comment.
  *
- *   Without CONFIG_DOCKER_IMAGE:
- *     Allocate a node by CONFIG_NODE_LABEL and run body directly.
+ * Without CONFIG_DOCKER_IMAGE:
+ *   Allocates a node by CONFIG_NODE_LABEL and runs body directly.
  */
 def withBuildAgent(Closure body) {
     def nodeLabel   = env.CONFIG_NODE_LABEL?.trim() ?: 'worker'
-    def dockerImage = env.CONFIG_DOCKER_IMAGE?.trim()
+    def image       = env.CONFIG_DOCKER_IMAGE?.trim()
 
     node(nodeLabel) {
-        if (dockerImage) {
-            def registry   = env.CONFIG_DOCKER_REGISTRY?.trim()
-            def credential = env.CONFIG_DOCKER_CREDENTIAL?.trim()
-            def podman     = isPodmanNode()
-
-            if (podman) {
-                echo 'Container runtime: Podman'
-                // Qualify unqualified image names — Podman won't guess the registry.
-                if (!registry && isUnqualifiedImageName(dockerImage)) {
-                    dockerImage = 'docker.io/' + dockerImage
-                    echo "Resolved image to fully-qualified name: ${dockerImage}"
-                }
-            } else {
-                echo 'Container runtime: Docker'
-            }
-
-            def resolvedImage = dockerImage
-
-            if (podman) {
-                // Use podmanArgs if defined, otherwise fall back to dockerArgs.
-                def podmanArgs = env.CONFIG_PODMAN_ARGS?.trim() ?: env.CONFIG_DOCKER_ARGS?.trim() ?: ''
-                echo "Container agent (podman): image='${resolvedImage}' args='${podmanArgs}'"
-                // Registry login for podman via podman login if credentials are set.
-                if (registry && credential) {
-                    withCredentials([usernamePassword(credentialsId: credential,
-                                                      usernameVariable: 'REG_USER',
-                                                      passwordVariable: 'REG_PASS')]) {
-                        sh "podman login '${registry}' -u '${REG_USER}' -p '${REG_PASS}'"
-                    }
-                }
-                runInPodmanContainer(resolvedImage, podmanArgs, body)
-            } else {
-                def dockerArgs = env.CONFIG_DOCKER_ARGS?.trim() ?: ''
-                echo "Container agent (docker): image='${resolvedImage}' args='${dockerArgs}'"
-                def runInContainer = {
-                    echo "Pulling image: ${resolvedImage}"
-                    docker.image(resolvedImage).pull()
-                    docker.image(resolvedImage).inside(dockerArgs) {
-                        body()
-                    }
-                }
-                if (registry && credential) {
-                    docker.withRegistry(registry, credential) {
-                        runInContainer()
-                    }
-                } else {
-                    runInContainer()
-                }
-            }
-        } else {
+        if (!image) {
             body()
+            return
+        }
+
+        def registry   = env.CONFIG_DOCKER_REGISTRY?.trim()
+        def credential = env.CONFIG_DOCKER_CREDENTIAL?.trim()
+        def podman     = isPodmanNode()
+        def runtime    = podman ? 'podman' : 'docker'
+
+        // Podman requires fully-qualified image names.
+        if (podman && !registry && isUnqualifiedImageName(image)) {
+            image = 'docker.io/' + image
+            echo "Resolved image to fully-qualified name: ${image}"
+        }
+
+        // Use podmanArgs on Podman nodes, dockerArgs on Docker nodes.
+        def extraArgs = podman
+            ? (env.CONFIG_PODMAN_ARGS?.trim() ?: env.CONFIG_DOCKER_ARGS?.trim() ?: '')
+            : (env.CONFIG_DOCKER_ARGS?.trim() ?: '')
+
+        echo "Container runtime: ${runtime}  image: ${image}  args: ${extraArgs ?: '(none)'}"
+
+        // Registry login.
+        if (registry && credential) {
+            withCredentials([usernamePassword(credentialsId: credential,
+                                              usernameVariable: 'REG_USER',
+                                              passwordVariable: 'REG_PASS')]) {
+                sh "${runtime} login '${registry}' -u '${REG_USER}' -p '${REG_PASS}'"
+            }
+        }
+
+        if (podman) {
+            runInPodmanContainer(image, extraArgs, body)
+        } else {
+            runInDockerContainer(image, extraArgs, body)
         }
     }
 }

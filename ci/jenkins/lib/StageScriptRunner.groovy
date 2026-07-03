@@ -19,18 +19,41 @@
  * .groovy scripts receive the config Map as their call() argument.
  * .sh and .py scripts receive config via environment variables set by initializeStage().
  *
+ * Container dispatch:
+ *   When BUILD_CONTAINER_ID is set (by DockerAgentHelper.withBuildAgent), .sh
+ *   and .py scripts are dispatched into the running container via
+ *   `docker exec` or `podman exec` with -w set to BUILD_CONTAINER_WORKSPACE.
+ *   .groovy scripts always run on the host JVM and cannot be dispatched
+ *   automatically — a warning is logged.
+ *
  * Public API:
  *   run(scriptStem, config=null) → int exit code (0 = success)
  */
 
 /**
- * Build the -e flag string for `podman exec` containing all pipeline
- * environment variables the stage scripts depend on.
+ * Build the -e flag arguments for `docker/podman exec` containing all
+ * pipeline environment variables the stage scripts depend on.
  *
- * Explicitly enumerates known variables — avoids sandbox violations from
- * env.getEnvironment() and never exposes Jenkins credential secrets.
+ * Why we enumerate explicitly (not printenv or env.getEnvironment()):
+ *   - env.getEnvironment() is blocked by the Jenkins script security sandbox.
+ *   - printenv dumps the host shell environment, which does NOT include vars
+ *     set via Groovy env.X = ... or withEnv() — those live in the CPS engine,
+ *     not in the shell process.
+ *   - Explicit enumeration avoids accidentally forwarding Jenkins credential
+ *     secrets (e.g. SSH keys, API tokens) into the container.
+ *
+ * Why we set HOME, PATH, GIT_ASKPASS etc. explicitly:
+ *   `docker/podman exec` starts with a minimal environment — not a login shell.
+ *   No profile scripts are sourced, so the image's PATH additions and HOME
+ *   setting are lost.  Specifically:
+ *     - HOME is unset or '/': git uses HOME for temp files; writing to '/' as
+ *       the container user fails and git reports "Out of memory".
+ *     - /usr/local/libexec/git-core is not on PATH: git cannot find its own
+ *       git-remote-https transport helper and fails with "Out of memory".
+ *     - GIT_ASKPASS / SSH_ASKPASS point to Jenkins agent binaries that don't
+ *       exist inside the container; git tries to exec them and fails.
  */
-def podmanEnvFlags() {
+def containerEnvFlags() {
     // Core pipeline vars set by initializeStage() / Jenkinsfile
     def vars = [
         'WORKSPACE',
@@ -68,26 +91,19 @@ def podmanEnvFlags() {
         .findAll { env.getProperty(it) != null && env.getProperty(it) != '' }
         .collect { "-e '${it}=${env.getProperty(it)}'" }
 
-    // Jenkins sets GIT_ASKPASS / SSH_ASKPASS to agent-side binaries that do
-    // not exist inside the container.  git clone over HTTPS will try to fork
-    // them for credential prompting and fail with "Out of memory" (the kernel
-    // error when exec() of a missing binary is attempted inside a container).
-    // Explicitly unset them and disable terminal prompting so git never tries.
+    // Clear Jenkins agent-side askpass binaries that don't exist in the container.
     flags << "-e 'GIT_ASKPASS='"
     flags << "-e 'SSH_ASKPASS='"
     flags << "-e 'GIT_TERMINAL_PROMPT=0'"
 
-    // The build image installs tools under /usr/local — git helpers live in
-    // /usr/local/libexec/git-core (needed so git can find git-remote-https),
-    // and other build tools (jq, etc.) live in /usr/local/bin.
-    // Prepend both so all image-installed tools are found before system ones.
+    // Ensure the image's tools directory is on PATH.  The build image installs
+    // git and its helpers under /usr/local; git-remote-https lives in
+    // /usr/local/libexec/git-core which is not on the default exec PATH.
     flags << "-e 'PATH=/usr/local/libexec/git-core:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'"
 
-    // podman exec starts with a minimal environment where HOME is unset or '/'.
-    // git uses HOME to locate temp files and the credential store — with HOME='/'
-    // uid 1001 cannot write there and git's xmalloc fails reporting "Out of memory".
-    // The host /home/jenkins is bind-mounted into the container so this path exists
-    // and is writable by the container process.
+    // Set HOME to the Jenkins agent's home directory.  The host home is
+    // bind-mounted into the container at the same path (by DockerAgentHelper),
+    // so it is writable.  Without a valid HOME, git's temp-file allocation fails.
     def jenkinsHome = env.getProperty('HOME') ?: '/home/jenkins'
     flags << "-e 'HOME=${jenkinsHome}'"
 
@@ -121,50 +137,47 @@ def run(String scriptStem, def config = null) {
 
     echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
 
-    def podmanId = env.BUILD_PODMAN_CONTAINER_ID?.trim()
-    def podmanWs = env.BUILD_PODMAN_WORKSPACE?.trim()
+    def containerId = env.BUILD_CONTAINER_ID?.trim()
+    def containerWs = env.BUILD_CONTAINER_WORKSPACE?.trim()
+    def runtime     = env.BUILD_CONTAINER_RUNTIME?.trim() ?: 'docker'
 
-    if (podmanId) {
-        // Ensure workspace and TARGET_DIR exist on the host (as the Jenkins agent
-        // uid that owns them) so the container sees them via the bind-mount.
-        sh "mkdir -p '${podmanWs}'"
-        if (env.TARGET_DIR) {
-            sh "mkdir -p '${env.TARGET_DIR}'"
-        }
-    } else if (env.TARGET_DIR) {
+    // Ensure workspace and TARGET_DIR exist on the host.  initializeStage()
+    // calls cleanWs() which wipes and recreates the workspace after the
+    // container starts; these mkdir calls run as the host Jenkins agent user
+    // so the container (which owns those paths via the bind-mount) can enter them.
+    if (containerId) {
+        sh "mkdir -p '${containerWs}'"
+    }
+    if (env.TARGET_DIR) {
         sh "mkdir -p '${env.TARGET_DIR}'"
     }
 
     switch (found.type) {
         case 'sh':
-            if (podmanId) {
-                // podman exec does not inherit the Jenkins environment — pass
-                // the known pipeline vars explicitly via -e flags.
-                def eFlags = podmanEnvFlags()
-                return sh(script: "podman exec ${eFlags} -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
+            if (containerId) {
+                def eFlags = containerEnvFlags()
+                return sh(script: "${runtime} exec ${eFlags} -w '${containerWs}' '${containerId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
+
         case 'groovy':
-            // Groovy scripts execute in the Jenkins CPS engine on the host JVM —
-            // they cannot be run inside a container via podman exec.
-            // However, a Groovy script can issue its own podman exec calls using
-            // the BUILD_PODMAN_CONTAINER_ID and BUILD_PODMAN_WORKSPACE env vars.
-            if (podmanId) {
+            // Groovy scripts run on the host JVM (Jenkins CPS engine) and cannot
+            // be dispatched into the container automatically.  Any sh() calls
+            // inside such a script will run on the host, not in the container.
+            if (containerId) {
                 echo "⚠️  WARNING: Groovy stage script '${found.path}' is running on the host JVM " +
-                     "while the build agent is a Podman container (BUILD_PODMAN_CONTAINER_ID=${podmanId}). " +
-                     "Groovy scripts execute in the Jenkins CPS engine and cannot be dispatched automatically " +
-                     "via podman exec. Any sh() calls inside this script will run on the host, not in the container. " +
+                     "while the build agent is a container (BUILD_CONTAINER_ID=${containerId}). " +
                      "Options: " +
                      "(1) Convert to a .sh or .py script — these are dispatched into the container automatically. " +
-                     "(2) Issue podman exec calls directly from within the Groovy script using: " +
-                     "BUILD_PODMAN_CONTAINER_ID and BUILD_PODMAN_WORKSPACE env vars."
+                     "(2) Issue '${runtime} exec' calls directly using BUILD_CONTAINER_ID and BUILD_CONTAINER_WORKSPACE."
             }
             def script = load(found.path)
             return script(config) ?: 0
+
         case 'py':
-            if (podmanId) {
-                def eFlags = podmanEnvFlags()
-                return sh(script: "podman exec ${eFlags} -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
+            if (containerId) {
+                def eFlags = containerEnvFlags()
+                return sh(script: "${runtime} exec ${eFlags} -w '${containerWs}' '${containerId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }
