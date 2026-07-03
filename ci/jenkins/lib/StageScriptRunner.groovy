@@ -67,20 +67,7 @@ def run(String scriptStem, def config = null) {
     switch (found.type) {
         case 'sh':
             if (podmanId) {
-                // We cannot use `podman exec -w` because crun resolves the working
-                // directory at exec-setup time and fails with "Permission denied"
-                // when the directory was created after the container started — even
-                // though the bind-mount is live and the host uid matches.
-                // Instead we write a tiny wrapper script into the workspace on the
-                // host (visible in the container via the bind-mount), which does the
-                // cd itself at shell runtime.  No quoting layers needed.
-                def wrapper = "${podmanWs}/.podman-exec-wrapper-${scriptStem}.sh"
-                sh """printf '%s\\n' '#!/bin/bash' 'set -e' 'cd ${podmanWs}' 'exec bash ${found.path}' > '${wrapper}' && chmod +x '${wrapper}'"""
-                try {
-                    return sh(script: "podman exec '${podmanId}' bash '${wrapper}'", returnStatus: true)
-                } finally {
-                    sh(script: "rm -f '${wrapper}'", returnStatus: true)
-                }
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
@@ -102,13 +89,7 @@ def run(String scriptStem, def config = null) {
             return script(config) ?: 0
         case 'py':
             if (podmanId) {
-                def wrapper = "${podmanWs}/.podman-exec-wrapper-${scriptStem}.sh"
-                sh """printf '%s\\n' '#!/bin/bash' 'set -e' 'cd ${podmanWs}' 'exec python3 ${found.path}' > '${wrapper}' && chmod +x '${wrapper}'"""
-                try {
-                    return sh(script: "podman exec '${podmanId}' bash '${wrapper}'", returnStatus: true)
-                } finally {
-                    sh(script: "rm -f '${wrapper}'", returnStatus: true)
-                }
+                return sh(script: "podman exec -w '${podmanWs}' '${podmanId}' python3 '${found.path}'", returnStatus: true)
             }
             return sh(script: "python3 ${found.path}", returnStatus: true)
     }

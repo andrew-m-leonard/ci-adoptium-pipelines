@@ -131,21 +131,25 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         echo "Pulling image (podman): ${image}"
         sh "podman pull '${image}'"
 
-        // --userns keep-id: maps the calling process uid (host jenkins uid, e.g. 1001)
-        // to the same uid inside the container's user namespace.  Without this,
-        // rootless Podman uses the default subuid mapping which puts the host uid
-        // at a high unmapped uid inside the container — the bind-mounted workspace
-        // then appears unowned and crun refuses to chdir into it.
-        // -u hostUid:hostGid: run the container process as that same uid so it
-        // matches the workspace owner regardless of what the image's /etc/passwd says.
-        def hostUid = sh(script: 'id -u', returnStdout: true).trim()
-        def hostGid = sh(script: 'id -g', returnStdout: true).trim()
-        echo "Starting Podman container: ${image} (uid=${hostUid} gid=${hostGid})"
+        // The image has /home/jenkins owned by uid=1000 mode=700.  When the host
+        // Jenkins user is uid=1001, that directory is not traversable by the container
+        // process — nothing under /home/jenkins/workspace is reachable even though
+        // the workspace itself is bind-mounted.  Fix: bind-mount the host's
+        // /home/jenkins (owned by uid=1001) over the image's /home/jenkins so the
+        // container sees the correct owner and permissions.
+        //
+        // --userns keep-id maps the host uid to the same uid inside the container.
+        // -u hostUid:hostGid makes the container process run as that uid.
+        def hostUid  = sh(script: 'id -u',   returnStdout: true).trim()
+        def hostGid  = sh(script: 'id -g',   returnStdout: true).trim()
+        def hostHome = sh(script: 'echo $HOME', returnStdout: true).trim()
+        echo "Starting Podman container: ${image} (uid=${hostUid} gid=${hostGid} home=${hostHome})"
         containerId = sh(
             script: """podman run -d --rm \\
                          --userns keep-id \\
                          -u '${hostUid}:${hostGid}' \\
                          ${podmanArgs} \\
+                         -v '${hostHome}:${hostHome}:rw,z' \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
                          '${image}' \\
@@ -153,10 +157,6 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        // Diagnostics — log the uid inside the container and the ownership/perms
-        // of each ancestor directory in the workspace path.
-        sh(script: "podman exec '${containerId}' id", returnStatus: true)
-        sh(script: "podman exec '${containerId}' bash -c 'ls -land /home /home/jenkins /home/jenkins/workspace 2>&1; stat ${ws} 2>&1' || true", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
