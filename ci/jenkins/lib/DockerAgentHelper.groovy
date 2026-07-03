@@ -121,17 +121,12 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
         ).trim()
         echo "Container started: ${containerId}"
 
-        // The bind-mount makes workspace content available inside the container
-        // but the directory path itself may not exist in the container's
-        // filesystem tree.  Create it explicitly so that subsequent exec calls
-        // can cd into it without a "No such file or directory" error.
-        sh "podman exec '${containerId}' mkdir -p '${ws}'"
-
         // Expose the container ID and workspace path so StageScriptRunner can
-        // dispatch stage scripts inside the container.  -w is intentionally
-        // NOT used on podman exec calls — crun fails to resolve the working
-        // directory under userns remapping before the namespace is settled.
-        // Instead every exec uses: bash -c "cd '<ws>' && <command>"
+        // dispatch stage scripts inside the container via podman exec -w.
+        // NOTE: we do NOT mkdir -p the workspace here — initializeStage() calls
+        // cleanWs() which wipes and recreates the workspace after this point,
+        // invalidating any directory we create now.  StageScriptRunner ensures
+        // the workspace path exists inside the container before each exec.
         withEnv([
             "BUILD_PODMAN_CONTAINER_ID=${containerId}",
             "BUILD_PODMAN_WORKSPACE=${ws}"

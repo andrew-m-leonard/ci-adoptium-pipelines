@@ -55,6 +55,14 @@ def run(String scriptStem, def config = null) {
 
     // Ensure TARGET_DIR exists before the script runs (if set by the stage).
     // On Podman builds this runs inside the container via podman exec.
+    // We also ensure the workspace path exists inside the container here —
+    // initializeStage() calls cleanWs() which wipes and recreates the workspace
+    // after the container starts, so any mkdir done at container startup is
+    // invalidated.  Recreating it here (after initializeStage completes) ensures
+    // podman exec -w can resolve the working directory correctly.
+    if (podmanId) {
+        sh "podman exec '${podmanId}' mkdir -p '${podmanWs}'"
+    }
     if (env.TARGET_DIR) {
         if (podmanId) {
             sh "podman exec -w '${podmanWs}' '${podmanId}' mkdir -p '${env.TARGET_DIR}'"
