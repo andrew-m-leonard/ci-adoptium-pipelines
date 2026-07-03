@@ -101,16 +101,18 @@ def isUnqualifiedImageName(String image) {
  * operations inside the container land in the Jenkins workspace on the host.
  */
 def runInPodmanContainer(String dockerImage, String dockerArgs, Closure body) {
-    def ws         = env.WORKSPACE
+    def ws          = env.WORKSPACE
     def containerId = ''
     try {
         echo "Starting Podman container: ${dockerImage}"
-        // -d: detached  --rm: auto-remove on stop  --userns=keep-id: UID preservation
-        // Workspace mounted at same absolute path so paths match inside and outside.
+        // -d: detached  --rm: auto-remove on stop
+        // -w is intentionally omitted here: crun resolves the working directory
+        // before the bind-mount is fully entered, causing a permission denied
+        // error under --userns=keep-id.  The working directory is set per-exec
+        // in StageScriptRunner via 'docker exec -w' instead.
         containerId = sh(
             script: """docker run -d --rm \\
                          ${dockerArgs} \\
-                         -w '${ws}' \\
                          -v '${ws}:${ws}:rw,z' \\
                          -v '${ws}@tmp:${ws}@tmp:rw,z' \\
                          '${dockerImage}' \\
@@ -119,9 +121,12 @@ def runInPodmanContainer(String dockerImage, String dockerArgs, Closure body) {
         ).trim()
         echo "Container started: ${containerId}"
 
-        // Expose the container ID so StageScriptRunner can prefix sh calls with
-        // 'docker exec <id> bash ...' for shell-type stage scripts.
-        withEnv(["BUILD_DOCKER_CONTAINER_ID=${containerId}"]) {
+        // Expose the container ID and workspace so StageScriptRunner can
+        // dispatch shell scripts via 'docker exec -w <ws> <id> bash ...'.
+        withEnv([
+            "BUILD_DOCKER_CONTAINER_ID=${containerId}",
+            "BUILD_DOCKER_WORKSPACE=${ws}"
+        ]) {
             body()
         }
     } finally {

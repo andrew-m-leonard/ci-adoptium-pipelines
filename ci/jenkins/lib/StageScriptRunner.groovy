@@ -50,20 +50,29 @@ def run(String scriptStem, def config = null) {
 
     echo "▶ Running ${found.type.toUpperCase()} stage script: ${found.path}"
 
-    // Ensure TARGET_DIR exists before the script runs (if set by the stage)
+    def containerId = env.BUILD_DOCKER_CONTAINER_ID?.trim()
+    def containerWs = env.BUILD_DOCKER_WORKSPACE?.trim()
+
+    // Ensure TARGET_DIR exists before the script runs (if set by the stage).
+    // On Podman builds this must run inside the container so the directory
+    // exists within the containerised filesystem view of the workspace.
     if (env.TARGET_DIR) {
-        sh "mkdir -p ${env.TARGET_DIR}"
+        if (containerId) {
+            sh "docker exec -w '${containerWs}' ${containerId} mkdir -p '${env.TARGET_DIR}'"
+        } else {
+            sh "mkdir -p ${env.TARGET_DIR}"
+        }
     }
 
     switch (found.type) {
         case 'sh':
             // If running inside a Podman container started by DockerAgentHelper,
-            // execute the script inside that container via docker exec rather than
-            // directly on the host.  BUILD_DOCKER_CONTAINER_ID is set by
-            // runInPodmanContainer() and is empty on Docker/.inside() builds.
-            def containerId = env.BUILD_DOCKER_CONTAINER_ID?.trim()
+            // execute the script inside that container via docker exec.
+            // -w sets the working directory to the workspace so relative paths
+            // and WORKSPACE env var usage inside the script resolve correctly.
+            // BUILD_DOCKER_CONTAINER_ID is empty on Docker/.inside() builds.
             if (containerId) {
-                return sh(script: "docker exec ${containerId} bash '${found.path}'", returnStatus: true)
+                return sh(script: "docker exec -w '${containerWs}' ${containerId} bash '${found.path}'", returnStatus: true)
             }
             return sh(script: "bash ${found.path}", returnStatus: true)
         case 'groovy':
