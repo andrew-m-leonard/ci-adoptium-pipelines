@@ -76,6 +76,14 @@ def podmanEnvFlags() {
     // transport helper and fails with "Out of memory".  Prepend it explicitly.
     flags << "-e 'PATH=/usr/local/libexec/git-core:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'"
 
+    // podman exec starts with a minimal environment where HOME is unset or '/'.
+    // git uses HOME to locate temp files and the credential store — with HOME='/'
+    // uid 1001 cannot write there and git's xmalloc fails reporting "Out of memory".
+    // The host /home/jenkins is bind-mounted into the container so this path exists
+    // and is writable by the container process.
+    def jenkinsHome = env.getProperty('HOME') ?: '/home/jenkins'
+    flags << "-e 'HOME=${jenkinsHome}'"
+
     return flags.join(' ')
 }
 
