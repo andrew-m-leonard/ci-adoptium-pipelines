@@ -157,6 +157,7 @@ def runInPodmanContainer(String image, String podmanArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
+        sh(script: "podman exec '${containerId}' bash -c 'ls -la /usr/local/libexec/git-core/git-remote-https; id; /usr/local/libexec/git-core/git-remote-https --version 2>&1 || true'", returnStatus: true)
 
         // Expose the container ID and workspace path so StageScriptRunner can
         // dispatch stage scripts inside the container via:
