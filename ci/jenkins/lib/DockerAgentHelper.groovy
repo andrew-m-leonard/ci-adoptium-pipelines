@@ -282,3 +282,5 @@ def withBuildAgent(Closure body) {
 }
 
 return this
+
+// Made with Bob

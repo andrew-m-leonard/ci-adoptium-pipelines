@@ -184,3 +184,5 @@ def run(String scriptStem, def config = null) {
 }
 
 return this
+
+// Made with Bob
