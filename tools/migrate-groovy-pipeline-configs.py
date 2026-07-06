@@ -137,6 +137,28 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
                 "artifactDaysToKeep": 7,
                 "artifactNumToKeep": 10
             }
+        },
+        # Per-stage agent label templates. Placeholders {os} and {arch} are
+        # substituted at runtime with the build job's TARGET_OS / ARCHITECTURE
+        # values. Override any entry to route a stage to vendor-specific nodes
+        # (e.g. a dedicated signing cluster or an OS-matched test worker).
+        "stageAgentLabels": {
+            "Initialize":                 "worker",
+            "Build":                      "build&&{os}&&{arch}",
+            "Internal Code Sign":         "eclipse-codesign",
+            "Assemble Images":            "build&&{os}&&{arch}",
+            "Post-Build Code Sign":       "worker",
+            "Build Installers":           "build&&{os}&&{arch}",
+            "Code Sign Installer":        "worker",
+            "SBOM Sign":                  "worker",
+            "Digital Artifact Sign":      "worker",
+            "Verify Signing":             "worker",
+            "Validate SBOM":              "build&&{os}&&{arch}",
+            "Smoke Tests":                "build&&{os}&&{arch}",
+            "Reproducible Compare Build": "build&&{os}&&{arch}",
+            "AQA Tests":                  "build&&{arch}",
+            "TCK Tests":                  "build&&{arch}",
+            "Publish Artifacts":          "worker"
         }
     }
 
