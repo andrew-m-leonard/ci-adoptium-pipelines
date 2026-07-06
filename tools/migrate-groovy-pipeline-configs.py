@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
-Convert legacy Groovy pipeline configurations to new JSON architecture.
+Migrate legacy Groovy pipeline configurations to new JSON architecture.
 
 This tool converts legacy Groovy configs to the new launch job architecture:
-- Uses the existing convert-all-legacy-groovy-configs.py for conversion
+- Uses batch-convert-groovy-configs.py for conversion
 - Removes "u" suffix from output filenames
-- Generates jenkins_job_config.json (top-level config with active versions)
+- Generates adoptium_pipeline_config.json  (CI-agnostic config)
+- Generates jenkins_job_config.json        (Jenkins-specific config)
 - Structures output for launch job + platform job architecture
 
 Usage:
-    # Convert all configs and generate jenkins_job_config.json
-    python3 convert-legacy-configs-to-new-architecture.py \
+    # Convert all configs and generate config files
+    python3 migrate-groovy-pipeline-configs.py \
         --source ~/workspace/ci-jenkins-pipelines/pipelines/jobs/configurations \
         --output ~/workspace/ci-temurin-config
 
     # Dry run to preview
-    python3 convert-legacy-configs-to-new-architecture.py \
+    python3 migrate-groovy-pipeline-configs.py \
         --source ./configs --output ./output --dry-run
 
     # Verbose output
-    python3 convert-legacy-configs-to-new-architecture.py \
+    python3 migrate-groovy-pipeline-configs.py \
         --source ./configs --output ./output --verbose
 """
 
@@ -35,15 +36,15 @@ from typing import List, Dict, Any
 
 
 def find_converter_script() -> Path:
-    """Find the convert-all-legacy-groovy-configs.py script."""
+    """Find the batch-convert-groovy-configs.py script."""
     script_dir = Path(__file__).parent
-    converter = script_dir / "convert-all-legacy-groovy-configs.py"
-    
+    converter = script_dir / "batch-convert-groovy-configs.py"
+
     if converter.exists():
         return converter
-    
+
     raise FileNotFoundError(
-        "Could not find convert-all-legacy-groovy-configs.py script. "
+        "Could not find batch-convert-groovy-configs.py script. "
         "Please ensure it's in the same directory as this script."
     )
 
@@ -84,35 +85,42 @@ def check_if_job_disabled(source_dir: Path, version: str) -> bool:
     return False
 
 
-def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Generate the top-level jenkins_job_config.json."""
-    # Sort by version, preserving the enabled status from each config
+def generate_adoptium_pipeline_config(version_configs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Generate adoptium_pipeline_config.json — CI-agnostic configuration."""
     version_configs_sorted = sorted(version_configs, key=lambda x: x["version"])
-    
-    # Create activeJdkVersions as array of objects with version and enabled properties
+
     active_versions = [
         {
             "version": config["version"],
-            "enabled": config.get("enabled", True)  # Default to True if not specified
+            "enabled": config.get("enabled", True)
         }
         for config in version_configs_sorted
     ]
-    
-    jenkins_config = {
+
+    return {
         "activeJdkVersions": active_versions,
         "defaultBuildArgs": "--create-jre-image --create-sbom",
         "defaultConfigureArgs": "",
         "defaultVariant": "temurin",
-        "defaultScmReference": "",
-        "pipelineTimeoutHours": 8,
         "configFilePrefix": "configurations/",
         "configFileSuffix": "_pipeline_config.json",
         "repository": {
             "url": "https://github.com/adoptium/ci-adoptium-pipelines.git",
             "branch": "main",
             "credentialsId": "",
-            "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative"
-        },
+            "buildRepoUrl": "https://github.com/adoptium/temurin-build.git",
+            "buildBranch": "master",
+            "aqaRepoUrl": "https://github.com/adoptium/aqa-tests.git",
+            "aqaBranch": "master"
+        }
+    }
+
+
+def generate_jenkins_job_config() -> Dict[str, Any]:
+    """Generate jenkins_job_config.json — Jenkins-specific configuration."""
+    return {
+        "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
+        "pipelineTimeoutHours": 8,
         "jobConfiguration": {
             "defaultParameters": {
                 "VARIANT": "temurin",
@@ -131,8 +139,6 @@ def generate_jenkins_job_config(version_configs: List[Dict[str, Any]]) -> Dict[s
             }
         }
     }
-    
-    return jenkins_config
 
 
 def main():
@@ -215,7 +221,8 @@ Examples:
                 print("1. Convert Groovy files to JSON (temp directory)")
                 print("2. Remove 'u' suffix from filenames")
                 print("3. Move to configurations/ subdirectory")
-                print("4. Generate jenkins_job_config.json")
+                print("4. Generate adoptium_pipeline_config.json")
+                print("5. Generate jenkins_job_config.json")
                 return 0
 
             # Step 1: Run the existing converter to temp directory
@@ -278,9 +285,14 @@ Examples:
                     if not config.get("openjdkVersion"):
                         config["openjdkVersion"] = version + "u"
                     
-                    # Remove old scmReference field if it exists (renamed to openjdkVersion)
-                    config.pop("scmReference", None)
-                    
+                    # Remove obsolete test fields and add new smoke test label field
+                    # per-platform buildConfigurations entry
+                    for platform_config in config.get("buildConfigurations", {}).values():
+                        platform_config.pop("test", None)
+                        platform_config.pop("additionalTestParams", None)
+                        if "additionalSmokeTestNodeLabels" not in platform_config:
+                            platform_config["additionalSmokeTestNodeLabels"] = ""
+
                     # Check if the job is disabled in the jdkNN(u).groovy file
                     is_disabled = check_if_job_disabled(args.source, version)
                     
@@ -303,6 +315,7 @@ Examples:
                         print(f"  OpenJDK Version: {config['openjdkVersion']}")
                         print(f"  Enabled: {config['enabled']}")
                         print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
+                        print(f"  Removed 'test' and 'additionalTestParams' fields; added 'additionalSmokeTestNodeLabels'")
                 
                 except json.JSONDecodeError as e:
                     print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ (Invalid JSON: {e})")
@@ -314,21 +327,32 @@ Examples:
                     print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ ({e})")
                     failed_files.append((temp_file.name, str(e)))
             
-            # Step 3: Generate jenkins_job_config.json
+            # Step 3: Generate adoptium_pipeline_config.json and jenkins_job_config.json
             if version_configs:
                 print()
-                print("Step 3: Generating jenkins_job_config.json...")
-                
-                jenkins_config = generate_jenkins_job_config(version_configs)
+                print("Step 3: Generating adoptium_pipeline_config.json...")
+
+                adoptium_config = generate_adoptium_pipeline_config(version_configs)
+                adoptium_config_file = args.output / "adoptium_pipeline_config.json"
+
+                with open(adoptium_config_file, 'w') as f:
+                    json.dump(adoptium_config, f, indent=2)
+
+                print(f"  Created: {adoptium_config_file.name}")
+
+                if args.verbose:
+                    print(f"  Active versions: {adoptium_config['activeJdkVersions']}")
+
+                print()
+                print("Step 4: Generating jenkins_job_config.json...")
+
+                jenkins_config = generate_jenkins_job_config()
                 jenkins_config_file = args.output / "jenkins_job_config.json"
-                
+
                 with open(jenkins_config_file, 'w') as f:
                     json.dump(jenkins_config, f, indent=2)
-                
+
                 print(f"  Created: {jenkins_config_file.name}")
-                
-                if args.verbose:
-                    print(f"  Active versions: {jenkins_config['activeJdkVersions']}")
             
             # Print summary
             print()
@@ -355,7 +379,8 @@ Examples:
                 return 1
             print()
             print("Generated files:")
-            print(f"  - jenkins_job_config.json")
+            print(f"  - adoptium_pipeline_config.json  (CI-agnostic)")
+            print(f"  - jenkins_job_config.json         (Jenkins-specific)")
             for config in version_configs:
                 print(f"  - configurations/{config['version']}_pipeline_config.json")
             print()

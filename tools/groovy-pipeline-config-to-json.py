@@ -6,7 +6,7 @@ This script parses Groovy configuration files and converts them to JSON,
 handling nested maps, lists, and variant-specific configurations.
 
 Usage:
-    python3 convert-groovy-to-json.py <input.groovy> <output.json>
+    python3 groovy-pipeline-config-to-json.py <input.groovy> <output.json>
 """
 
 import sys
@@ -371,10 +371,10 @@ def convert_groovy_to_json(input_file: Path, output_file: Path):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python3 convert-groovy-to-json.py <input.groovy> <output.json>")
+        print("Usage: python3 groovy-pipeline-config-to-json.py <input.groovy> <output.json>")
         print("")
         print("Example:")
-        print("  python3 convert-groovy-to-json.py jdk21u_pipeline_config.groovy jdk21u_pipeline_config.json")
+        print("  python3 groovy-pipeline-config-to-json.py jdk21u_pipeline_config.groovy jdk21u_pipeline_config.json")
         sys.exit(1)
 
     input_file = Path(sys.argv[1])

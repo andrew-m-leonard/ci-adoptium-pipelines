@@ -11,6 +11,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 | Set up Jenkins from scratch | [JOB_DSL_AUTOMATION.md](./JOB_DSL_AUTOMATION.md) |
 | Understand the overall design | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) |
 | Configure a build | [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) |
+| Look up a config file schema | [CONFIG_SCHEMA.md](./CONFIG_SCHEMA.md) |
 | Restart a failed stage | [BUILD_UID_INTEGRATION.md](./BUILD_UID_INTEGRATION.md) |
 | Run the pipeline locally | [PIPELINE_RUNNER_GUIDE.md](./PIPELINE_RUNNER_GUIDE.md) |
 | Add or modify a stage script | [CI_AGNOSTIC_ARCHITECTURE.md](./CI_AGNOSTIC_ARCHITECTURE.md) (Per-Stage Summary) + [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md) |
@@ -27,7 +28,8 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 ## Configuration
 
-- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Config repo layout, all config file schemas, vendor-scripts resolution, config flow through the pipeline
+- **[CONFIG_SCHEMA.md](./CONFIG_SCHEMA.md)** — Full schema reference for `adoptium_pipeline_config.json`, `jenkins_job_config.json`, and `configurations/jdkNN_pipeline_config.json`
+- **[CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md)** — Config repo layout, vendor-scripts resolution, config flow through the pipeline
 
 ## Jenkins Integration
 
@@ -52,7 +54,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 
 ## Tools
 
-- **[Tools README](../tools/README.md)** — Legacy Groovy-to-JSON configuration conversion tools: `convert-groovy-to-json.py`, `convert-all-legacy-groovy-configs.py`
+- **[Tools README](../tools/README.md)** — Legacy Groovy-to-JSON configuration conversion tools: `migrate-groovy-pipeline-configs.py`, `batch-convert-groovy-configs.py`, `groovy-pipeline-config-to-json.py`
 
 ## Historical
 

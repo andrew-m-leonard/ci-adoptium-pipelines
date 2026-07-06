@@ -7,16 +7,16 @@ to the new JSON-based configuration format used by the declarative pipeline.
 
 Usage:
     # Convert all configs in a directory
-    python3 convert-all-legacy-groovy-configs.py --source /path/to/groovy/configs --output /path/to/json/configs
+    python3 batch-convert-groovy-configs.py --source /path/to/groovy/configs --output /path/to/json/configs
 
     # Convert with custom pattern
-    python3 convert-all-legacy-groovy-configs.py --source ./configs --output ./json --pattern "*_config.groovy"
+    python3 batch-convert-groovy-configs.py --source ./configs --output ./json --pattern "*_config.groovy"
 
     # Dry run to see what would be converted
-    python3 convert-all-legacy-groovy-configs.py --source ./configs --output ./json --dry-run
+    python3 batch-convert-groovy-configs.py --source ./configs --output ./json --dry-run
 
     # Verbose output
-    python3 convert-all-legacy-groovy-configs.py --source ./configs --output ./json --verbose
+    python3 batch-convert-groovy-configs.py --source ./configs --output ./json --verbose
 """
 
 import argparse
@@ -27,21 +27,21 @@ import glob
 
 
 def find_converter_script() -> Path:
-    """Find the convert-groovy-to-json.py script."""
+    """Find the groovy-pipeline-config-to-json.py script."""
     # Try current directory first
     script_dir = Path(__file__).parent
-    converter = script_dir / "convert-groovy-to-json.py"
+    converter = script_dir / "groovy-pipeline-config-to-json.py"
 
     if converter.exists():
         return converter
 
     # Try parent directory
-    converter = script_dir.parent / "tools" / "convert-groovy-to-json.py"
+    converter = script_dir.parent / "tools" / "groovy-pipeline-config-to-json.py"
     if converter.exists():
         return converter
 
     raise FileNotFoundError(
-        "Could not find convert-groovy-to-json.py script. "
+        "Could not find groovy-pipeline-config-to-json.py script. "
         "Please ensure it's in the same directory as this script."
     )
 
