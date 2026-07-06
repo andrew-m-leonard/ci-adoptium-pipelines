@@ -42,26 +42,50 @@ def ensureLibsLoaded() {
 }
 
 /**
+ * Built-in default stage agent label templates.
+ * The vendor config repo's stageAgentLabels map takes precedence.
+ * Placeholders: {os} → TARGET_OS, {arch} → ARCHITECTURE.
+ */
+@Field def DEFAULT_STAGE_AGENT_LABELS = [
+    'Initialize':                 'worker',
+    'Build':                      'build&&{os}&&{arch}',
+    'Internal Code Sign':         'worker',
+    'Assemble Images':            'build&&{os}&&{arch}',
+    'Post-Build Code Sign':       'worker',
+    'Build Installers':           'build&&{os}&&{arch}',
+    'Code Sign Installer':        'worker',
+    'SBOM Sign':                  'worker',
+    'Digital Artifact Sign':      'worker',
+    'Verify Signing':             'worker',
+    'Validate SBOM':              'build&&{os}&&{arch}',
+    'Smoke Tests':                'build&&{os}&&{arch}',
+    'Reproducible Compare Build': 'build&&{os}&&{arch}',
+    'AQA Tests':                  'build&&{arch}',
+    'TCK Tests':                  'build&&{arch}',
+    'Publish Artifacts':          'worker',
+]
+
+/**
  * Resolve the agent label for a named pipeline stage.
  *
- * Reads CONFIG_STAGE_AGENT_LABELS (a JSON map set by ConfigHelper) and looks
- * up the entry for stageName.  Substitutes {os} and {arch} with the current
- * CONFIG_TARGET_OS / CONFIG_ARCHITECTURE values so vendor labels like
- * "build&&{os}&&{arch}" resolve to the concrete values for this build job.
- * Falls back to 'worker' when the stage has no entry or the env var is unset.
+ * Uses params.TARGET_OS / params.ARCHITECTURE (fixed job parameters, available
+ * at pipeline startup) to resolve {os} and {arch} placeholders.
+ * The vendor config repo map (CONFIG_STAGE_AGENT_LABELS) takes precedence over
+ * DEFAULT_STAGE_AGENT_LABELS when set. Falls back to 'worker'.
  */
 def getStageLabel(String stageName) {
+    def template = null
     def labelsJson = env.CONFIG_STAGE_AGENT_LABELS
     if (labelsJson) {
         def labels = new groovy.json.JsonSlurperClassic().parseText(labelsJson)
-        def template = labels[stageName]
-        if (template) {
-            return template
-                .replace('{os}',   env.CONFIG_TARGET_OS   ?: '')
-                .replace('{arch}', env.CONFIG_ARCHITECTURE ?: '')
-        }
+        template = labels[stageName]
     }
-    return 'worker'
+    if (!template) {
+        template = DEFAULT_STAGE_AGENT_LABELS[stageName] ?: 'worker'
+    }
+    def os   = params.TARGET_OS    ?: env.CONFIG_TARGET_OS    ?: ''
+    def arch = params.ARCHITECTURE ?: env.CONFIG_ARCHITECTURE ?: ''
+    return template.replace('{os}', os).replace('{arch}', arch)
 }
 
 /**
