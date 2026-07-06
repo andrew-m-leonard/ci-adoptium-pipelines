@@ -60,30 +60,22 @@ def extract_variant_value(value, variant):
     return None
 
 
-def get_test_list(test_config, is_release, is_weekly):
-    """Get test list based on build type"""
-    if test_config is None or test_config == 'default':
-        return []
+def build_node_label(build_label_template, additional_labels):
+    """Build the Build-stage node label from the stageAgentLabels template.
 
-    if isinstance(test_config, dict):
-        if is_release and 'release' in test_config:
-            return test_config['release']
-        elif is_weekly and 'weekly' in test_config:
-            return test_config['weekly']
-        elif 'nightly' in test_config:
-            return test_config['nightly']
+    The template is taken verbatim from stageAgentLabels["Build"] in
+    jenkins_job_config.json (e.g. "build&&{os}&&{arch}").  {os} and {arch}
+    placeholders are intentionally left unresolved here — they are resolved at
+    runtime by the Jenkinsfile so that every stage uses the same mechanism.
 
-    return []
-
-
-def build_node_label(target_os, architecture, additional_labels):
-    """Build node label from components"""
-    labels = ['build', target_os, architecture]
-
+    If additional_labels are present (from the platform config's
+    additionalNodeLabels field) they are appended with '&&', giving the Build
+    stage any extra hardware/toolchain constraints the platform requires.
+    """
+    label = build_label_template
     if additional_labels:
-        labels.insert(0, additional_labels)
-
-    return '&&'.join(labels)
+        label = label + '&&' + additional_labels
+    return label
 
 
 def load_configuration(args):
@@ -95,6 +87,18 @@ def load_configuration(args):
     architecture = args.architecture
     config_dir = args.config_dir
     output_dir = args.output_dir
+
+    # Load stageAgentLabels from jenkins_job_config.json when provided.
+    # Fall back to a minimal default so the script works without it.
+    stage_agent_labels = {'Build': 'build&&{os}&&{arch}'}
+    if args.job_config:
+        job_config_path = Path(args.job_config)
+        if not job_config_path.exists():
+            print(f"ERROR: jenkins_job_config.json not found: {job_config_path}", file=sys.stderr)
+            sys.exit(1)
+        with open(job_config_path, 'r') as f:
+            job_config = json.load(f)
+        stage_agent_labels = job_config.get('stageAgentLabels', stage_agent_labels)
 
     # Optional parameters
     # Determine release type from --release-type parameter (defaults to NIGHTLY)
@@ -153,14 +157,11 @@ def load_configuration(args):
     docker_image = extract_variant_value(platform_config.get('dockerImage'), variant)
     docker_file = extract_variant_value(platform_config.get('dockerFile'), variant)
     additional_node_labels = extract_variant_value(platform_config.get('additionalNodeLabels'), variant)
-    additional_test_labels = extract_variant_value(platform_config.get('additionalTestLabels'), variant)
     podman_args = platform_config.get('podmanArgs', '')
 
-    # Determine test list based on build type
-    test_list = get_test_list(platform_config.get('test'), is_release, is_weekly)
-
-    # Build node label
-    node_label = build_node_label(target_os, architecture, additional_node_labels)
+    # Build the Build-stage node label from the vendor template + platform additionalNodeLabels
+    build_label_template = stage_agent_labels.get('Build', 'build&&{os}&&{arch}')
+    node_label = build_node_label(build_label_template, additional_node_labels)
 
     # Create pipeline-config.json (new format only)
     pipeline_config = {
@@ -178,8 +179,6 @@ def load_configuration(args):
             'DOCKER_CREDENTIAL': platform_config.get('dockerCredential', ''),
             'DOCKER_ARGS': platform_config.get('dockerArgs', ''),
             'PODMAN_ARGS': podman_args,
-            'TEST_LIST': test_list,
-            'ADDITIONAL_TEST_LABEL': additional_test_labels or ''
         },
         'parameters': {
             'enableTests': enable_tests,
@@ -196,14 +195,9 @@ def load_configuration(args):
             'buildRepoUrl': build_repo_url,
             'aqaRef': aqa_ref,
             'aqaRepoUrl': aqa_repo_url
-        }
+        },
+        'stageAgentLabels': stage_agent_labels
     }
-
-    # Add additional test params if present
-    if 'additionalTestParams' in platform_config:
-        variant_test_params = platform_config['additionalTestParams'].get(variant)
-        if variant_test_params:
-            pipeline_config['buildConfig']['ADDITIONAL_TEST_PARAMS'] = variant_test_params
 
     # Save configuration
     output_path = Path(output_dir)
@@ -220,7 +214,6 @@ def load_configuration(args):
     print(f"  Configure Args: {configure_args}")
     print(f"  Node Label: {node_label}")
     print(f"  Docker Image: {docker_image}")
-    print(f"  Tests: {len(test_list)} test suites")
 
     return pipeline_config
 
@@ -267,6 +260,7 @@ Examples:
     # Optional arguments
     parser.add_argument('--config-dir', default='./configurations', help='Configuration directory (default: ./configurations)')
     parser.add_argument('--output-dir', default='.', help='Output directory for generated configs (default: .)')
+    parser.add_argument('--job-config', default=None, help='Path to jenkins_job_config.json (provides stageAgentLabels)')
 
     # Release type - case-insensitive (will be converted to uppercase)
     parser.add_argument('--release-type', type=str,

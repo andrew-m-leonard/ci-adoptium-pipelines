@@ -110,6 +110,12 @@ def generatePipelineConfig(String configDir = './configurations') {
         pythonArgs.add("--ea-beta-build")
     }
 
+    // Pass jenkins_job_config.json so stageAgentLabels flow into pipeline-config.json
+    def jobConfigFile = './config-repo/jenkins_job_config.json'
+    if (fileExists(jobConfigFile)) {
+        pythonArgs.add("--job-config ${jobConfigFile}")
+    }
+
     // Execute Python script to generate configuration
     sh "python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}"
 
@@ -148,6 +154,12 @@ def generatePipelineConfig(String configDir = './configurations') {
     env.AQA_REF                  = config.refs.aqaRef
     env.SMOKE_TESTS_PASSED       = 'false'
 
+    // Serialise stageAgentLabels map so the Jenkinsfile can resolve per-stage
+    // agent labels without re-reading the config file on every agent allocation.
+    env.CONFIG_STAGE_AGENT_LABELS = groovy.json.JsonOutput.toJson(
+        config.stageAgentLabels ?: [:]
+    )
+
     return config
 }
 
@@ -167,7 +179,13 @@ def summarizePipelineConfig(config) {
     echo "  Docker Credential: ${config.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"
     echo "  Docker Args: ${config.buildConfig.DOCKER_ARGS ?: '(none)'}"
     echo "  Podman Args: ${config.buildConfig.PODMAN_ARGS ?: '(none)'}"
-    echo "  Tests: ${config.buildConfig.TEST_LIST}"
+    echo "Stage Agent Labels:"
+    def os   = config.buildConfig.TARGET_OS
+    def arch = config.buildConfig.ARCHITECTURE
+    (config.stageAgentLabels ?: [:]).each { stage, template ->
+        def resolved = template.replace('{os}', os).replace('{arch}', arch)
+        echo "  ${stage}: ${template}  →  ${resolved}"
+    }
 }
 
 return this

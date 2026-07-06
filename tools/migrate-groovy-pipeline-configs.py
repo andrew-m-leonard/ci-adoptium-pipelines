@@ -285,13 +285,11 @@ Examples:
                     if not config.get("openjdkVersion"):
                         config["openjdkVersion"] = version + "u"
                     
-                    # Remove obsolete test fields and add new smoke test label field
-                    # per-platform buildConfigurations entry
+                    # Remove obsolete fields from each platform entry
                     for platform_config in config.get("buildConfigurations", {}).values():
                         platform_config.pop("test", None)
                         platform_config.pop("additionalTestParams", None)
-                        if "additionalSmokeTestNodeLabels" not in platform_config:
-                            platform_config["additionalSmokeTestNodeLabels"] = ""
+                        platform_config.pop("additionalTestLabels", None)
 
                     # Check if the job is disabled in the jdkNN(u).groovy file
                     is_disabled = check_if_job_disabled(args.source, version)
@@ -315,7 +313,7 @@ Examples:
                         print(f"  OpenJDK Version: {config['openjdkVersion']}")
                         print(f"  Enabled: {config['enabled']}")
                         print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
-                        print(f"  Removed 'test' and 'additionalTestParams' fields; added 'additionalSmokeTestNodeLabels'")
+                        print(f"  Removed obsolete fields: test, additionalTestParams, additionalTestLabels")
                 
                 except json.JSONDecodeError as e:
                     print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ (Invalid JSON: {e})")

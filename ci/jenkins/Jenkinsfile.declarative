@@ -42,11 +42,24 @@ def ensureLibsLoaded() {
 }
 
 /**
- * Get the appropriate node label for the build.
+ * Resolve the agent label for a named pipeline stage.
+ *
+ * Reads CONFIG_STAGE_AGENT_LABELS (a JSON map set by ConfigHelper) and looks
+ * up the entry for stageName.  Substitutes {os} and {arch} with the current
+ * CONFIG_TARGET_OS / CONFIG_ARCHITECTURE values so vendor labels like
+ * "build&&{os}&&{arch}" resolve to the concrete values for this build job.
+ * Falls back to 'worker' when the stage has no entry or the env var is unset.
  */
-def getNodeLabel() {
-    if (env.CONFIG_NODE_LABEL) {
-        return env.CONFIG_NODE_LABEL
+def getStageLabel(String stageName) {
+    def labelsJson = env.CONFIG_STAGE_AGENT_LABELS
+    if (labelsJson) {
+        def labels = new groovy.json.JsonSlurperClassic().parseText(labelsJson)
+        def template = labels[stageName]
+        if (template) {
+            return template
+                .replace('{os}',   env.CONFIG_TARGET_OS   ?: '')
+                .replace('{arch}', env.CONFIG_ARCHITECTURE ?: '')
+        }
     }
     return 'worker'
 }
@@ -70,7 +83,7 @@ pipeline {
     stages {
         stage('Initialize') {
             agent {
-                label 'worker'
+                label getStageLabel('Initialize')
             }
             steps {
                 script {
@@ -126,7 +139,7 @@ pipeline {
 
         stage('Internal Code Sign') {
             agent {
-                label 'eclipse-codesign'
+                label getStageLabel('Internal Code Sign')
             }
             when {
                 beforeAgent true
@@ -155,7 +168,7 @@ pipeline {
 
         stage('Assemble Images') {
             agent {
-                label getNodeLabel()
+                label getStageLabel('Assemble Images')
             }
             when {
                 beforeAgent true
@@ -184,7 +197,7 @@ pipeline {
 
         stage('Post-Build Code Sign') {
             agent {
-                label 'worker'
+                label getStageLabel('Post-Build Code Sign')
             }
             when {
                 expression { env.CONFIG_ENABLE_SIGNER == 'true' }
@@ -206,7 +219,7 @@ pipeline {
 
         stage('Build Installers') {
             agent {
-                label 'worker'
+                label getStageLabel('Build Installers')
             }
             when {
                 expression { env.CONFIG_ENABLE_INSTALLERS == 'true' }
@@ -228,7 +241,7 @@ pipeline {
 
         stage('Code Sign Installer') {
             agent {
-                label 'worker'
+                label getStageLabel('Code Sign Installer')
             }
             when {
                 allOf {
@@ -253,7 +266,7 @@ pipeline {
 
         stage('SBOM Sign') {
             agent {
-                label 'worker'
+                label getStageLabel('SBOM Sign')
             }
             when {
                 allOf {
@@ -281,7 +294,7 @@ pipeline {
 
         stage('Digital Artifact Sign') {
             agent {
-                label 'worker'
+                label getStageLabel('Digital Artifact Sign')
             }
             when {
                 allOf {
@@ -308,7 +321,7 @@ pipeline {
 
         stage('Verify Signing') {
             agent {
-                label 'worker'
+                label getStageLabel('Verify Signing')
             }
             when {
                 allOf {
@@ -335,7 +348,7 @@ pipeline {
 
         stage('Validate SBOM') {
             agent {
-                label 'worker'
+                label getStageLabel('Validate SBOM')
             }
             when {
                 expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
@@ -359,7 +372,7 @@ pipeline {
 
         stage('Smoke Tests') {
             agent {
-                label 'worker'
+                label getStageLabel('Smoke Tests')
             }
             when {
                 allOf {
@@ -394,7 +407,7 @@ pipeline {
 
         stage('Reproducible Compare Build') {
             agent {
-                label 'worker'
+                label getStageLabel('Reproducible Compare Build')
             }
             when {
                 allOf {
@@ -436,7 +449,7 @@ pipeline {
 
         stage('AQA Tests') {
             agent {
-                label 'worker'
+                label getStageLabel('AQA Tests')
             }
             when {
                 allOf {
@@ -461,7 +474,7 @@ pipeline {
 
         stage('TCK Tests') {
             agent {
-                label 'worker'
+                label getStageLabel('TCK Tests')
             }
             when {
                 allOf {
@@ -494,7 +507,7 @@ pipeline {
 
         stage('Publish Artifacts') {
             agent {
-                label 'worker'
+                label getStageLabel('Publish Artifacts')
             }
             when {
                 expression { env.CONFIG_PUBLISH_ARTIFACTS == 'true' }
@@ -531,7 +544,7 @@ pipeline {
 
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
                     try {
-                        node(getNodeLabel()) {
+                        node(getStageLabel('Initialize')) {
                             echo "Final workspace cleanup..."
                             cleanWs notFailBuild: true, deleteDirs: true
                         }
