@@ -142,6 +142,7 @@ def runInDockerContainer(String image, String extraArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
+        sh(script: "docker exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a' 2>&1 || true", returnStatus: true)
 
         withEnv([
             "BUILD_CONTAINER_ID=${containerId}",
@@ -203,6 +204,7 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
+        sh(script: "podman exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a' 2>&1 || true", returnStatus: true)
 
         withEnv([
             "BUILD_CONTAINER_ID=${containerId}",
