@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Build Metadata Writer
 
 Writes a build-metadata.json file from values supplied as CLI arguments and
-environment variables.  All dynamic data is passed in explicitly — nothing is
-read from the shell environment via string interpolation — so the script is
+environment variables.  All dynamic data is passed in explicitly - nothing is
+read from the shell environment via string interpolation - so the script is
 safe to call from any shell context.
 
 Usage:
