@@ -8,7 +8,7 @@ read from the shell environment via string interpolation - so the script is
 safe to call from any shell context.
 
 Usage:
-    python3 build-metadata-writer.py \\
+    python build-metadata-writer.py \\
         --output /path/to/build-metadata.json \\
         --version  jdk-21.0.12+7 \\
         --build-number 42 \\
@@ -26,18 +26,28 @@ The following fields are read from environment variables (set by the pipeline):
     CONFIG_VARIANT
 """
 
+from __future__ import print_function
+
 import argparse
 import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 
 
-class BuildMetadataWriter:
+def _utc_iso(ts):
+    """Return an ISO-8601 UTC timestamp string for the given epoch seconds."""
+    t = time.gmtime(ts)
+    return "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(
+        t.tm_year, t.tm_mon, t.tm_mday,
+        t.tm_hour, t.tm_min, t.tm_sec,
+    )
+
+
+class BuildMetadataWriter(object):
     """Collects build metadata and serialises it to a JSON file."""
 
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(self, args):
         self._output = args.output
         self._version = args.version
         self._build_number = args.build_number
@@ -46,16 +56,15 @@ class BuildMetadataWriter:
         self._stage = args.stage
         self._workspace = args.workspace
 
-    def _collect(self) -> dict:
+    def _collect(self):
         now = time.time()
-        iso = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         return {
             "version":      self._version,
             "buildNumber":  self._build_number,
             "buildUid":     self._build_uid,
             "groupUid":     self._group_uid,
             "timestamp":    int(now),
-            "timestampISO": iso,
+            "timestampISO": _utc_iso(now),
             "stage":        self._stage,
             "workspace":    self._workspace,
             "javaVersion":  os.environ.get("CONFIG_JAVA_TO_BUILD", ""),
@@ -64,18 +73,19 @@ class BuildMetadataWriter:
             "variant":      os.environ.get("CONFIG_VARIANT", ""),
         }
 
-    def write(self) -> None:
+    def write(self):
         metadata = self._collect()
         try:
             with open(self._output, "w") as fh:
                 json.dump(metadata, fh, indent=2)
                 fh.write("\n")
-        except OSError as exc:
-            print(f"ERROR: could not write {self._output}: {exc}", file=sys.stderr)
+        except (IOError, OSError) as exc:
+            print("ERROR: could not write {0}: {1}".format(self._output, exc),
+                  file=sys.stderr)
             sys.exit(1)
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(
         description="Write build-metadata.json for an Adoptium build stage",
         formatter_class=argparse.RawDescriptionHelpFormatter,

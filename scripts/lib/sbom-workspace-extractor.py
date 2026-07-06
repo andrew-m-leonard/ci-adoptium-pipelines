@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 SBOM Workspace Extractor
 
@@ -9,8 +9,10 @@ property is absent; exits with a non-zero code only on hard errors (unreadable
 file, invalid JSON).
 
 Usage:
-    value=$(python3 sbom-workspace-extractor.py --sbom /path/to/sbom.json)
+    value=$(python sbom-workspace-extractor.py --sbom /path/to/sbom.json)
 """
+
+from __future__ import print_function
 
 import argparse
 import json
@@ -21,24 +23,27 @@ import sys
 _PROPERTY_NAME = "Build Workspace Directory"
 
 
-class SbomWorkspaceExtractor:
+class SbomWorkspaceExtractor(object):
     """Parses an Adoptium SBOM and retrieves the build workspace directory."""
 
-    def __init__(self, sbom_path: str) -> None:
+    def __init__(self, sbom_path):
         self._sbom_path = sbom_path
 
-    def _load(self) -> dict:
+    def _load(self):
         try:
             with open(self._sbom_path) as fh:
                 return json.load(fh)
-        except OSError as exc:
-            print(f"ERROR: cannot open SBOM file '{self._sbom_path}': {exc}", file=sys.stderr)
+        except (IOError, OSError) as exc:
+            print("ERROR: cannot open SBOM file '{0}': {1}".format(self._sbom_path, exc),
+                  file=sys.stderr)
             sys.exit(1)
-        except json.JSONDecodeError as exc:
-            print(f"ERROR: invalid JSON in '{self._sbom_path}': {exc}", file=sys.stderr)
+        except ValueError as exc:
+            # json.JSONDecodeError is a subclass of ValueError; both Py2 and Py3 raise ValueError
+            print("ERROR: invalid JSON in '{0}': {1}".format(self._sbom_path, exc),
+                  file=sys.stderr)
             sys.exit(1)
 
-    def extract(self) -> str:
+    def extract(self):
         """Return the Build Workspace Directory value, or an empty string."""
         data = self._load()
         try:
@@ -51,7 +56,7 @@ class SbomWorkspaceExtractor:
         return ""
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(
         description="Extract Build Workspace Directory from an Adoptium SBOM",
         formatter_class=argparse.RawDescriptionHelpFormatter,
