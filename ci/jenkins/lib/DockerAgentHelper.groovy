@@ -133,7 +133,8 @@ def runInDockerContainer(String image, String extraArgs, Closure body) {
         echo "Starting Docker container: ${image}"
         containerId = sh(
             script: """docker run -d --rm \\
-                         --ulimit nofile=65536:65536 \\
+                         --ulimit nofile=1048576:1048576 \\
+                         --pids-limit -1 \\
                          ${extraArgs} \\
                          -v '${hostHome}:${hostHome}:rw' \\
                          -v '${ws}:${ws}:rw' \\
@@ -143,7 +144,6 @@ def runInDockerContainer(String image, String extraArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        sh(script: "docker exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a' 2>&1 || true", returnStatus: true)
 
         withEnv([
             "BUILD_CONTAINER_ID=${containerId}",
@@ -196,7 +196,8 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
         containerId = sh(
             script: """podman run -d --rm \\
                          --userns keep-id \\
-                         --ulimit nofile=65536:65536 \\
+                         --ulimit nofile=1048576:1048576 \\
+                         --pids-limit -1 \\
                          ${extraArgs} \\
                          -v '${hostHome}:${hostHome}:rw,z' \\
                          -v '${ws}:${ws}:rw,z' \\
@@ -206,7 +207,6 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        sh(script: "podman exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a; echo \"=== pids cgroup ===\"; cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids.max 2>/dev/null || echo pids-limit-not-found' 2>&1 || true", returnStatus: true)
 
         withEnv([
             "BUILD_CONTAINER_ID=${containerId}",
