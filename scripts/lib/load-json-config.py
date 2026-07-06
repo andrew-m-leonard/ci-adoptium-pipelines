@@ -60,19 +60,14 @@ def extract_variant_value(value, variant):
     return None
 
 
-def build_node_label(build_label_template, additional_labels):
-    """Build the Build-stage node label from the stageAgentLabels template.
+def build_node_label(build_label_template, additional_labels, target_os, architecture):
+    """Build the fully-resolved Build-stage node label.
 
-    The template is taken verbatim from stageAgentLabels["Build"] in
-    jenkins_job_config.json (e.g. "build&&{os}&&{arch}").  {os} and {arch}
-    placeholders are intentionally left unresolved here — they are resolved at
-    runtime by the Jenkinsfile so that every stage uses the same mechanism.
-
-    If additional_labels are present (from the platform config's
-    additionalNodeLabels field) they are appended with '&&', giving the Build
-    stage any extra hardware/toolchain constraints the platform requires.
+    Resolves {os} and {arch} placeholders in the stageAgentLabels["Build"]
+    template against the concrete target_os and architecture values for this
+    build, then appends any platform additionalNodeLabels with '&&'.
     """
-    label = build_label_template
+    label = build_label_template.replace('{os}', target_os).replace('{arch}', architecture)
     if additional_labels:
         label = label + '&&' + additional_labels
     return label
@@ -159,9 +154,9 @@ def load_configuration(args):
     additional_node_labels = extract_variant_value(platform_config.get('additionalNodeLabels'), variant)
     podman_args = platform_config.get('podmanArgs', '')
 
-    # Build the Build-stage node label from the vendor template + platform additionalNodeLabels
+    # Build the fully-resolved Build-stage node label
     build_label_template = stage_agent_labels.get('Build', 'build&&{os}&&{arch}')
-    node_label = build_node_label(build_label_template, additional_node_labels)
+    node_label = build_node_label(build_label_template, additional_node_labels, target_os, architecture)
 
     # Create pipeline-config.json (new format only)
     pipeline_config = {
