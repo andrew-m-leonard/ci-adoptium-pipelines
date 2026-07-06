@@ -8,7 +8,6 @@
 # Prerequisites:
 #   - temurin-build repository cloned in workspace
 #   - Required build tools installed (make, gcc, etc.)
-#   - Boot JDK installed
 #
 # Required Environment Variables:
 #   WORKSPACE     - Stage workspace directory
@@ -143,26 +142,6 @@ setup_build_environment() {
         fi
         log_debug "Found tool: ${tool}"
     done
-
-    # Check for Java (boot JDK)
-    if ! command -v java &> /dev/null; then
-        log_error "Boot JDK not found in PATH - required for building OpenJDK"
-        log_error "Install a boot JDK (N-1 version of what you're building)"
-        exit 1
-    else
-        local java_version=$(java -version 2>&1 | head -n 1)
-        log_info "Boot JDK: ${java_version}"
-
-        # Set JAVA_HOME if not set
-        if [[ -z "${JAVA_HOME:-}" ]]; then
-            if [[ "$(uname -s)" == "Darwin" ]]; then
-                export JAVA_HOME=$(/usr/libexec/java_home)
-                log_info "Set JAVA_HOME to: ${JAVA_HOME}"
-            else
-                log_warn "JAVA_HOME not set - build may fail"
-            fi
-        fi
-    fi
 
     log_info "Build environment ready"
 }
