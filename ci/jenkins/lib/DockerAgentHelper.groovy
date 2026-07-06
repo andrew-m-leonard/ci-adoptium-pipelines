@@ -206,7 +206,7 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
             returnStdout: true
         ).trim()
         echo "Container started: ${containerId}"
-        sh(script: "podman exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a' 2>&1 || true", returnStatus: true)
+        sh(script: "podman exec '${containerId}' bash -c 'echo \"=== ulimit -a ===\"; ulimit -a; echo \"=== pids cgroup ===\"; cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || cat /sys/fs/cgroup/pids.max 2>/dev/null || echo pids-limit-not-found' 2>&1 || true", returnStatus: true)
 
         withEnv([
             "BUILD_CONTAINER_ID=${containerId}",
