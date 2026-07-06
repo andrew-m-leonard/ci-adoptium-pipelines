@@ -245,10 +245,10 @@ setup_reproducible_build_padding() {
 
     log_section "Setting up reproducible build path padding"
 
-    # Extract configuration for API URL construction
-    local target_os=$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")
-    local architecture=$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")
-    local release=$(get_config_bool "${CONFIG_FILE}" ".parameters.release" "false")
+    # Use CONFIG_* env vars already set by the pipeline (avoids jq dependency)
+    local target_os="${CONFIG_TARGET_OS:-}"
+    local architecture="${CONFIG_ARCHITECTURE:-}"
+    local release="${CONFIG_RELEASE:-false}"
 
     # Remove "_adopt" suffix from SCM_REF if present
     local scm_ref_for_api="${scm_ref/_adopt/}"
@@ -290,9 +290,9 @@ setup_reproducible_build_padding() {
     if curl -L -f -s -o "${sbom_file}" "${api_sbom_url}"; then
         log_info "SBOM downloaded successfully"
 
-        # Extract BUILD_WORKSPACE_DIRECTORY from SBOM
+        # Extract BUILD_WORKSPACE_DIRECTORY from SBOM using Python (no jq dependency)
         local build_workspace_directory
-        build_workspace_directory=$(jq -r '.components[0] | .properties[] | select(.name == "Build Workspace Directory") | .value' "${sbom_file}" 2>/dev/null)
+        build_workspace_directory=$(python3 "${SCRIPT_DIR}/../lib/sbom-workspace-extractor.py" --sbom "${sbom_file}")
 
         if [[ -n "${build_workspace_directory}" && "${build_workspace_directory}" != "null" ]]; then
             log_info "Found BUILD_WORKSPACE_DIRECTORY in SBOM: ${build_workspace_directory}"
@@ -465,42 +465,18 @@ extract_build_metadata() {
         log_warn "spec.gmk not found under ${WORKSPACE}/temurin-build/workspace/build/src/build"
     fi
 
-    # Create build metadata JSON using jq to properly escape values
-    jq -n \
-        --arg version "${version}" \
-        --arg buildNumber "${BUILD_NUMBER}" \
-        --arg buildUid "${BUILD_UID:-}" \
-        --arg groupUid "${GROUP_UID:-}" \
-        --arg timestamp "$(date +%s)" \
-        --arg timestampISO "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg stage "${STAGE_NAME}" \
-        --arg workspace "${WORKSPACE}" \
-        --arg javaVersion "$(get_config_value "${CONFIG_FILE}" ".buildConfig.JAVA_TO_BUILD")" \
-        --arg targetOS "$(get_config_value "${CONFIG_FILE}" ".buildConfig.TARGET_OS")" \
-        --arg architecture "$(get_config_value "${CONFIG_FILE}" ".buildConfig.ARCHITECTURE")" \
-        --arg variant "$(get_config_value "${CONFIG_FILE}" ".buildConfig.VARIANT")" \
-        '{
-            version: $version,
-            buildNumber: $buildNumber,
-            buildUid: $buildUid,
-            groupUid: $groupUid,
-            timestamp: ($timestamp | tonumber),
-            timestampISO: $timestampISO,
-            stage: $stage,
-            workspace: $workspace,
-            javaVersion: $javaVersion,
-            targetOS: $targetOS,
-            architecture: $architecture,
-            variant: $variant
-        }' > "${WORKSPACE}/build-metadata.json"
+    # Create build-metadata.json via a standalone Python script.
+    # Values are passed as CLI arguments — no shell interpolation inside Python.
+    python3 "${SCRIPT_DIR}/../lib/build-metadata-writer.py" \
+        --output    "${WORKSPACE}/build-metadata.json" \
+        --version   "${version}" \
+        --build-number "${BUILD_NUMBER}" \
+        --stage     "${STAGE_NAME}" \
+        --workspace "${WORKSPACE}" \
+        --build-uid "${BUILD_UID:-}" \
+        --group-uid "${GROUP_UID:-}"
 
     log_info "Build metadata saved to build-metadata.json"
-
-    # Display metadata
-    if command -v jq &> /dev/null; then
-        log_debug "Build metadata:"
-        cat "${WORKSPACE}/build-metadata.json" | jq . || true
-    fi
 }
 
 # Organize build outputs into standard structure
