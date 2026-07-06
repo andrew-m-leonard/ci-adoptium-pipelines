@@ -51,7 +51,7 @@ def ensureLibsLoaded() {
 def getStageLabel(String stageName) {
     def labelsJson = env.CONFIG_STAGE_AGENT_LABELS
     if (labelsJson) {
-        def labels = new groovy.json.JsonSlurperClassic().parseText(labelsJson)
+        def labels = new groovy.json.JsonSlurper().parseText(labelsJson)
         def template = labels[stageName]
         if (template) {
             return template
