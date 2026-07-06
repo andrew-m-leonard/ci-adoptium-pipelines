@@ -122,6 +122,18 @@ main() {
     log_section "Build Stage - Complete"
 }
 
+# Resolve the Python interpreter (python3 preferred, falls back to python)
+resolve_python() {
+    if command -v python3 &> /dev/null; then
+        echo "python3"
+    elif command -v python &> /dev/null; then
+        echo "python"
+    else
+        log_error "No Python interpreter found (tried python3, python)"
+        exit 1
+    fi
+}
+
 # Setup build environment
 setup_build_environment() {
     log_info "Setting up build environment"
@@ -292,7 +304,7 @@ setup_reproducible_build_padding() {
 
         # Extract BUILD_WORKSPACE_DIRECTORY from SBOM using Python (no jq dependency)
         local build_workspace_directory
-        build_workspace_directory=$(python3 "${SCRIPT_DIR}/../lib/sbom-workspace-extractor.py" --sbom "${sbom_file}")
+        build_workspace_directory=$($(resolve_python) "${SCRIPT_DIR}/../lib/sbom-workspace-extractor.py" --sbom "${sbom_file}")
 
         if [[ -n "${build_workspace_directory}" && "${build_workspace_directory}" != "null" ]]; then
             log_info "Found BUILD_WORKSPACE_DIRECTORY in SBOM: ${build_workspace_directory}"
@@ -467,7 +479,7 @@ extract_build_metadata() {
 
     # Create build-metadata.json via a standalone Python script.
     # Values are passed as CLI arguments — no shell interpolation inside Python.
-    python3 "${SCRIPT_DIR}/../lib/build-metadata-writer.py" \
+    $(resolve_python) "${SCRIPT_DIR}/../lib/build-metadata-writer.py" \
         --output    "${WORKSPACE}/build-metadata.json" \
         --version   "${version}" \
         --build-number "${BUILD_NUMBER}" \
