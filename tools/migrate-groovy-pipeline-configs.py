@@ -145,7 +145,7 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
         "stageAgentLabels": {
             "Initialize":                 "worker",
             "Build":                      "build&&{os}&&{arch}",
-            "Internal Code Sign":         "eclipse-codesign",
+            "Internal Code Sign":         "worker",
             "Assemble Images":            "build&&{os}&&{arch}",
             "Post-Build Code Sign":       "worker",
             "Build Installers":           "build&&{os}&&{arch}",
