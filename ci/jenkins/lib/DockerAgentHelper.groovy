@@ -133,6 +133,7 @@ def runInDockerContainer(String image, String extraArgs, Closure body) {
         echo "Starting Docker container: ${image}"
         containerId = sh(
             script: """docker run -d --rm \\
+                         --ulimit nofile=65536:65536 \\
                          ${extraArgs} \\
                          -v '${hostHome}:${hostHome}:rw' \\
                          -v '${ws}:${ws}:rw' \\
@@ -195,6 +196,7 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
         containerId = sh(
             script: """podman run -d --rm \\
                          --userns keep-id \\
+                         --ulimit nofile=65536:65536 \\
                          ${extraArgs} \\
                          -v '${hostHome}:${hostHome}:rw,z' \\
                          -v '${ws}:${ws}:rw,z' \\
