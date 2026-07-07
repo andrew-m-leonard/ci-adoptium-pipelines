@@ -83,8 +83,7 @@ Specifies the hardware architecture of the agent.
 
 | Label              | Architecture                         |
 |--------------------|--------------------------------------|
-| `hw.arch.x86`      | x86 (32-bit or generic x86 family)   |
-| `hw.arch.x86-64`   | x86 64-bit (amd64)                   |
+| `hw.arch.x86`      | x86 family (32-bit and 64-bit/amd64) |
 | `hw.arch.aarch64`  | ARM 64-bit (AArch64)                 |
 | `hw.arch.aarch32`  | ARM 32-bit (AArch32 / armv7)         |
 | `hw.arch.ppc64`    | IBM POWER 64-bit big-endian          |
@@ -95,7 +94,9 @@ Specifies the hardware architecture of the agent.
 
 > **Migration note:** the legacy arch token in `stageAgentLabels` was the raw
 > temurin-build `arch` value (e.g. `x64`).  It must be replaced with the
-> appropriate `hw.arch.*` label (see mapping table below).
+> appropriate `hw.arch.*` label (see mapping table below).  Note that both `x64`
+> (64-bit) and `x86-32` (32-bit) map to `hw.arch.x86` — the aqa-tests schema
+> uses `hw.arch.x86` for the whole x86 family.
 
 ---
 
@@ -145,10 +146,10 @@ and the agent label expression used for Jenkins node selection.
 
 | Config key (old camelCase) | New aqa-aligned key      | `sw.os.*` label        | `hw.arch.*` label    |
 |----------------------------|--------------------------|------------------------|----------------------|
-| `x64Linux`                 | `x86-64_linux`           | `sw.os.linux`          | `hw.arch.x86-64`     |
-| `x64Mac`                   | `x86-64_mac`             | `sw.os.mac`            | `hw.arch.x86-64`     |
-| `x64Windows`               | `x86-64_windows`         | `sw.os.windows`        | `hw.arch.x86-64`     |
-| `x64AlpineLinux`           | `x86-64_alpine-linux`    | `sw.os.alpine-linux`   | `hw.arch.x86-64`     |
+| `x64Linux`                 | `x86-64_linux`           | `sw.os.linux`          | `hw.arch.x86`        |
+| `x64Mac`                   | `x86-64_mac`             | `sw.os.mac`            | `hw.arch.x86`        |
+| `x64Windows`               | `x86-64_windows`         | `sw.os.windows`        | `hw.arch.x86`        |
+| `x64AlpineLinux`           | `x86-64_alpine-linux`    | `sw.os.alpine-linux`   | `hw.arch.x86`        |
 | `x32Windows`               | `x86-32_windows`         | `sw.os.windows`        | `hw.arch.x86`        |
 | `aarch64Linux`             | `aarch64_linux`          | `sw.os.linux`          | `hw.arch.aarch64`    |
 | `aarch64Mac`               | `aarch64_mac`            | `sw.os.mac`            | `hw.arch.aarch64`    |
@@ -248,7 +249,7 @@ from the platform entry's `os` and `arch` fields via the mapping below.
 
 | `arch` value in config | `{arch}` resolves to |
 |------------------------|----------------------|
-| `x64`                  | `hw.arch.x86-64`     |
+| `x64`                  | `hw.arch.x86`        |
 | `x86-32`               | `hw.arch.x86`        |
 | `aarch64`              | `hw.arch.aarch64`    |
 | `arm`                  | `hw.arch.aarch32`    |
@@ -262,12 +263,12 @@ from the platform entry's `os` and `arch` fields via the mapping below.
 
 For a build with `"os": "mac"`, `"arch": "aarch64"`:
 
-| Stage          | Template                                 | Resolved                                       |
-|----------------|------------------------------------------|------------------------------------------------|
-| Build          | `ci.role.build&&sw.os.{os}&&hw.arch.{arch}` | `ci.role.build&&sw.os.mac&&hw.arch.aarch64` |
-| Smoke Tests    | `ci.role.build&&sw.os.{os}&&hw.arch.{arch}` | `ci.role.build&&sw.os.mac&&hw.arch.aarch64` |
-| AQA Tests      | `ci.role.build&&hw.arch.{arch}`          | `ci.role.build&&hw.arch.aarch64`               |
-| Initialize     | `ci.role.worker`                         | `ci.role.worker`                               |
+| Stage          | Template                                    | Resolved                                          |
+|----------------|---------------------------------------------|---------------------------------------------------|
+| Build          | `ci.role.build&&sw.os.{os}&&hw.arch.{arch}` | `ci.role.build&&sw.os.mac&&hw.arch.aarch64`       |
+| Smoke Tests    | `ci.role.build&&sw.os.{os}&&hw.arch.{arch}` | `ci.role.build&&sw.os.mac&&hw.arch.aarch64`       |
+| AQA Tests      | `ci.role.test&&hw.arch.{arch}`              | `ci.role.test&&hw.arch.aarch64`                   |
+| Initialize     | `ci.role.worker`                            | `ci.role.worker`                                  |
 
 ---
 

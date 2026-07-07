@@ -68,13 +68,21 @@ repository references that apply regardless of which CI system runs the pipeline
 
 ## `jenkins_job_config.json`
 
-Jenkins-specific configuration. Contains settings that are only meaningful in a Jenkins context:
-where to find the Jenkinsfile, pipeline timeout, default job parameter values, and log rotation policy.
+Jenkins-specific configuration. Contains two groups: **job-creation settings** (`jenkinsfilePath`, `pipelineTimeoutHours`, `jobConfiguration`) used by the seed job only; and **agent-selection settings** (`stageAgentLabels`) read at build runtime by `ConfigHelper.generateJenkinsConfig()` to resolve which node each stage runs on.
 
 ```json
 {
   "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
   "pipelineTimeoutHours": 8,
+  "stageAgentLabels": {
+    "Initialize":            "ci.role.worker",
+    "Build":                 "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "Smoke Tests":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "AQA Tests":             "ci.role.test&&hw.arch.{arch}",
+    "Post-Build Code Sign":  "ci.role.sign&&sw.os.{os}",
+    "Build Installers":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "Publish Artifacts":     "ci.role.publish"
+  },
   "jobConfiguration": {
     "defaultParameters": {
       "VARIANT": "temurin",
@@ -101,7 +109,8 @@ where to find the Jenkinsfile, pipeline timeout, default job parameter values, a
 |---|---|---|---|
 | `jenkinsfilePath` | string | ✅ | Relative path within the pipeline repo to the Jenkinsfile |
 | `pipelineTimeoutHours` | integer | ✅ | Maximum wall-clock hours a pipeline run is allowed before Jenkins aborts it |
-| `jobConfiguration` | object | ✅ | Jenkins job settings |
+| `stageAgentLabels` | object | ✅ | Map of stage name → label template. `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. Read by `ConfigHelper.generateJenkinsConfig()` to produce `jenkins-config.json` |
+| `jobConfiguration` | object | ✅ | Jenkins job settings (seed job only) |
 | `jobConfiguration.defaultParameters` | object | ✅ | Default values for Jenkins build parameters (can be overridden at trigger time) |
 | `jobConfiguration.defaultParameters.VARIANT` | string | ✅ | JVM variant to build, e.g. `"temurin"` |
 | `jobConfiguration.defaultParameters.CLEAN_WORKSPACE_AFTER_STAGE` | boolean | ✅ | Whether to clean the workspace after each stage completes |
@@ -163,7 +172,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
 
 ### `buildConfigurations` platform entry fields
 
-Each key in `buildConfigurations` is a platform name (e.g. `"x64Linux"`) whose value is a platform
+Each key in `buildConfigurations` is a platform name (e.g. `"x86-64_linux"`) whose value is a platform
 configuration object with the following fields.
 
 #### Polymorphic fields

@@ -94,6 +94,11 @@ Ensure jenkins_job_config.json exists and is accessible.
 // Extract default parameters with safe navigation
 def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
 
+// Extract the Initialize stage label from stageAgentLabels so the Jenkinsfile
+// can use it at pipeline-definition time (before CONFIG_STAGE_AGENT_LABELS is set).
+// The Initialize stage is platform-independent so no {os}/{arch} substitution needed.
+def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
+
 // Fetch platform-specific configuration to get os, arch, and variant
 def platformConfig
 def architecture
@@ -243,6 +248,14 @@ pipelineJob(jobName) {
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
+
+        // Read from jenkins_job_config.json stageAgentLabels.Initialize at job-generation
+        // time so the Jenkinsfile can select the correct agent for the Initialize stage
+        // before CONFIG_STAGE_AGENT_LABELS is populated by that stage itself.
+        // This value will not change unless jenkins_job_config.json is updated and the
+        // job is regenerated via the seed job.
+        stringParam('INITIALIZE_LABEL', initializeLabel,
+            'Jenkins node label for the Initialize stage (fixed at job generation from stageAgentLabels.Initialize in jenkins_job_config.json)')
     }
 
     definition {

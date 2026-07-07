@@ -72,7 +72,8 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
                      sparseCheckoutPaths: [
                          [path: 'configurations/*'],
                          [path: 'vendor-scripts/*'],
-                         [path: 'adoptium_pipeline_config.json']
+                         [path: 'adoptium_pipeline_config.json'],
+                         [path: 'jenkins_job_config.json']
                      ]]
                 ]
             ])

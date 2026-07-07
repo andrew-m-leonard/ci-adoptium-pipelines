@@ -13,7 +13,7 @@
  * Helper libraries (loaded after checkout):
  *   - PipelineHelper.groovy     — initializeStage, finalizeStage, executeStageWithTracking
  *   - StageScriptRunner.groovy  — vendor-overridable stage script resolution
- *   - ConfigHelper.groovy       — generatePipelineConfig, summarizePipelineConfig
+ *   - ConfigHelper.groovy       — generatePipelineConfig, generateJenkinsConfig, summarizePipelineConfig
  *   - DockerAgentHelper.groovy  — withBuildAgent() for optional Docker container support
  *   - BuildUidHelper.groovy     — unique build tracking (loaded by PipelineHelper)
  *
@@ -44,22 +44,31 @@ def ensureLibsLoaded() {
 /**
  * Resolve the agent label for a named pipeline stage.
  *
- * Reads CONFIG_STAGE_AGENT_LABELS (a JSON map set by ConfigHelper during
- * Initialize) and looks up the entry for stageName. Substitutes {os} and
- * {arch} with CONFIG_TARGET_OS / CONFIG_ARCHITECTURE. Falls back to 'worker'.
+ * Reads CONFIG_STAGE_AGENT_LABELS (a JSON map set by ConfigHelper.generateJenkinsConfig()
+ * during Initialize) and returns the already-resolved sw.os.* / hw.arch.* label.
+ * For the Initialize stage (evaluated before CONFIG_STAGE_AGENT_LABELS exists)
+ * falls back to the INITIALIZE_LABEL job parameter baked in by the Job DSL.
  */
 def getStageLabel(String stageName) {
+    // CONFIG_STAGE_AGENT_LABELS is populated by ConfigHelper.generateJenkinsConfig()
+    // during the Initialize stage.  Labels are already fully resolved — no
+    // further placeholder substitution is performed here.
     def labelsJson = env.CONFIG_STAGE_AGENT_LABELS
     if (labelsJson) {
         def labels = new groovy.json.JsonSlurper().parseText(labelsJson)
-        def template = labels[stageName]
-        if (template) {
-            return template
-                .replace('{os}',   env.CONFIG_TARGET_OS   ?: '')
-                .replace('{arch}', env.CONFIG_ARCHITECTURE ?: '')
+        def label = labels[stageName]
+        if (label) {
+            return label
         }
     }
-    return 'worker'
+    // CONFIG_STAGE_AGENT_LABELS is not yet set when the Initialize stage agent
+    // block is evaluated (pipeline definition time, before any steps run).
+    // The Job DSL bakes the Initialize label from jenkins_job_config.json into
+    // the INITIALIZE_LABEL job parameter so it is available here.
+    if (stageName == 'Initialize') {
+        return params.INITIALIZE_LABEL ?: 'ci.role.worker'
+    }
+    return 'ci.role.worker'
 }
 
 /**
@@ -89,14 +98,15 @@ pipeline {
                     pipelineHelper.executeStageWithTracking('Initialize') {
                         pipelineHelper.initializeStage('Initialize', [])
 
-                        def config = configHelper.generatePipelineConfig('./config-repo/configurations')
+                        def pipelineConfig = configHelper.generatePipelineConfig('./config-repo')
+                        def jenkinsConfig  = configHelper.generateJenkinsConfig('./config-repo')
 
-                        archiveArtifacts artifacts: 'pipeline-config.json',
+                        archiveArtifacts artifacts: 'pipeline-config.json,jenkins-config.json',
                                        fingerprint: true,
                                        allowEmptyArchive: false
 
-                        configHelper.summarizePipelineConfig(config)
-                        pipelineHelper.ensureBuildDescriptionSet(config)
+                        configHelper.summarizePipelineConfig(pipelineConfig, jenkinsConfig)
+                        pipelineHelper.ensureBuildDescriptionSet(pipelineConfig)
                         pipelineHelper.finalizeStage('Initialize')
                     }
                 }

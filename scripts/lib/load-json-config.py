@@ -25,8 +25,10 @@ from pathlib import Path
 
 # Mapping from temurin-build arch values to aqa-tests hw.arch.* label tokens.
 # Used when resolving {arch} placeholders in stageAgentLabels templates.
+# Note: x64 (x86 64-bit) and x86-32 both map to hw.arch.x86 — the aqa-tests
+# schema uses hw.arch.x86 for the whole x86 family; there is no hw.arch.x86-64.
 ARCH_TO_LABEL = {
-    'x64':     'hw.arch.x86-64',
+    'x64':     'hw.arch.x86',
     'x86-32':  'hw.arch.x86',
     'aarch64': 'hw.arch.aarch64',
     'arm':     'hw.arch.aarch32',
@@ -151,7 +153,7 @@ def build_node_label(build_label_template, additional_labels, target_os, archite
 
 
 def load_configuration(args):
-    """Load JSON configuration and generate pipeline configs"""
+    """Load CI-agnostic JSON configuration and generate pipeline-config.json."""
 
     jdk_version = args.jdk_version
     variant = args.variant
@@ -159,18 +161,6 @@ def load_configuration(args):
     architecture = args.architecture
     config_dir = args.config_dir
     output_dir = args.output_dir
-
-    # Load stageAgentLabels from jenkins_job_config.json when provided.
-    # Fall back to a minimal default so the script works without it.
-    stage_agent_labels = {'Build': 'build&&{os}&&{arch}'}
-    if args.job_config:
-        job_config_path = Path(args.job_config)
-        if not job_config_path.exists():
-            print(f"ERROR: jenkins_job_config.json not found: {job_config_path}", file=sys.stderr)
-            sys.exit(1)
-        with open(job_config_path, 'r') as f:
-            job_config = json.load(f)
-        stage_agent_labels = job_config.get('stageAgentLabels', stage_agent_labels)
 
     # Optional parameters
     # Determine release type from --release-type parameter (defaults to NIGHTLY)
@@ -239,11 +229,14 @@ def load_configuration(args):
     additional_node_labels = extract_variant_value(platform_config.get('additionalNodeLabels'), variant)
     podman_args = platform_config.get('podmanArgs', '')
 
-    # Build the fully-resolved Build-stage node label
-    build_label_template = stage_agent_labels.get('Build', 'build&&{os}&&{arch}')
+    # Build the fully-resolved Build-stage node label using a CI-agnostic default.
+    # CI-specific stageAgentLabels (e.g. from jenkins_job_config.json) are injected
+    # by a separate CI-specific script (e.g. ci/jenkins/lib/load-jenkins-json-config.py)
+    # which augments this file after generation.
+    build_label_template = 'ci.role.build&&sw.os.{os}&&hw.arch.{arch}'
     node_label = build_node_label(build_label_template, additional_node_labels, target_os, architecture)
 
-    # Create pipeline-config.json (new format only)
+    # Create pipeline-config.json (CI-agnostic)
     pipeline_config = {
         'buildConfig': {
             'JAVA_TO_BUILD': openjdk_version,
@@ -275,11 +268,6 @@ def load_configuration(args):
             'buildRepoUrl': build_repo_url,
             'aqaRef': aqa_ref,
             'aqaRepoUrl': aqa_repo_url
-        },
-        'stageAgentLabels': stage_agent_labels,
-        'resolvedStageAgentLabels': {
-            stage: resolve_label_placeholders(template, target_os, architecture)
-            for stage, template in stage_agent_labels.items()
         }
     }
 
@@ -344,7 +332,6 @@ Examples:
     # Optional arguments
     parser.add_argument('--config-dir', default='./configurations', help='Configuration directory (default: ./configurations)')
     parser.add_argument('--output-dir', default='.', help='Output directory for generated configs (default: .)')
-    parser.add_argument('--job-config', default=None, help='Path to jenkins_job_config.json (provides stageAgentLabels)')
 
     # Release type - case-insensitive (will be converted to uppercase)
     parser.add_argument('--release-type', type=str,

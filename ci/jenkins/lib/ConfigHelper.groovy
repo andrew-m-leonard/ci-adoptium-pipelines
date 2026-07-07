@@ -8,27 +8,37 @@
  * writeJSON, fileExists, error, etc.) are called directly — no 'steps.' prefix.
  *
  * Public API:
- *   generatePipelineConfig(configDir='./configurations')
- *     → calls scripts/lib/load-json-config.py to produce pipeline-config.json;
- *       sets CONFIG_VARIANT, CONFIG_TARGET_OS, CONFIG_ARCHITECTURE, CONFIG_JAVA_TO_BUILD,
- *       CONFIG_NODE_LABEL, CONFIG_BUILD_ARGS, CONFIG_RUN_TESTS, CONFIG_ENABLE_INSTALLERS,
- *       CONFIG_SIGN_ARTIFACTS, CONFIG_ENABLE_TCK, CONFIG_PUBLISH_ARTIFACTS, AQA_REF,
- *       SMOKE_TESTS_PASSED env vars; returns the parsed config Map
+ *   generatePipelineConfig(configRepoPath='./config-repo')
+ *     → calls scripts/lib/load-json-config.py (CI-agnostic) to produce
+ *       pipeline-config.json from jdkNN_pipeline_config.json and
+ *       adoptium_pipeline_config.json; sets CONFIG_* / AQA_REF / SMOKE_TESTS_PASSED
+ *       env vars; returns the parsed pipelineConfig Map.
  *
- *   summarizePipelineConfig(config)
- *     → logs key build configuration values
+ *   generateJenkinsConfig(configRepoPath='./config-repo')
+ *     → calls ci/jenkins/lib/load-jenkins-json-config.py to produce a separate
+ *       jenkins-config.json from jenkins_job_config.json; sets
+ *       CONFIG_NODE_LABEL / CONFIG_STAGE_AGENT_LABELS env vars;
+ *       returns the parsed jenkinsConfig Map.
+ *
+ *   summarizePipelineConfig(pipelineConfig, jenkinsConfig)
+ *     → logs key build configuration values from both config objects
  */
 
 /**
- * Generate pipeline-config.json from parameters and adoptium_pipeline_config.json.
+ * Generate pipeline-config.json from job parameters and the config repository.
+ *
+ * Loads jdkNN_pipeline_config.json and adoptium_pipeline_config.json only.
+ * Does not touch jenkins_job_config.json — call generateJenkinsConfig() for that.
  *
  * Resolves BUILD_REF/AQA_REF from job params (if non-empty) or config repo defaults.
- * Sets environment variables for use in when{} blocks.
+ * Sets CI-agnostic CONFIG_* environment variables for use in when{} blocks.
  *
- * @param configDir  Path to the configurations directory (e.g. './config-repo/configurations')
- * @return parsed pipeline-config.json as a Map
+ * @param configRepoPath  Path to the config repository root (e.g. './config-repo').
+ *                        The configurations sub-directory and adoptium_pipeline_config.json
+ *                        are resolved from this root automatically.
+ * @return parsed pipeline-config.json as a Map (pipelineConfig)
  */
-def generatePipelineConfig(String configDir = './configurations') {
+def generatePipelineConfig(String configRepoPath = './config-repo') {
 
     // Validate parameters
     if (params.RUN_REPRODUCIBLE_COMPARE && (!params.SCM_REF || params.SCM_REF.trim().isEmpty())) {
@@ -36,7 +46,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     }
 
     // Load adoptium_pipeline_config.json for vendor defaults
-    def adoptiumConfigFile = './config-repo/adoptium_pipeline_config.json'
+    def adoptiumConfigFile = "${configRepoPath}/adoptium_pipeline_config.json"
     if (!fileExists(adoptiumConfigFile)) {
         error("adoptium_pipeline_config.json not found in config repo — this file is required")
     }
@@ -70,6 +80,7 @@ def generatePipelineConfig(String configDir = './configurations') {
     echo "  AQA Repo URL  : ${aqaRepoUrl}"
 
     // Build Python command arguments
+    def configDir = "${configRepoPath}/configurations"
     def pythonArgs = [
         "--jdk-version jdk${params.JDK_VERSION}",
         "--variant ${params.VARIANT}",
@@ -110,84 +121,104 @@ def generatePipelineConfig(String configDir = './configurations') {
         pythonArgs.add("--ea-beta-build")
     }
 
-    // Pass jenkins_job_config.json so stageAgentLabels flow into pipeline-config.json
-    def jobConfigFile = './config-repo/jenkins_job_config.json'
-    if (fileExists(jobConfigFile)) {
-        pythonArgs.add("--job-config ${jobConfigFile}")
-    }
-
-    // Execute Python script to generate configuration
+    // Execute CI-agnostic Python script — produces pipeline-config.json
     sh "python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}"
 
-    // Read and return the generated configuration
-    def config = readJSON(file: 'pipeline-config.json')
+    // Read the generated pipeline-config.json
+    def pipelineConfig = readJSON(file: 'pipeline-config.json')
 
-    // Set TCK enablement from parameter
-    config.parameters.enableTCK = params.ENABLE_TCK
+    // Set TCK enablement from parameter and persist
+    pipelineConfig.parameters.enableTCK = params.ENABLE_TCK
+    writeJSON(file: 'pipeline-config.json', json: pipelineConfig, pretty: 4)
 
-    // Update pipeline-config.json with TCK setting
-    writeJSON(file: 'pipeline-config.json', json: config, pretty: 4)
-
-    // Set environment variables for use in when{} blocks
-    env.CONFIG_VARIANT           = config.buildConfig.VARIANT
-    env.CONFIG_TARGET_OS         = config.buildConfig.TARGET_OS
-    env.CONFIG_ARCHITECTURE      = config.buildConfig.ARCHITECTURE
-    env.CONFIG_JAVA_TO_BUILD     = config.buildConfig.JAVA_TO_BUILD
-    env.CONFIG_NODE_LABEL        = config.buildConfig.NODE_LABEL ?: 'worker'
-    env.CONFIG_BUILD_ARGS        = config.buildConfig.BUILD_ARGS ?: ''
-    env.CONFIG_CONFIGURE_ARGS    = config.buildConfig.CONFIGURE_ARGS ?: ''
-    env.CONFIG_BUILD_REF         = config.refs.buildRef ?: 'master'
-    env.CONFIG_BUILD_REPO_URL    = config.refs.buildRepoUrl ?: ''
-    env.CONFIG_CLEAN_WORKSPACE   = config.parameters.cleanWorkspaceAfterStage?.toString() ?: 'false'
-    env.CONFIG_EA_BETA_BUILD     = config.parameters.eaBetaBuild?.toString() ?: 'false'
-    env.CONFIG_COMPARE_BUILD     = config.parameters.compareBuild?.toString() ?: 'false'
-    env.CONFIG_DOCKER_IMAGE      = config.buildConfig.DOCKER_IMAGE ?: ''
-    env.CONFIG_DOCKER_REGISTRY   = config.buildConfig.DOCKER_REGISTRY ?: ''
-    env.CONFIG_DOCKER_CREDENTIAL = config.buildConfig.DOCKER_CREDENTIAL ?: ''
-    env.CONFIG_DOCKER_ARGS       = config.buildConfig.DOCKER_ARGS ?: ''
-    env.CONFIG_PODMAN_ARGS       = config.buildConfig.PODMAN_ARGS ?: ''
-    env.CONFIG_RUN_TESTS         = config.parameters.enableTests.toString()
-    env.CONFIG_ENABLE_INSTALLERS = config.parameters.enableInstallers.toString()
-    env.CONFIG_SIGN_ARTIFACTS    = config.parameters.enableSigner.toString()
-    env.CONFIG_ENABLE_TCK        = config.parameters.enableTCK.toString()
+    // Set CI-agnostic environment variables for use in when{} blocks
+    env.CONFIG_VARIANT           = pipelineConfig.buildConfig.VARIANT
+    env.CONFIG_TARGET_OS         = pipelineConfig.buildConfig.TARGET_OS
+    env.CONFIG_ARCHITECTURE      = pipelineConfig.buildConfig.ARCHITECTURE
+    env.CONFIG_JAVA_TO_BUILD     = pipelineConfig.buildConfig.JAVA_TO_BUILD
+    env.CONFIG_NODE_LABEL        = pipelineConfig.buildConfig.NODE_LABEL ?: 'worker'
+    env.CONFIG_BUILD_ARGS        = pipelineConfig.buildConfig.BUILD_ARGS ?: ''
+    env.CONFIG_CONFIGURE_ARGS    = pipelineConfig.buildConfig.CONFIGURE_ARGS ?: ''
+    env.CONFIG_BUILD_REF         = pipelineConfig.refs.buildRef ?: 'master'
+    env.CONFIG_BUILD_REPO_URL    = pipelineConfig.refs.buildRepoUrl ?: ''
+    env.CONFIG_CLEAN_WORKSPACE   = pipelineConfig.parameters.cleanWorkspaceAfterStage?.toString() ?: 'false'
+    env.CONFIG_EA_BETA_BUILD     = pipelineConfig.parameters.eaBetaBuild?.toString() ?: 'false'
+    env.CONFIG_COMPARE_BUILD     = pipelineConfig.parameters.compareBuild?.toString() ?: 'false'
+    env.CONFIG_DOCKER_IMAGE      = pipelineConfig.buildConfig.DOCKER_IMAGE ?: ''
+    env.CONFIG_DOCKER_REGISTRY   = pipelineConfig.buildConfig.DOCKER_REGISTRY ?: ''
+    env.CONFIG_DOCKER_CREDENTIAL = pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: ''
+    env.CONFIG_DOCKER_ARGS       = pipelineConfig.buildConfig.DOCKER_ARGS ?: ''
+    env.CONFIG_PODMAN_ARGS       = pipelineConfig.buildConfig.PODMAN_ARGS ?: ''
+    env.CONFIG_RUN_TESTS         = pipelineConfig.parameters.enableTests.toString()
+    env.CONFIG_ENABLE_INSTALLERS = pipelineConfig.parameters.enableInstallers.toString()
+    env.CONFIG_SIGN_ARTIFACTS    = pipelineConfig.parameters.enableSigner.toString()
+    env.CONFIG_ENABLE_TCK        = pipelineConfig.parameters.enableTCK.toString()
     env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
-    env.AQA_REF                  = config.refs.aqaRef
+    env.AQA_REF                  = pipelineConfig.refs.aqaRef
     env.SMOKE_TESTS_PASSED       = 'false'
 
-    // Serialise resolvedStageAgentLabels map so the Jenkinsfile can resolve
-    // per-stage agent labels without re-reading the config file on every agent
-    // allocation.  The Python script has already substituted {os} and {arch}
-    // with the correct sw.os.* / hw.arch.* label schema tokens.
-    // Fall back to the raw stageAgentLabels if the resolved map is absent
-    // (e.g. when loading a pipeline-config.json generated by an older tool).
+    return pipelineConfig
+}
+
+/**
+ * Generate jenkins-config.json from jenkins_job_config.json.
+ *
+ * Must be called after generatePipelineConfig() so that pipeline-config.json
+ * already exists (TARGET_OS and ARCHITECTURE are read from it to resolve label
+ * placeholders).  Writes a separate jenkins-config.json — pipeline-config.json
+ * is never modified.
+ *
+ * Updates env vars:
+ *   CONFIG_NODE_LABEL         — resolved Build-stage node label (with additionalNodeLabels)
+ *   CONFIG_STAGE_AGENT_LABELS — JSON map of all resolved stage labels
+ *
+ * @param configRepoPath  Path to the config repository root (contains jenkins_job_config.json).
+ * @return parsed jenkins-config.json as a Map (jenkinsConfig)
+ */
+def generateJenkinsConfig(String configRepoPath = './config-repo') {
+    sh "python3 ci/jenkins/lib/load-jenkins-json-config.py" +
+       " --config-repo-path ${configRepoPath}" +
+       " --pipeline-config  ./pipeline-config.json" +
+       " --output           ./jenkins-config.json"
+
+    def jenkinsConfig = readJSON(file: 'jenkins-config.json')
+
+    // Update node label env var to the Jenkins schema-resolved Build label
+    env.CONFIG_NODE_LABEL = jenkinsConfig.buildNodeLabel ?: env.CONFIG_NODE_LABEL ?: 'worker'
+
+    // Serialise resolvedStageAgentLabels so the Jenkinsfile can resolve per-stage
+    // agent labels without re-reading the config file on every agent allocation.
     env.CONFIG_STAGE_AGENT_LABELS = groovy.json.JsonOutput.toJson(
-        config.resolvedStageAgentLabels ?: config.stageAgentLabels ?: [:]
+        jenkinsConfig.resolvedStageAgentLabels ?: jenkinsConfig.stageAgentLabels ?: [:]
     )
 
-    return config
+    return jenkinsConfig
 }
 
 /**
  * Display key configuration values in a consistent format.
+ *
+ * @param pipelineConfig  Map returned by generatePipelineConfig()
+ * @param jenkinsConfig   Map returned by generateJenkinsConfig() (optional)
  */
-def summarizePipelineConfig(config) {
+def summarizePipelineConfig(def pipelineConfig, def jenkinsConfig = null) {
     echo "Build Configuration:"
-    echo "  JDK Version: ${config.buildConfig.JAVA_TO_BUILD}"
-    echo "  Variant: ${config.buildConfig.VARIANT}"
-    echo "  OS: ${config.buildConfig.TARGET_OS}"
-    echo "  Architecture: ${config.buildConfig.ARCHITECTURE}"
-    echo "  Node Label: ${config.buildConfig.NODE_LABEL}"
-    echo "  Build Args: ${config.buildConfig.BUILD_ARGS}"
-    echo "  Docker Image: ${config.buildConfig.DOCKER_IMAGE ?: '(none)'}"
-    echo "  Docker Registry: ${config.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
-    echo "  Docker Credential: ${config.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"
-    echo "  Docker Args: ${config.buildConfig.DOCKER_ARGS ?: '(none)'}"
-    echo "  Podman Args: ${config.buildConfig.PODMAN_ARGS ?: '(none)'}"
-    echo "Stage Agent Labels:"
-    // resolvedStageAgentLabels has {os}/{arch} already substituted to
-    // sw.os.* / hw.arch.* tokens by load-json-config.py
-    (config.resolvedStageAgentLabels ?: config.stageAgentLabels ?: [:]).each { stage, label ->
-        echo "  ${stage}: ${label}"
+    echo "  JDK Version: ${pipelineConfig.buildConfig.JAVA_TO_BUILD}"
+    echo "  Variant: ${pipelineConfig.buildConfig.VARIANT}"
+    echo "  OS: ${pipelineConfig.buildConfig.TARGET_OS}"
+    echo "  Architecture: ${pipelineConfig.buildConfig.ARCHITECTURE}"
+    echo "  Build Args: ${pipelineConfig.buildConfig.BUILD_ARGS}"
+    echo "  Docker Image: ${pipelineConfig.buildConfig.DOCKER_IMAGE ?: '(none)'}"
+    echo "  Docker Registry: ${pipelineConfig.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
+    echo "  Docker Credential: ${pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"
+    echo "  Docker Args: ${pipelineConfig.buildConfig.DOCKER_ARGS ?: '(none)'}"
+    echo "  Podman Args: ${pipelineConfig.buildConfig.PODMAN_ARGS ?: '(none)'}"
+    if (jenkinsConfig) {
+        echo "Stage Agent Labels (resolved):"
+        (jenkinsConfig.resolvedStageAgentLabels ?: [:]).each { stage, label ->
+            echo "  ${stage}: ${label}"
+        }
+        echo "  Build Node Label: ${jenkinsConfig.buildNodeLabel ?: '(none)'}"
     }
 }
 

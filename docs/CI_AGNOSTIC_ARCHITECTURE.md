@@ -128,7 +128,7 @@ In Jenkins, `initializeStage()` calls `copyArtifacts` to pull artifacts from the
 
 ```
 Initialize stage
-  → archiveArtifacts pipeline-config.json
+  → archiveArtifacts pipeline-config.json, jenkins-config.json
        ↓
 Each subsequent stage
   copyArtifacts → INPUT_ARTIFACTS_DIR    ← stage reads from here
@@ -143,7 +143,7 @@ The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the
 
 | # | Stage | Script | Prerequisites | Key Outputs |
 |---|---|---|---|---|
-| 01 | Initialize | *(ConfigHelper.groovy + load-json-config.py)* | — | `pipeline-config.json` |
+| 01 | Initialize | *(ConfigHelper.groovy + load-json-config.py + load-jenkins-json-config.py)* | — | `pipeline-config.json`, `jenkins-config.json` |
 | 02 | Build | `02-build.sh` | Initialize | JDK tarballs/zips, metadata, SBOMs |
 | 03 | Internal Code Sign | `03-internal-code-sign.sh` | Build | Signed JMODs (macOS/Windows, JDK ≥ 11) |
 | 04 | Assemble Images | `04-assemble-images.sh` | Internal Code Sign | Assembled JDK image |
@@ -247,7 +247,8 @@ ci-adoptium-pipelines/
 │   │   ├── Jenkinsfile.launch              # Multi-platform launch pipeline
 │   │   ├── lib/
 │   │   │   ├── BuildUidHelper.groovy       # BUILD_UID tracking & stage results
-│   │   │   ├── ConfigHelper.groovy         # pipeline-config.json generation
+│   │   │   ├── ConfigHelper.groovy         # pipeline-config.json + jenkins-config.json generation
+│   │   │   ├── load-jenkins-json-config.py # Jenkins-specific: jenkins-config.json generation
 │   │   │   ├── PipelineHelper.groovy       # Stage lifecycle
 │   │   │   └── StageScriptRunner.groovy    # Vendor-override script resolution
 │   │   └── job-dsl/
@@ -296,7 +297,7 @@ ci-adoptium-pipelines/
 ```
 ci-temurin-config/
 ├── adoptium_pipeline_config.json           # Pipeline defaults (repo URLs, branches, variant)
-├── jenkins_job_config.json                 # Job DSL settings (log rotation, default params)
+├── jenkins_job_config.json                 # Job DSL settings + stage agent label templates
 ├── configurations/
 │   ├── jdk8u_pipeline_config.json          # Per-version platform build matrix
 │   ├── jdk11u_pipeline_config.json

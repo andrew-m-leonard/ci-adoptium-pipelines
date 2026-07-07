@@ -20,7 +20,7 @@ The config repo is the single source of all externalized settings. It must conta
 ```
 <config-repo>/
 ├── adoptium_pipeline_config.json          # CI-agnostic defaults and repo pointers
-├── jenkins_job_config.json                # Jenkins-specific job settings
+├── jenkins_job_config.json                # Jenkins-specific job and agent settings
 ├── configurations/
 │   ├── jdk8u_pipeline_config.json         # Per-version platform build settings
 │   ├── jdk11u_pipeline_config.json
@@ -84,17 +84,29 @@ This is the top-level config file that glues everything together. It tells the s
 
 ---
 
-### 2. `jenkins_job_config.json` — Jenkins-specific job settings
+### 2. `jenkins_job_config.json` — Jenkins-specific job and agent settings
 
 **Location**: root of the config repo  
-**Consumed by**: seed job only (`seed_job_consolidated.groovy`)
+**Consumed by**: seed job (`seed_job_consolidated.groovy`) at job-creation time, and by `ConfigHelper.generateJenkinsConfig()` at build runtime (via `ci/jenkins/lib/load-jenkins-json-config.py`)
 
-Contains settings that are Jenkins-specific and only needed at job creation time. The build pipeline itself never reads this file.
+Contains two distinct groups of settings:
+
+- **Job-creation settings** (`pipelineTimeoutHours`, `jobConfiguration`) — used by the seed job to configure Jenkins job definitions. Not needed at build runtime.
+- **Agent-selection settings** (`stageAgentLabels`) — used at build runtime to resolve which Jenkins node each pipeline stage runs on. The `{os}` and `{arch}` placeholders are substituted with `sw.os.*` / `hw.arch.*` schema label tokens derived from the platform's `os` and `arch` fields.
 
 **Example structure**:
 ```json
 {
   "pipelineTimeoutHours": 8,
+  "stageAgentLabels": {
+    "Initialize":            "ci.role.worker",
+    "Build":                 "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "Smoke Tests":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "AQA Tests":             "ci.role.test&&hw.arch.{arch}",
+    "Post-Build Code Sign":  "ci.role.sign&&sw.os.{os}",
+    "Build Installers":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "Publish Artifacts":     "ci.role.publish"
+  },
   "jobConfiguration": {
     "defaultParameters": {
       "RUN_TESTS": false,
@@ -113,7 +125,11 @@ Contains settings that are Jenkins-specific and only needed at job creation time
 }
 ```
 
-**How it is loaded**: Fetched from `raw.githubusercontent.com` during seed job execution alongside `adoptium_pipeline_config.json`. It is never read at runtime by the build pipeline or the local runner.
+**How it is loaded**:
+
+- **Seed job** — fetched from `raw.githubusercontent.com` alongside `adoptium_pipeline_config.json`; used to set log rotation and default parameter values on generated jobs.
+- **Build pipeline** — sparse-checked out into `config-repo/` alongside `adoptium_pipeline_config.json`; then read by `ci/jenkins/lib/load-jenkins-json-config.py` (called from `ConfigHelper.generateJenkinsConfig()`) to produce `jenkins-config.json`. See §4 below.
+- **Local runner** — not consumed; `jenkins_job_config.json` is Jenkins-specific and the local runner has no equivalent.
 
 ---
 
@@ -129,37 +145,30 @@ One file per JDK version. Describes every supported build platform and its platf
 {
   "openjdkVersion": "jdk21u",
   "buildConfigurations": {
-    "aarch64Mac": {
+    "aarch64_mac": {
       "os": "mac",
       "arch": "aarch64",
-      "additionalNodeLabels": "xcode15.0.1",
+      "additionalNodeLabels": "sw.tool.xcode.15_0_1",
       "configureArgs": "--enable-dtrace",
       "buildArgs": {
         "temurin": "--create-jre-image --create-sbom",
         "hotspot": "--create-jre-image"
       },
-      "dockerImage": "",
-      "test": {
-        "nightly": ["sanity.openjdk"],
-        "weekly": ["sanity.openjdk", "sanity.system"],
-        "release": ["sanity.openjdk", "sanity.system", "extended.openjdk"]
-      }
+      "dockerImage": ""
     },
-    "x64Linux": {
+    "x86-64_linux": {
       "os": "linux",
       "arch": "x64",
       "additionalNodeLabels": "",
       "dockerImage": "adoptopenjdk/centos7_build_image",
       "configureArgs": "--enable-unlimited-crypto",
-      "buildArgs": "--create-jre-image --create-sbom",
-      "test": {
-        "nightly": ["sanity.openjdk", "sanity.system"],
-        "weekly": ["sanity.openjdk", "sanity.system", "extended.system"]
-      }
+      "buildArgs": "--create-jre-image --create-sbom"
     }
   }
 }
 ```
+
+> **Platform key naming**: keys follow the aqa-tests `PLATFORM_MAP` convention — `{arch}_{os}` using hyphens within compound segments, e.g. `x86-64_linux`, `aarch64_mac`. The `os` and `arch` **field values** inside each entry retain their temurin-build identifiers (`"os": "mac"`, `"arch": "x64"`, etc.) and do **not** change. See [`LABEL_SCHEMA.md`](./LABEL_SCHEMA.md) for the full key mapping table.
 
 **How it is loaded**:
 
@@ -171,14 +180,14 @@ The file is located by [`scripts/lib/load-json-config.py`](../scripts/lib/load-j
 
 `--config-dir` defaults to `./configurations` and is set to `./config-repo/configurations` (Jenkins) or resolved from `configFilePrefix` in `adoptium_pipeline_config.json` (local runner).
 
-The script extracts the entry for the requested platform key (e.g. `aarch64Mac`), merges it with runtime parameters, and writes the output to `pipeline-config.json`.
+The script extracts the entry for the requested platform key (e.g. `aarch64_mac`), merges it with runtime parameters, and writes the output to `pipeline-config.json`.
 
 #### Platform configuration fields
 
 | Field | Type | Description |
 |---|---|---|
-| `os` | string | Operating system: `mac`, `linux`, `windows`, `aix` |
-| `arch` | string | Architecture: `aarch64`, `x64`, `x32`, `ppc64` |
+| `os` | string | Operating system: `mac`, `linux`, `windows`, `aix`, `alpine-linux`, `solaris`, `zos` |
+| `arch` | string | Architecture: `aarch64`, `x64`, `x86-32`, `ppc64`, `ppc64le`, `s390x`, `arm`, `riscv64`, `sparcv9` |
 | `buildArgs` | string or object | Build arguments passed to `make-adopt-build-farm.sh` |
 | `configureArgs` | string or object | Arguments passed to OpenJDK `configure` |
 | `dockerImage` | string or object | Docker image to use for the build |
@@ -186,10 +195,9 @@ The script extracts the entry for the requested platform key (e.g. `aarch64Mac`)
 | `dockerRegistry` | string | Docker registry URL |
 | `dockerCredential` | string | Jenkins credential ID for the Docker registry |
 | `dockerArgs` | string | Additional arguments passed to `docker run` |
-| `additionalNodeLabels` | string or object | Extra Jenkins node labels appended to the base label |
+| `additionalNodeLabels` | string or object | Extra Jenkins node labels ANDed onto the base label. Must use the `sw.*` / `hw.*` / `ci.*` schema (e.g. `sw.tool.xcode.15_0_1`, `sw.os.windows.2022&&sw.tool.vs.2022`) |
 | `additionalTestLabels` | string or object | Extra labels for test nodes |
 | `additionalTestParams` | object | Extra parameters forwarded to the test stage |
-| `test` | object | Test lists keyed by build type (`nightly`, `weekly`, `release`) |
 | `cleanWorkspaceAfterBuild` | boolean | Whether to clean the workspace after the build stage |
 
 Fields marked as "string or object" support **variant-specific values**: supply either a plain string (applies to all variants) or an object keyed by variant name:
@@ -208,40 +216,15 @@ Fields marked as "string or object" support **variant-specific values**: supply 
 
 `load-json-config.py` detects which form is used, extracts the value for the active variant, and falls back to `"default"` if the variant key is absent.
 
-#### Test configuration
-
-```json
-"test": {
-  "nightly": ["sanity.openjdk", "sanity.system"],
-  "weekly":  ["sanity.openjdk", "sanity.system", "extended.system"],
-  "release": ["sanity.openjdk", "extended.openjdk", "special.functional"]
-}
-```
-
-Use `"test": "default"` to inherit the default test list without listing targets explicitly.
-
-#### Platform keys
-
-Platform keys are constructed as `{architecture}{OS}` (camel-case), e.g.:
-
-| Key | Platform |
-|---|---|
-| `aarch64Mac` | Apple Silicon Mac |
-| `x64Mac` | Intel Mac |
-| `x64Linux` | Intel/AMD Linux |
-| `aarch64Linux` | ARM Linux |
-| `x64Windows` | Intel/AMD Windows |
-| `ppc64Aix` | PowerPC AIX |
-
 ---
 
-### 4. `pipeline-config.json` — Generated runtime config
+### 4. `pipeline-config.json` — CI-agnostic generated runtime config
 
 **Location**: workspace root (Jenkins) or `<workspace>/pipeline-config.json` (local)  
-**Generated by**: `scripts/lib/load-json-config.py` during the Initialize stage  
+**Generated by**: `scripts/lib/load-json-config.py` via `ConfigHelper.generatePipelineConfig()` during the Initialize stage  
 **Consumed by**: every subsequent pipeline stage via the `CONFIG_FILE` environment variable; also read by `PipelineHelper.groovy` and `StageScriptRunner.groovy` to gate stage execution
 
-This file is not stored in any repository — it is generated fresh for each build by combining the per-version JSON config with the runtime parameters supplied to the job.
+This file is not stored in any repository — it is generated fresh for each build by combining the per-version JSON config with the runtime parameters supplied to the job. It is CI-agnostic: it contains no Jenkins-specific agent labels.
 
 **Structure**:
 ```json
@@ -253,9 +236,8 @@ This file is not stored in any repository — it is generated fresh for each bui
     "VARIANT": "temurin",
     "BUILD_ARGS": "--create-jre-image --create-sbom",
     "CONFIGURE_ARGS": "--enable-dtrace",
-    "NODE_LABEL": "build&&mac&&aarch64",
-    "DOCKER_IMAGE": "",
-    "TEST_LIST": ["sanity.openjdk"]
+    "NODE_LABEL": "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
+    "DOCKER_IMAGE": ""
   },
   "parameters": {
     "enableTests": true,
@@ -280,7 +262,36 @@ On Jenkins it is immediately archived as a build artifact so that subsequent sta
 
 ---
 
-### 5. `vendor-scripts/` — Optional stage overrides
+### 5. `jenkins-config.json` — Jenkins-specific generated runtime config
+
+**Location**: workspace root (Jenkins only)  
+**Generated by**: `ci/jenkins/lib/load-jenkins-json-config.py` via `ConfigHelper.generateJenkinsConfig()` during the Initialize stage  
+**Consumed by**: `ConfigHelper.generateJenkinsConfig()` which reads it back to set `CONFIG_NODE_LABEL` and `CONFIG_STAGE_AGENT_LABELS` environment variables used for Jenkins agent selection
+
+This file is Jenkins-specific and has no equivalent in the local runner. It is archived alongside `pipeline-config.json` as a build artifact.
+
+**Structure**:
+```json
+{
+  "stageAgentLabels": {
+    "Initialize":  "ci.role.worker",
+    "Build":       "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "Smoke Tests": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}"
+  },
+  "resolvedStageAgentLabels": {
+    "Initialize":  "ci.role.worker",
+    "Build":       "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
+    "Smoke Tests": "ci.role.build&&sw.os.mac&&hw.arch.aarch64"
+  },
+  "buildNodeLabel": "ci.role.build&&sw.os.mac&&hw.arch.aarch64"
+}
+```
+
+The `resolvedStageAgentLabels` map has all `{os}` and `{arch}` placeholders substituted with the `sw.os.*` / `hw.arch.*` label schema tokens corresponding to the platform's `os` and `arch` field values. See [`LABEL_SCHEMA.md`](./LABEL_SCHEMA.md) for the substitution mapping.
+
+---
+
+### 6. `vendor-scripts/` — Optional stage overrides
 
 **Location**: `vendor-scripts/` directory of the config repo  
 **Consumed by**: `StageScriptRunner.groovy` (Jenkins) and `StageResolver` (local runner)
@@ -322,11 +333,23 @@ Launch Job (Jenkinsfile.launch)
 Build Pipeline (Jenkinsfile.declarative)
   │
   ├─ Initialize stage (PipelineHelper + ConfigHelper)
-  │     git sparse-checkout config-repo (configurations/*, vendor-scripts/*, adoptium_pipeline_config.json)
-  │     reads config-repo/adoptium_pipeline_config.json   ← buildRef, aqaRef defaults
-  │     runs scripts/lib/load-json-config.py              ← merges params + per-version JSON
-  │     writes pipeline-config.json
-  │     archives pipeline-config.json as build artifact
+  │     git sparse-checkout config-repo
+  │       (configurations/*, vendor-scripts/*, adoptium_pipeline_config.json,
+  │        jenkins_job_config.json)
+  │
+  │     ConfigHelper.generatePipelineConfig()  [CI-agnostic]
+  │       reads config-repo/adoptium_pipeline_config.json  ← buildRef, aqaRef defaults
+  │       runs scripts/lib/load-json-config.py             ← merges params + per-version JSON
+  │       writes pipeline-config.json
+  │
+  │     ConfigHelper.generateJenkinsConfig()  [Jenkins-specific]
+  │       runs ci/jenkins/lib/load-jenkins-json-config.py
+  │         reads config-repo/jenkins_job_config.json      ← stageAgentLabels templates
+  │         reads pipeline-config.json                     ← TARGET_OS, ARCHITECTURE
+  │         writes jenkins-config.json                     ← resolved stage labels
+  │       sets CONFIG_NODE_LABEL, CONFIG_STAGE_AGENT_LABELS env vars
+  │
+  │     archives pipeline-config.json, jenkins-config.json as build artifacts
   │
   └─ Every subsequent stage (PipelineHelper.initializeStage)
         clean workspace
@@ -345,6 +368,7 @@ run-pipeline.py
   │     reads config-repo/adoptium_pipeline_config.json   ← variant, buildRef, aqaRef defaults
   │     runs scripts/lib/load-json-config.py              ← merges CLI args + per-version JSON
   │     writes <workspace>/pipeline-config.json
+  │     (jenkins_job_config.json is not read — Jenkins-specific)
   │
   └─ Every subsequent stage
         StageResolver.run(stem, env)
@@ -441,10 +465,10 @@ Sensitive settings belong in the config repo:
 
 ### Platform key not found
 
-**Error**: `Platform 'aarch64Mac' not found in configuration`
+**Error**: `Platform 'aarch64_mac' not found in configuration`
 
 1. List available keys: `jq '.buildConfigurations | keys' configurations/jdkNN_pipeline_config.json`
-2. Verify the OS and architecture match the `{arch}{OS}` key convention.
+2. Verify the platform key uses the aqa-aligned `{arch}_{os}` format (e.g. `x86-64_linux`, not `x64Linux`).
 3. Add the missing platform entry to the config file.
 
 ### Variant-specific value falls back unexpectedly
@@ -460,5 +484,5 @@ Each field must consistently use either a plain string or a variant-keyed object
 ## Related Documentation
 
 - [CI_AGNOSTIC_ARCHITECTURE.md](CI_AGNOSTIC_ARCHITECTURE.md) — overall architecture overview, artifact flow, per-stage summary
-- [PIPELINE_ORCHESTRATION_ARCHITECTURE.md](PIPELINE_ORCHESTRATION_ARCHITECTURE.md) — job hierarchy and launch pipeline
+- [LABEL_SCHEMA.md](LABEL_SCHEMA.md) — node label schema reference and platform-to-label mapping
 - [JOB_DSL_AUTOMATION.md](JOB_DSL_AUTOMATION.md) — seed job and job creation

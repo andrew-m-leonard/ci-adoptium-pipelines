@@ -41,9 +41,9 @@ openjdk-build-seed-job (Freestyle, self-updating)
        if REGENERATE_JOBS=true (or build #1): calls jobDsl(openjdk_build_pipeline.groovy)
          → creates/updates platform build jobs:
              openjdk-builds/jdk21/
-               ├── jdk21-x64Linux-build-pipeline
-               ├── jdk21-aarch64Linux-build-pipeline
-               └── jdk21-aarch64Mac-build-pipeline  ...
+               ├── jdk21-x86-64_linux-build-pipeline
+               ├── jdk21-aarch64_linux-build-pipeline
+               └── jdk21-aarch64_mac-build-pipeline  ...
        triggers all selected platform builds in parallel
 ```
 
@@ -103,8 +103,8 @@ Check that the following jobs were created (exact versions depend on `adoptium_p
 ### Step 4: Create Platform Build Jobs
 
 Run a launch job (e.g. `21-launch-build-pipelines`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
-- `openjdk-builds/jdk21/jdk21-x64Linux-build-pipeline`
-- `openjdk-builds/jdk21/jdk21-aarch64Mac-build-pipeline`
+- `openjdk-builds/jdk21/jdk21-x86-64_linux-build-pipeline`
+- `openjdk-builds/jdk21/jdk21-aarch64_mac-build-pipeline`
 
 Platform jobs are also automatically created on the first run of each launch job (build #1).
 
