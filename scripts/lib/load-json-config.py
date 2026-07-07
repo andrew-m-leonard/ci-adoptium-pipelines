@@ -23,11 +23,76 @@ import argparse
 from pathlib import Path
 
 
+# Mapping from temurin-build arch values to aqa-tests hw.arch.* label tokens.
+# Used when resolving {arch} placeholders in stageAgentLabels templates.
+ARCH_TO_LABEL = {
+    'x64':     'hw.arch.x86-64',
+    'x86-32':  'hw.arch.x86',
+    'aarch64': 'hw.arch.aarch64',
+    'arm':     'hw.arch.aarch32',
+    'ppc64':   'hw.arch.ppc64',
+    'ppc64le': 'hw.arch.ppc64le',
+    's390x':   'hw.arch.s390x',
+    'riscv64': 'hw.arch.riscv',
+    'sparcv9': 'hw.arch.sparcv9',
+}
+
+# Mapping from temurin-build os values to aqa-tests sw.os.* label tokens.
+# Used when resolving {os} placeholders in stageAgentLabels templates.
+OS_TO_LABEL = {
+    'linux':        'sw.os.linux',
+    'alpine-linux': 'sw.os.alpine-linux',
+    'mac':          'sw.os.mac',
+    'windows':      'sw.os.windows',
+    'aix':          'sw.os.aix',
+    'solaris':      'sw.os.solaris',
+    'zos':          'sw.os.zos',
+}
+
+# Mapping from old camelCase platform keys to new aqa-aligned {arch}_{os} keys.
+# Enables graceful lookup when configs still use the legacy naming.
+LEGACY_PLATFORM_KEY_MAP = {
+    'x64Linux':           'x86-64_linux',
+    'x64Mac':             'x86-64_mac',
+    'x64Windows':         'x86-64_windows',
+    'x64AlpineLinux':     'x86-64_alpine-linux',
+    'x32Windows':         'x86-32_windows',
+    'aarch64Linux':       'aarch64_linux',
+    'aarch64Mac':         'aarch64_mac',
+    'aarch64Windows':     'aarch64_windows',
+    'aarch64AlpineLinux': 'aarch64_alpine-linux',
+    'arm32Linux':         'arm_linux',
+    'ppc64Aix':           'ppc64_aix',
+    'ppc64leLinux':       'ppc64le_linux',
+    's390xLinux':         's390x_linux',
+    'riscv64Linux':       'riscv64_linux',
+    'sparcv9Solaris':     'sparcv9_solaris',
+    'x64Solaris':         'x86-64_solaris',
+}
+
+
 def get_platform_key(architecture, target_os):
-    """Construct platform key from architecture and OS"""
-    # Capitalize first letter of OS
-    os_capitalized = target_os[0].upper() + target_os[1:]
-    return f"{architecture}{os_capitalized}"
+    """Construct aqa-aligned platform key from architecture and OS.
+
+    Returns the canonical {arch}_{os} key used in PLATFORM_MAP, e.g.
+    get_platform_key('x64', 'linux') -> 'x86-64_linux'.
+    Falls back to the old camelCase construction if the combination is not in
+    the explicit map, so novel platforms are still handled gracefully.
+    """
+    # Build the arch segment: map temurin-build arch → aqa arch prefix
+    arch_segment_map = {
+        'x64':     'x86-64',
+        'x86-32':  'x86-32',
+        'aarch64': 'aarch64',
+        'arm':     'arm',
+        'ppc64':   'ppc64',
+        'ppc64le': 'ppc64le',
+        's390x':   's390x',
+        'riscv64': 'riscv64',
+        'sparcv9': 'sparcv9',
+    }
+    arch_seg = arch_segment_map.get(architecture, architecture)
+    return f"{arch_seg}_{target_os}"
 
 
 def extract_variant_value(value, variant):
@@ -60,14 +125,26 @@ def extract_variant_value(value, variant):
     return None
 
 
+def resolve_label_placeholders(template, target_os, architecture):
+    """Resolve {os} and {arch} placeholders in a label template.
+
+    Maps temurin-build os/arch values to the aqa-tests sw.os.* / hw.arch.*
+    label tokens before substitution, so templates like
+    'ci.role.build&&sw.os.{os}&&hw.arch.{arch}' resolve correctly.
+    """
+    os_label = OS_TO_LABEL.get(target_os, f'sw.os.{target_os}')
+    arch_label = ARCH_TO_LABEL.get(architecture, f'hw.arch.{architecture}')
+    return template.replace('{os}', os_label).replace('{arch}', arch_label)
+
+
 def build_node_label(build_label_template, additional_labels, target_os, architecture):
     """Build the fully-resolved Build-stage node label.
 
     Resolves {os} and {arch} placeholders in the stageAgentLabels["Build"]
-    template against the concrete target_os and architecture values for this
-    build, then appends any platform additionalNodeLabels with '&&'.
+    template via the sw.os.* / hw.arch.* label schema, then appends any
+    platform additionalNodeLabels with '&&'.
     """
-    label = build_label_template.replace('{os}', target_os).replace('{arch}', architecture)
+    label = resolve_label_placeholders(build_label_template, target_os, architecture)
     if additional_labels:
         label = label + '&&' + additional_labels
     return label
@@ -137,12 +214,20 @@ def load_configuration(args):
     platform_key = get_platform_key(architecture, target_os)
     print(f"Platform key: {platform_key}")
 
-    # Get platform configuration
+    # Get platform configuration — also accept legacy camelCase keys
     if platform_key not in build_configurations:
-        available = ', '.join(build_configurations.keys())
-        print(f"ERROR: Platform '{platform_key}' not found in configuration.", file=sys.stderr)
-        print(f"Available platforms: {available}", file=sys.stderr)
-        sys.exit(1)
+        legacy_key = next(
+            (old for old, new in LEGACY_PLATFORM_KEY_MAP.items() if new == platform_key),
+            None
+        )
+        if legacy_key and legacy_key in build_configurations:
+            print(f"Warning: config uses legacy platform key '{legacy_key}'; treating as '{platform_key}'")
+            platform_key = legacy_key
+        else:
+            available = ', '.join(build_configurations.keys())
+            print(f"ERROR: Platform '{platform_key}' not found in configuration.", file=sys.stderr)
+            print(f"Available platforms: {available}", file=sys.stderr)
+            sys.exit(1)
 
     platform_config = build_configurations[platform_key]
 
@@ -191,7 +276,11 @@ def load_configuration(args):
             'aqaRef': aqa_ref,
             'aqaRepoUrl': aqa_repo_url
         },
-        'stageAgentLabels': stage_agent_labels
+        'stageAgentLabels': stage_agent_labels,
+        'resolvedStageAgentLabels': {
+            stage: resolve_label_placeholders(template, target_os, architecture)
+            for stage, template in stage_agent_labels.items()
+        }
     }
 
     # Save configuration

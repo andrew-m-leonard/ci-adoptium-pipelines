@@ -116,6 +116,193 @@ def generate_adoptium_pipeline_config(version_configs: List[Dict[str, Any]]) -> 
     }
 
 
+# ---------------------------------------------------------------------------
+# Label token migration
+# ---------------------------------------------------------------------------
+# Schema version convention:
+#   - Dots (.) are used ONLY as namespace separators between label segments,
+#     e.g.  sw.tool.xcode.15_0_1   sw.os.mac.10_14   sw.os.aix.7_2
+#   - Version numbers that contain dots in the legacy form have those dots
+#     replaced with underscores in the schema version component via _v().
+#   - Non-digit separator characters between a tool name and its version
+#     (e.g. the "v" in "armv8.2") are stripped entirely.
+#
+# Each rule is a (compiled_regex, callable) pair; tried in order, first match
+# wins.  Pattern convention: (?i) for case-insensitivity, $ anchors the end
+# (re.match already anchors the start).
+
+
+def _v(ver_str: str) -> str:
+    """Normalise a version string for use as a label version segment.
+
+    Dots within the version number are replaced with underscores so that dots
+    remain exclusively as schema namespace separators.
+    '15.0.1' -> '15_0_1',  '8.2' -> '8_2',  '10.14' -> '10_14',  '17' -> '17'
+    """
+    return ver_str.replace('.', '_')
+
+
+_LABEL_MIGRATION_RULES = [
+    # -----------------------------------------------------------------------
+    # ci.role — bare role words
+    # -----------------------------------------------------------------------
+    (re.compile(r'(?i)^build$'),   lambda m: 'ci.role.build'),
+    (re.compile(r'(?i)^worker$'),  lambda m: 'ci.role.worker'),
+    (re.compile(r'(?i)^test$'),    lambda m: 'ci.role.test'),
+
+    # -----------------------------------------------------------------------
+    # sw.tool — Xcode  xcode[non-digit-prefix]<ver>
+    # Non-digit chars between "xcode" and the version are stripped.
+    # e.g. xcode15.0.1  =>  sw.tool.xcode.15_0_1
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^xcode[^\d]*(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.tool.xcode.{_v(m.group("ver"))}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.tool — Visual Studio  vs<4-digit-year>
+    # e.g. vs2022  =>  sw.tool.vs.2022
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^vs(?P<year>\d{4})$'),
+        lambda m: f'sw.tool.vs.{m.group("year")}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.tool — IBM XL C/C++  xlc<ver>
+    # e.g. xlc16  =>  sw.tool.xlc.16
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^xlc(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.tool.xlc.{_v(m.group("ver"))}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.tool — IBM Open XL C/C++  openxl<ver>
+    # e.g. openxl17  =>  sw.tool.openxl.17
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^openxl(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.tool.openxl.{_v(m.group("ver"))}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.tool — ARM architecture feature label  arm[non-digit-prefix]<ver>
+    # Non-digit separator chars (e.g. "v") between "arm" and the version are
+    # stripped; version dots become underscores.
+    # e.g. armv8.2  =>  sw.tool.arm.8_2
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^arm[^\d]*(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.tool.arm.{_v(m.group("ver"))}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # hw.arch — bare x86 architecture tokens used as additionalNodeLabels
+    # Both x86-32 and x86-64 map to hw.arch.x86 (there are no native 32-bit
+    # x86 Linux build targets; aarch32 is the only 32-bit arch in use).
+    # e.g. x86-32  =>  hw.arch.x86
+    #      x86-64  =>  hw.arch.x86
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^x86-(?:32|64)$'),
+        lambda m: 'hw.arch.x86',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.os.windows — win<4-digit-year>
+    # e.g. win2022  =>  sw.os.windows.2022
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^win(?P<year>\d{4})$'),
+        lambda m: f'sw.os.windows.{m.group("year")}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.os.mac — macos<ver>  (full version preserved, dots → underscores)
+    # e.g. macos10.14  =>  sw.os.mac.10_14
+    #      macos11     =>  sw.os.mac.11
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^macos(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.os.mac.{_v(m.group("ver"))}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.os.aix — aix<3-digit-stream>
+    # Stream encodes major+minor: 720 → major=7, minor=2  =>  sw.os.aix.7_2
+    # e.g. aix720  =>  sw.os.aix.7_2
+    #      aix715  =>  sw.os.aix.7_1
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^aix(?P<stream>\d{3})$'),
+        lambda m: f'sw.os.aix.{m.group("stream")[0]}_{m.group("stream")[1]}',
+    ),
+
+    # -----------------------------------------------------------------------
+    # sw.os.linux distributions — <distro><ver>  (dots → underscores)
+    # e.g. centos7   =>  sw.os.centos.7
+    #      rhel8     =>  sw.os.rhel.8
+    #      ubuntu22  =>  sw.os.ubuntu.22
+    # -----------------------------------------------------------------------
+    (
+        re.compile(r'(?i)^(?P<distro>centos|rhel|ubuntu|sles|debian|fedora)(?P<ver>\d[\d.]*)$'),
+        lambda m: f'sw.os.{m.group("distro").lower()}.{_v(m.group("ver"))}',
+    ),
+]
+
+# Schema root prefixes — tokens that already start with one of these are
+# already schema-compliant and must not be rewritten.
+_SCHEMA_ROOTS = ('hw.', 'sw.', 'ci.')
+
+
+def migrate_label_token(token: str) -> str:
+    """Translate a single legacy label token to its schema equivalent.
+
+    Tokens that already start with a recognised schema root (hw., sw., ci.)
+    are returned unchanged.  All other tokens — including those that contain
+    dots as part of a legacy version number (e.g. xcode15.0.1, armv8.2,
+    macos10.14) — are tested against the migration rules in order.
+    Unrecognised tokens are returned as-is so the config still works.
+    """
+    token = token.strip()
+    if not token:
+        return token
+
+    # Already schema-compliant — pass through.
+    if any(token.startswith(root) for root in _SCHEMA_ROOTS):
+        return token
+
+    for pattern, replacement in _LABEL_MIGRATION_RULES:
+        m = pattern.match(token)
+        if m:
+            return replacement(m)
+
+    # No rule matched — return unchanged so the config still works.
+    return token
+
+
+def migrate_label_tokens(label_value: str) -> str:
+    """Translate a legacy &&-joined label string to schema-compliant tokens."""
+    tokens = [t.strip() for t in label_value.split("&&")]
+    return "&&".join(migrate_label_token(t) for t in tokens)
+
+
+def migrate_additional_node_labels(platform_config: Dict[str, Any]) -> None:
+    """Migrate additionalNodeLabels in-place to the aqa-tests label schema."""
+    anl = platform_config.get("additionalNodeLabels")
+    if anl is None:
+        return
+    if isinstance(anl, str):
+        platform_config["additionalNodeLabels"] = migrate_label_tokens(anl)
+    elif isinstance(anl, dict):
+        platform_config["additionalNodeLabels"] = {
+            variant: migrate_label_tokens(val)
+            for variant, val in anl.items()
+        }
+
+
 def generate_jenkins_job_config() -> Dict[str, Any]:
     """Generate jenkins_job_config.json — Jenkins-specific configuration."""
     return {
@@ -138,27 +325,26 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
                 "artifactNumToKeep": 10
             }
         },
-        # Per-stage agent label templates. Placeholders {os} and {arch} are
-        # substituted at runtime with the build job's TARGET_OS / ARCHITECTURE
-        # values. Override any entry to route a stage to vendor-specific nodes
-        # (e.g. a dedicated signing cluster or an OS-matched test worker).
+        # Per-stage agent label templates.  Placeholders {os} and {arch} are
+        # resolved at runtime to sw.os.* / hw.arch.* schema tokens by
+        # load-json-config.py via its OS_TO_LABEL / ARCH_TO_LABEL maps.
         "stageAgentLabels": {
-            "Initialize":                 "worker",
-            "Build":                      "build&&{os}&&{arch}",
-            "Internal Code Sign":         "worker",
-            "Assemble Images":            "build&&{os}&&{arch}",
-            "Post-Build Code Sign":       "worker",
-            "Build Installers":           "build&&{os}&&{arch}",
-            "Code Sign Installer":        "worker",
-            "SBOM Sign":                  "worker",
-            "Digital Artifact Sign":      "worker",
-            "Verify Signing":             "worker",
-            "Validate SBOM":              "build&&{os}&&{arch}",
-            "Smoke Tests":                "build&&{os}&&{arch}",
-            "Reproducible Compare Build": "build&&{os}&&{arch}",
-            "AQA Tests":                  "build&&{arch}",
-            "TCK Tests":                  "build&&{arch}",
-            "Publish Artifacts":          "worker"
+            "Initialize":                 "ci.role.worker",
+            "Build":                      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "Internal Code Sign":         "eclipse-codesign",
+            "Assemble Images":            "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "Post-Build Code Sign":       "ci.role.worker",
+            "Build Installers":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "Code Sign Installer":        "ci.role.worker",
+            "SBOM Sign":                  "ci.role.worker",
+            "Digital Artifact Sign":      "ci.role.worker",
+            "Verify Signing":             "ci.role.worker",
+            "Validate SBOM":              "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "Smoke Tests":                "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "Reproducible Compare Build": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+            "AQA Tests":                  "ci.role.build&&hw.arch.{arch}",
+            "TCK Tests":                  "ci.role.build&&hw.arch.{arch}",
+            "Publish Artifacts":          "ci.role.worker"
         }
     }
 
@@ -307,11 +493,12 @@ Examples:
                     if not config.get("openjdkVersion"):
                         config["openjdkVersion"] = version + "u"
                     
-                    # Remove obsolete fields from each platform entry
+                    # Remove obsolete fields and migrate labels for each platform entry
                     for platform_config in config.get("buildConfigurations", {}).values():
                         platform_config.pop("test", None)
                         platform_config.pop("additionalTestParams", None)
                         platform_config.pop("additionalTestLabels", None)
+                        migrate_additional_node_labels(platform_config)
 
                     # Check if the job is disabled in the jdkNN(u).groovy file
                     is_disabled = check_if_job_disabled(args.source, version)
@@ -336,6 +523,7 @@ Examples:
                         print(f"  Enabled: {config['enabled']}")
                         print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
                         print(f"  Removed obsolete fields: test, additionalTestParams, additionalTestLabels")
+                        print(f"  Migrated additionalNodeLabels to label schema tokens")
                 
                 except json.JSONDecodeError as e:
                     print(f"[{i}/{len(converted_files)}] {temp_file.name} ❌ (Invalid JSON: {e})")

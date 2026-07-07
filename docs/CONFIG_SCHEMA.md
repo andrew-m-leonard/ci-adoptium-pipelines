@@ -128,9 +128,9 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
   "version": "jdk21",
   "openjdkVersion": "jdk21u",
   "enabled": true,
-  "targetConfigurations": ["x64Linux", "x64Mac", "x64Windows"],
+  "targetConfigurations": ["x86-64_linux", "x86-64_mac", "x86-64_windows"],
   "buildConfigurations": {
-    "x64Linux": {
+    "x86-64_linux": {
       "os": "linux",
       "arch": "x64",
       "dockerImage": "adoptopenjdk/centos7_build_image",
@@ -140,7 +140,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
       "dockerRegistry": "https://adoptium.azurecr.io",
       "dockerCredential": "bbb9fa70-a1de-4853-b564-5f02193329ac",
       "crossCompile": "aarch64",
-      "additionalNodeLabels": "centos7&&build",
+      "additionalNodeLabels": "sw.os.centos.7",
       "additionalTestLabels": { "temurin": "!sw.tool.glibc.2_12" },
       "cleanWorkspaceAfterBuild": true,
       "configureArgs": { "temurin": "--enable-dtrace" },
@@ -159,7 +159,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
 | `openjdkVersion` | string | ✅ | OpenJDK source stream identifier, typically with `u` suffix, e.g. `"jdk21u"`. Used to locate the upstream source |
 | `enabled` | boolean | ✅ | Whether this version is active. Must match the corresponding entry in `adoptium_pipeline_config.json` |
 | `targetConfigurations` | array of strings | ✅ | Ordered list of platform keys from `buildConfigurations` that should be built. Must be a subset of the keys in `buildConfigurations` |
-| `buildConfigurations` | object | ✅ | Map of platform name → platform build configuration. Key is a descriptive platform identifier (e.g. `"x64Linux"`, `"aarch64Mac"`) |
+| `buildConfigurations` | object | ✅ | Map of platform name → platform build configuration. Key follows the aqa-tests `PLATFORM_MAP` naming convention: `{arch}_{os}` with hyphens for compound words (e.g. `"x86-64_linux"`, `"aarch64_mac"`). See `LABEL_SCHEMA.md` for the full mapping table |
 
 ### `buildConfigurations` platform entry fields
 
@@ -191,7 +191,7 @@ values. This is noted in the Type column as `string | variant-object`.
 | `dockerRegistry` | string | Registry URL used to pull the `dockerImage`, e.g. `"https://adoptium.azurecr.io"` |
 | `dockerCredential` | string | Jenkins credentials ID used to authenticate with `dockerRegistry` |
 | `crossCompile` | string | Host architecture used as the cross-compilation toolchain host. E.g. `"aarch64"` when building arm32, `"x64"` when cross-compiling aarch64 Windows, `"qemustatic"` for RISC-V via QEMU |
-| `additionalNodeLabels` | `string \| variant-object` | Extra Jenkins node label expression ANDed onto the base agent selector. String applies to all variants; variant-object allows per-variant labels |
+| `additionalNodeLabels` | `string \| variant-object` | Extra Jenkins node label expression ANDed onto the base agent selector. Values **must** use the `sw.*` / `hw.*` / `ci.*` label schema (e.g. `sw.tool.xcode15.0.1`, `sw.os.windows.2022&&sw.tool.vs2022`). String applies to all variants; variant-object allows per-variant labels. See `LABEL_SCHEMA.md` for the full token migration table |
 | `additionalTestLabels` | `string \| variant-object` | Additional AQA test node label constraints. String applies to all variants; variant-object allows per-variant expressions (e.g. exclusions like `"!sw.tool.glibc.2_12"`) |
 | `cleanWorkspaceAfterBuild` | boolean | When `true`, the workspace is wiped after a successful build. Typically set on resource-constrained agents (e.g. AIX). Defaults to `false` when absent |
 | `configureArgs` | `string \| variant-object` | Arguments appended to the OpenJDK `configure` invocation. String applies to all variants; variant-object allows per-variant arguments |
@@ -225,24 +225,32 @@ Fields that support both forms: `dockerImage`, `additionalNodeLabels`, `addition
 
 ## Platform naming convention
 
-Platform keys in `buildConfigurations` follow the pattern `{arch}{Os}` (camelCase):
+Platform keys in `buildConfigurations` follow the aqa-tests `PLATFORM_MAP` convention:
+`{arch}_{os}` using hyphens within compound segments (not camelCase).
 
-| Example key | `arch` | `os` |
-|---|---|---|
-| `x64Linux` | x64 | linux |
-| `aarch64Mac` | aarch64 | mac |
-| `x64Windows` | x64 | windows |
-| `x32Windows` | x86-32 | windows |
-| `ppc64Aix` | ppc64 | aix |
-| `s390xLinux` | s390x | linux |
-| `ppc64leLinux` | ppc64le | linux |
-| `arm32Linux` | arm (32-bit) | linux |
-| `riscv64Linux` | riscv64 | linux |
-| `x64AlpineLinux` | x64 | alpine-linux |
-| `aarch64AlpineLinux` | aarch64 | alpine-linux |
-| `sparcv9Solaris` | sparcv9 | solaris |
-| `x64Solaris` | x64 | solaris |
-| `aarch64Windows` | aarch64 | windows (cross-compiled) |
+> **Note:** the `os` and `arch` *field values* inside each entry retain their
+> existing temurin-build identifiers and do **not** change.  Only the map *key*
+> uses the new format.  See [`LABEL_SCHEMA.md`](./LABEL_SCHEMA.md) for the full
+> mapping from old camelCase keys to new keys.
+
+| Platform key         | `arch` field value | `os` field value |
+|----------------------|--------------------|------------------|
+| `x86-64_linux`       | `x64`              | `linux`          |
+| `x86-64_mac`         | `x64`              | `mac`            |
+| `x86-64_windows`     | `x64`              | `windows`        |
+| `x86-32_windows`     | `x86-32`           | `windows`        |
+| `x86-64_alpine-linux`| `x64`              | `alpine-linux`   |
+| `aarch64_linux`      | `aarch64`          | `linux`          |
+| `aarch64_mac`        | `aarch64`          | `mac`            |
+| `aarch64_windows`    | `aarch64`          | `windows`        |
+| `aarch64_alpine-linux`| `aarch64`         | `alpine-linux`   |
+| `arm_linux`          | `arm`              | `linux`          |
+| `ppc64_aix`          | `ppc64`            | `aix`            |
+| `ppc64le_linux`      | `ppc64le`          | `linux`          |
+| `s390x_linux`        | `s390x`            | `linux`          |
+| `riscv64_linux`      | `riscv64`          | `linux`          |
+| `sparcv9_solaris`    | `sparcv9`          | `solaris`        |
+| `x86-64_solaris`     | `x64`              | `solaris`        |
 
 ---
 
