@@ -117,6 +117,51 @@ def generate_adoptium_pipeline_config(version_configs: List[Dict[str, Any]]) -> 
 
 
 # ---------------------------------------------------------------------------
+# Platform key migration  (camelCase → aqa-aligned {arch}_{os})
+# ---------------------------------------------------------------------------
+
+PLATFORM_KEY_MAP = {
+    'x64Linux':           'x86-64_linux',
+    'x64Mac':             'x86-64_mac',
+    'x64Windows':         'x86-64_windows',
+    'x64AlpineLinux':     'x86-64_alpine-linux',
+    'x32Windows':         'x86-32_windows',
+    'aarch64Linux':       'aarch64_linux',
+    'aarch64Mac':         'aarch64_mac',
+    'aarch64Windows':     'aarch64_windows',
+    'aarch64AlpineLinux': 'aarch64_alpine-linux',
+    'arm32Linux':         'arm_linux',
+    'ppc64Aix':           'ppc64_aix',
+    'ppc64leLinux':       'ppc64le_linux',
+    's390xLinux':         's390x_linux',
+    'riscv64Linux':       'riscv64_linux',
+    'sparcv9Solaris':     'sparcv9_solaris',
+    'x64Solaris':         'x86-64_solaris',
+}
+
+
+def migrate_platform_keys(config: Dict[str, Any]) -> None:
+    """Rename buildConfigurations keys and targetConfigurations entries in-place.
+
+    Converts legacy camelCase keys (e.g. 'x64Linux') to the aqa-tests
+    PLATFORM_MAP convention (e.g. 'x86-64_linux').  Unknown keys are left
+    unchanged so novel platforms are not silently dropped.
+    """
+    build_configs = config.get('buildConfigurations')
+    if build_configs:
+        config['buildConfigurations'] = {
+            PLATFORM_KEY_MAP.get(k, k): v
+            for k, v in build_configs.items()
+        }
+
+    target_configs = config.get('targetConfigurations')
+    if target_configs:
+        config['targetConfigurations'] = [
+            PLATFORM_KEY_MAP.get(k, k) for k in target_configs
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Label token migration
 # ---------------------------------------------------------------------------
 # Schema version convention:
@@ -493,6 +538,9 @@ Examples:
                     if not config.get("openjdkVersion"):
                         config["openjdkVersion"] = version + "u"
                     
+                    # Rename platform keys to aqa-aligned {arch}_{os} convention
+                    migrate_platform_keys(config)
+
                     # Remove obsolete fields and migrate labels for each platform entry
                     for platform_config in config.get("buildConfigurations", {}).values():
                         platform_config.pop("test", None)
@@ -522,6 +570,7 @@ Examples:
                         print(f"  OpenJDK Version: {config['openjdkVersion']}")
                         print(f"  Enabled: {config['enabled']}")
                         print(f"  Platforms: {len(config.get('buildConfigurations', {}))}")
+                        print(f"  Migrated platform keys to aqa-aligned {arch}_{os} convention")
                         print(f"  Removed obsolete fields: test, additionalTestParams, additionalTestLabels")
                         print(f"  Migrated additionalNodeLabels to label schema tokens")
                 
