@@ -230,34 +230,36 @@ underscores before embedding it in the label.
 ## `stageAgentLabels` Templates
 
 The `stageAgentLabels` map in `jenkins_job_config.json` controls which Jenkins
-agent each pipeline stage runs on.  The `{os}` and `{arch}` placeholders are
-substituted at runtime with the **sw.os** and **hw.arch** label values derived
-from the platform entry's `os` and `arch` fields via the mapping below.
+agent each pipeline stage runs on.  Templates use `sw.os.{os}` and
+`hw.arch.{arch}` — the `{os}` and `{arch}` placeholders are substituted with
+the **suffix only** (the part after the final `.`), derived from the platform
+entry's `os` and `arch` fields.  The `sw.os.` and `hw.arch.` prefixes are
+written literally in the template.
 
-### os → sw.os mapping (for placeholder substitution)
+### os → `{os}` suffix mapping
 
-| `os` value in config | `{os}` resolves to  |
-|----------------------|---------------------|
-| `linux`              | `sw.os.linux`       |
-| `alpine-linux`       | `sw.os.alpine-linux`|
-| `mac`                | `sw.os.mac`         |
-| `windows`            | `sw.os.windows`     |
-| `aix`                | `sw.os.aix`         |
-| `solaris`            | `sw.os.solaris`     |
+| `os` value in config | `{os}` substituted with |
+|----------------------|-------------------------|
+| `linux`              | `linux`                 |
+| `alpine-linux`       | `alpine-linux`          |
+| `mac`                | `mac`                   |
+| `windows`            | `windows`               |
+| `aix`                | `aix`                   |
+| `solaris`            | `solaris`               |
 
-### arch → hw.arch mapping (for placeholder substitution)
+### arch → `{arch}` suffix mapping
 
-| `arch` value in config | `{arch}` resolves to |
-|------------------------|----------------------|
-| `x64`                  | `hw.arch.x86`        |
-| `x86-32`               | `hw.arch.x86`        |
-| `aarch64`              | `hw.arch.aarch64`    |
-| `arm`                  | `hw.arch.aarch32`    |
-| `ppc64`                | `hw.arch.ppc64`      |
-| `ppc64le`              | `hw.arch.ppc64le`    |
-| `s390x`                | `hw.arch.s390x`      |
-| `riscv64`              | `hw.arch.riscv`      |
-| `sparcv9`              | `hw.arch.sparcv9`    |
+| `arch` value in config | `{arch}` substituted with |
+|------------------------|---------------------------|
+| `x64`                  | `x86`                     |
+| `x86-32`               | `x86`                     |
+| `aarch64`              | `aarch64`                 |
+| `arm`                  | `aarch32`                 |
+| `ppc64`                | `ppc64`                   |
+| `ppc64le`              | `ppc64le`                 |
+| `s390x`                | `s390x`                   |
+| `riscv64`              | `riscv`                   |
+| `sparcv9`              | `sparcv9`                 |
 
 ### Example resolved labels
 

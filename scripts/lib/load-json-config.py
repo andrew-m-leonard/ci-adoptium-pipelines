@@ -23,32 +23,34 @@ import argparse
 from pathlib import Path
 
 
-# Mapping from temurin-build arch values to aqa-tests hw.arch.* label tokens.
-# Used when resolving {arch} placeholders in stageAgentLabels templates.
-# Note: x64 (x86 64-bit) and x86-32 both map to hw.arch.x86 — the aqa-tests
-# schema uses hw.arch.x86 for the whole x86 family; there is no hw.arch.x86-64.
-ARCH_TO_LABEL = {
-    'x64':     'hw.arch.x86',
-    'x86-32':  'hw.arch.x86',
-    'aarch64': 'hw.arch.aarch64',
-    'arm':     'hw.arch.aarch32',
-    'ppc64':   'hw.arch.ppc64',
-    'ppc64le': 'hw.arch.ppc64le',
-    's390x':   'hw.arch.s390x',
-    'riscv64': 'hw.arch.riscv',
-    'sparcv9': 'hw.arch.sparcv9',
+# Mapping from temurin-build arch values to the aqa-tests hw.arch suffix.
+# The suffix is the part that follows 'hw.arch.' in label templates.
+# Templates use 'hw.arch.{arch}' — {arch} is replaced with just the suffix.
+# Note: x64 and x86-32 both map to 'x86' — the aqa-tests schema uses
+# hw.arch.x86 for the whole x86 family; there is no hw.arch.x86-64.
+ARCH_SUFFIX = {
+    'x64':     'x86',
+    'x86-32':  'x86',
+    'aarch64': 'aarch64',
+    'arm':     'aarch32',
+    'ppc64':   'ppc64',
+    'ppc64le': 'ppc64le',
+    's390x':   's390x',
+    'riscv64': 'riscv',
+    'sparcv9': 'sparcv9',
 }
 
-# Mapping from temurin-build os values to aqa-tests sw.os.* label tokens.
-# Used when resolving {os} placeholders in stageAgentLabels templates.
-OS_TO_LABEL = {
-    'linux':        'sw.os.linux',
-    'alpine-linux': 'sw.os.alpine-linux',
-    'mac':          'sw.os.mac',
-    'windows':      'sw.os.windows',
-    'aix':          'sw.os.aix',
-    'solaris':      'sw.os.solaris',
-    'zos':          'sw.os.zos',
+# Mapping from temurin-build os values to the aqa-tests sw.os suffix.
+# The suffix is the part that follows 'sw.os.' in label templates.
+# Templates use 'sw.os.{os}' — {os} is replaced with just the suffix.
+OS_SUFFIX = {
+    'linux':        'linux',
+    'alpine-linux': 'alpine-linux',
+    'mac':          'mac',
+    'windows':      'windows',
+    'aix':          'aix',
+    'solaris':      'solaris',
+    'zos':          'zos',
 }
 
 # Mapping from old camelCase platform keys to new aqa-aligned {arch}_{os} keys.
@@ -130,13 +132,14 @@ def extract_variant_value(value, variant):
 def resolve_label_placeholders(template, target_os, architecture):
     """Resolve {os} and {arch} placeholders in a label template.
 
-    Maps temurin-build os/arch values to the aqa-tests sw.os.* / hw.arch.*
-    label tokens before substitution, so templates like
-    'ci.role.build&&sw.os.{os}&&hw.arch.{arch}' resolve correctly.
+    Replaces {os} with the sw.os suffix and {arch} with the hw.arch suffix
+    so that templates like 'ci.role.build&&sw.os.{os}&&hw.arch.{arch}'
+    produce 'ci.role.build&&sw.os.linux&&hw.arch.x86' — not a double-prefixed
+    result like 'sw.os.sw.os.linux'.
     """
-    os_label = OS_TO_LABEL.get(target_os, f'sw.os.{target_os}')
-    arch_label = ARCH_TO_LABEL.get(architecture, f'hw.arch.{architecture}')
-    return template.replace('{os}', os_label).replace('{arch}', arch_label)
+    os_suffix   = OS_SUFFIX.get(target_os, target_os)
+    arch_suffix = ARCH_SUFFIX.get(architecture, architecture)
+    return template.replace('{os}', os_suffix).replace('{arch}', arch_suffix)
 
 
 def build_node_label(build_label_template, additional_labels, target_os, architecture):
