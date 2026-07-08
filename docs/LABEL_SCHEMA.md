@@ -161,7 +161,7 @@ and the agent label expression used for Jenkins node selection.
 | `s390xLinux`               | `s390x_linux`            | `sw.os.linux`          | `hw.arch.s390x`      |
 | `riscv64Linux`             | `riscv64_linux`          | `sw.os.linux`          | `hw.arch.riscv`      |
 | `sparcv9Solaris`           | `sparcv9_solaris`        | `sw.os.solaris`        | `hw.arch.sparcv9`    |
-| `x64Solaris`               | `x86-64_solaris`         | `sw.os.solaris`        | `hw.arch.x86-64`     |
+| `x64Solaris`               | `x86-64_solaris`         | `sw.os.solaris`        | `hw.arch.x86`        |
 
 > The `os` and `arch` field values inside each platform entry **do not change** —
 > they remain the temurin-build values (`mac`, `linux`, `x64`, `aarch64`, etc.).
@@ -246,6 +246,7 @@ written literally in the template.
 | `windows`            | `windows`               |
 | `aix`                | `aix`                   |
 | `solaris`            | `solaris`               |
+| `zos`                | `zos`                   |
 
 ### arch → `{arch}` suffix mapping
 
