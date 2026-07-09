@@ -23,10 +23,11 @@ The seed job uses a **consolidated script** that contains all logic in a single 
 
 **Active Script:**
 - **`seed_job_consolidated.groovy`**: Main seed job script that:
-  1. Loads configuration from jenkins_job_config.json
-  2. Creates launch orchestrator jobs for each active JDK version
-  3. Creates/updates the seed job itself (self-updating)
-  4. Creates views for organizing jobs
+  1. Loads configuration from `jenkins_job_config.json` and `adoptium_pipeline_config.json`
+  2. Creates `OpenJDK_Build_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
+  3. Creates the `OpenJDK_Build_launchers/` and `Build_openjdk/` top-level folders
+  4. Creates/updates the seed job itself (self-updating)
+  5. Creates the `Build OpenJDK Launchers` and `Build OpenJDK Platform Pipelines` views
 
 **Legacy Scripts (kept for reference):**
 - `load_config.groovy` - Original config loader (functionality now in consolidated script)
@@ -46,9 +47,11 @@ These scripts are NOT processed by the seed job. They are called dynamically by 
 
 **Files:**
 - **`openjdk_build_pipeline.groovy`**: Creates platform-specific build jobs
-  - Called by: Launch jobs (Jenkinsfile.launch)
+  - Called by: Launch jobs (`Jenkinsfile.launch`)
   - When: `REGENERATE_JOBS=true` or when platform jobs don't exist
   - Requires: `JDK_VERSION`, `PLATFORM`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH` parameters
+  - Creates: `Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>` (AQA-style naming)
+  - See [docs/BUILD_JOB_NAMING_CONVENTION.md](../../../docs/BUILD_JOB_NAMING_CONVENTION.md) for the naming schema
 
 ## Adding New Scripts
 

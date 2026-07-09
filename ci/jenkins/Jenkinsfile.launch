@@ -4,8 +4,8 @@
  * This pipeline orchestrates builds across multiple platforms for a specific JDK version.
  * It dynamically creates platform-specific build jobs and launches them in parallel.
  *
- * Job Name Pattern: jdk${version}-launch-build-pipelines
- * Creates: jdk${version}-${platform}-build-pipeline jobs
+ * Job Name Pattern: OpenJDK_Build_launchers/Build_openjdk<version>_launch
+ * Creates:          Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>
  */
 
 import groovy.json.JsonSlurper
@@ -134,10 +134,11 @@ pipeline {
                     }
                     
                     def platforms = env.SELECTED_PLATFORMS.split(',')
-                    
+
                     platforms.each { platform ->
-                        def jobName = "/openjdk-builds/jdk${env.JDK_VERSION}/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
-                        echo "  → Creating/updating: ${jobName}"
+                        // Job name is determined by openjdk_build_pipeline.groovy using arch/os/distro
+                        // from the platform config. We echo the platform key here for traceability.
+                        echo "  → Creating/updating build job for platform: ${platform}"
                         
                         // Use Job DSL to create/update the job
                         // IMPORTANT: Use ignoreMissingFiles and ignoreExisting to prevent modifying this launch job
@@ -171,8 +172,17 @@ pipeline {
                     def buildJobs = [:]
                     def buildResults = [:]
                     
+                    // Load the version config to map platform keys to arch/os/distro so we can
+                    // construct the AQA-style job name: Build_openjdk<version>_<distro>_<arch>_<os>
+                    def versionConfigText = env.VERSION_CONFIG
+                    def versionConfig = new groovy.json.JsonSlurper().parseText(versionConfigText)
+
                     platforms.each { platform ->
-                        def jobName = "/openjdk-builds/jdk${env.JDK_VERSION}/jdk${env.JDK_VERSION}-${platform}-build-pipeline"
+                        def platformCfg = versionConfig.buildConfigurations[platform]
+                        def arch    = platformCfg?.arch    ?: platform
+                        def os      = platformCfg?.os      ?: platform
+                        def distro  = platformCfg?.variant ?: params.VARIANT ?: 'temurin'
+                        def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${distro}_${arch}_${os}"
                         
                         buildJobs[platform] = {
                             stage("Build ${platform}") {

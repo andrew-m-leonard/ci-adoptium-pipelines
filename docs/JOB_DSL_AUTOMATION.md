@@ -29,21 +29,21 @@ openjdk-build-seed-job (Freestyle, self-updating)
        reads jenkins_job_config.json from config repo        (log rotation, default params)
        creates Jenkins views
        creates per-JDK launch jobs:
-         openjdk-launch-pipelines/
-           ├── 21-launch-build-pipelines   (Jenkinsfile.launch)
-           ├── 17-launch-build-pipelines
+         OpenJDK_Build_launchers/
+           ├── Build_openjdk21_launch   (Jenkinsfile.launch)
+           ├── Build_openjdk17_launch
            └── ...
 
-21-launch-build-pipelines (run manually or on schedule)
+Build_openjdk21_launch (run manually or on schedule)
   → ci/jenkins/Jenkinsfile.launch
        git clone config-repo
        reads configurations/jdk21_pipeline_config.json   (available platforms)
        if REGENERATE_JOBS=true (or build #1): calls jobDsl(openjdk_build_pipeline.groovy)
          → creates/updates platform build jobs:
-             openjdk-builds/jdk21/
-               ├── jdk21-x86-64_linux-build-pipeline
-               ├── jdk21-aarch64_linux-build-pipeline
-               └── jdk21-aarch64_mac-build-pipeline  ...
+             Build_openjdk/
+               ├── Build_openjdk21_temurin_x86-64_linux
+               ├── Build_openjdk21_temurin_aarch64_linux
+               └── Build_openjdk21_temurin_aarch64_mac  ...
        triggers all selected platform builds in parallel
 ```
 
@@ -52,6 +52,8 @@ openjdk-build-seed-job (Freestyle, self-updating)
 ### Step 1: Create Seed Job
 
 1. In Jenkins, create a new **Freestyle project** named `openjdk-build-seed-job`
+
+> **Job naming**: generated platform build jobs follow the AQA-style convention `Build_openjdk<version>_<distro>_<arch>_<os>` and are placed under a top-level `Build_openjdk/` folder. Launch orchestrators are placed under `OpenJDK_Build_launchers/`. See [BUILD_JOB_NAMING_CONVENTION.md](./BUILD_JOB_NAMING_CONVENTION.md) for full details.
 
 2. **Add Parameters** (required):
    - Click "This project is parameterized"
@@ -88,23 +90,23 @@ openjdk-build-seed-job (Freestyle, self-updating)
 3. Click "Build"
 4. The job will:
    - Fetch `adoptium_pipeline_config.json` and `jenkins_job_config.json` from the config repo
-   - Create the `openjdk-launch-pipelines/` and `openjdk-builds/` folders
-   - Create one launch job per active JDK version under `openjdk-launch-pipelines/`
-   - Create two Jenkins views: **JDK Pipeline Launchers** and **JDK Build Platform Pipelines**
+   - Create the `OpenJDK_Build_launchers/` and `Build_openjdk/` folders
+   - Create one launch job per active JDK version under `OpenJDK_Build_launchers/`
+   - Create two Jenkins views: **Build OpenJDK Launchers** and **Build OpenJDK Platform Pipelines**
    - Recreate itself (`openjdk-build-seed-job`) with the SCM poll trigger
 
 ### Step 3: Verify
 
 Check that the following jobs were created (exact versions depend on `adoptium_pipeline_config.json`):
-- `openjdk-launch-pipelines/21-launch-build-pipelines`
-- `openjdk-launch-pipelines/17-launch-build-pipelines`
-- `openjdk-launch-pipelines/11-launch-build-pipelines`
+- `OpenJDK_Build_launchers/Build_openjdk21_launch`
+- `OpenJDK_Build_launchers/Build_openjdk17_launch`
+- `OpenJDK_Build_launchers/Build_openjdk11_launch`
 
 ### Step 4: Create Platform Build Jobs
 
-Run a launch job (e.g. `21-launch-build-pipelines`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
-- `openjdk-builds/jdk21/jdk21-x86-64_linux-build-pipeline`
-- `openjdk-builds/jdk21/jdk21-aarch64_mac-build-pipeline`
+Run a launch job (e.g. `Build_openjdk21_launch`) with `REGENERATE_JOBS=true`. It will create platform build jobs like:
+- `Build_openjdk/Build_openjdk21_temurin_x86-64_linux`
+- `Build_openjdk/Build_openjdk21_temurin_aarch64_mac`
 
 Platform jobs are also automatically created on the first run of each launch job (build #1).
 
@@ -180,16 +182,16 @@ Job DSL scripts are in [`ci/jenkins/job-dsl/`](../ci/jenkins/job-dsl/):
 1. Validates `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters (fails immediately if empty)
 2. Fetches `adoptium_pipeline_config.json` via `raw.githubusercontent.com` — provides active JDK versions, pipeline repo URL/branch, default build args
 3. Fetches `jenkins_job_config.json` via `raw.githubusercontent.com` — provides log rotation and default parameter values
-4. For each enabled JDK version in `activeJdkVersions`: loads the per-version platform config to discover available platforms, then creates `openjdk-launch-pipelines/${version}-launch-build-pipelines` with a `PLATFORMS` choice parameter pre-populated from the config
-5. Creates the `openjdk-launches-pipelines/` and `openjdk-builds/` folders
-6. Creates the `JDK Pipeline Launchers` and `JDK Build Platform Pipelines` views
+4. For each enabled JDK version in `activeJdkVersions`: loads the per-version platform config to discover available platforms, then creates `OpenJDK_Build_launchers/Build_openjdk${version}_launch` with a `PLATFORMS` choice parameter pre-populated from the config
+5. Creates the `OpenJDK_Build_launchers/` and `Build_openjdk/` folders
+6. Creates the `Build OpenJDK Launchers` and `Build OpenJDK Platform Pipelines` views
 7. Recreates `openjdk-build-seed-job` with an SCM poll trigger pointing at `ci-adoptium-pipelines`
 
 **`openjdk_build_pipeline.groovy`** (called by each launch job via `jobDsl()`):
 1. Receives `JDK_VERSION`, `PLATFORM`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH` as binding variables
 2. Fetches both config files from `raw.githubusercontent.com`
 3. Fetches `configurations/jdk${JDK_VERSION}_pipeline_config.json` and extracts `arch`, `os`, and `variant` for the requested platform key
-4. Creates `openjdk-builds/jdk${JDK_VERSION}/jdk${JDK_VERSION}-${PLATFORM}-build-pipeline` with:
+4. Creates `Build_openjdk/Build_openjdk${JDK_VERSION}_${variant}_${arch}_${os}` with:
    - Fixed params: `JDK_VERSION`, `TARGET_OS`, `ARCHITECTURE`
    - Variable params sourced from `jenkins_job_config.json` defaults: `RUN_TESTS`, `ENABLE_INSTALLERS`, `SIGN_ARTIFACTS`, `PUBLISH_ARTIFACTS`, `RUN_REPRODUCIBLE_COMPARE`, `CLEAN_WORKSPACE_AFTER_STAGE`, `ENABLE_TCK`
    - Other params: `VARIANT`, `SCM_REF`, `BUILD_REF`, `AQA_REF`, `RELEASE_TYPE`, `GROUP_UID`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH`
@@ -287,6 +289,7 @@ To change how jobs are created:
 
 ## Related Documentation
 
+- [BUILD_JOB_NAMING_CONVENTION.md](./BUILD_JOB_NAMING_CONVENTION.md) — Job naming schema and folder layout
 - [BUILD_UID Integration](BUILD_UID_INTEGRATION.md) — Pipeline restart safety
 - [ci/jenkins/README.md](../ci/jenkins/README.md) — Jenkins integration overview
 - [CODE_CONFIG_SEPARATION.md](./CODE_CONFIG_SEPARATION.md) — Config repo JSON reference

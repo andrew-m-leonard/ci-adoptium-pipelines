@@ -83,13 +83,20 @@ ci-adoptium-pipelines/
 ```
 seed-job (Freestyle)
   └─ seed_job_consolidated.groovy  ← creates/updates all jobs
-       ├─ jdk21-launch-build-pipelines  (Jenkinsfile.launch)
-       │    └─ fans out in parallel to:
-       │         ├─ jdk21-x64Linux-build-pipeline   (Jenkinsfile.declarative)
-       │         ├─ jdk21-aarch64Linux-build-pipeline
-       │         └─ jdk21-aarch64Mac-build-pipeline  ...
-       ├─ jdk17-launch-build-pipelines
-       └─ ...
+       │
+       ├─ OpenJDK_Build_launchers/
+       │    ├─ Build_openjdk21_launch  (Jenkinsfile.launch)
+       │    │    └─ fans out in parallel to:
+       │    │         ├─ Build_openjdk21_temurin_x86-64_linux   (Jenkinsfile.declarative)
+       │    │         ├─ Build_openjdk21_temurin_aarch64_linux
+       │    │         └─ Build_openjdk21_temurin_aarch64_mac  ...
+       │    ├─ Build_openjdk17_launch
+       │    └─ ...
+       │
+       └─ Build_openjdk/
+            ├─ Build_openjdk21_temurin_x86-64_linux
+            ├─ Build_openjdk21_temurin_aarch64_linux
+            └─ ...
 ```
 
 **Launch pipeline** (`Jenkinsfile.launch`) — fetches the config repo, determines which platforms to build, optionally regenerates platform jobs via Job DSL, then triggers all selected platform builds in parallel.

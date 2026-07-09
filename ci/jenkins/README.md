@@ -6,7 +6,7 @@ This directory contains Jenkins-specific pipeline definitions, shared Groovy lib
 
 ### Jenkinsfile.declarative
 
-Single-platform build pipeline. Every `jdk${version}-${platform}-build-pipeline` job points at this file. It:
+Single-platform build pipeline. Every `Build_openjdk<version>_<distro>_<arch>_<os>` job points at this file. It:
 
 1. Loads shared helpers from `lib/` after checkout
 2. Runs all applicable pipeline stages in sequence
@@ -17,7 +17,7 @@ Single-platform build pipeline. Every `jdk${version}-${platform}-build-pipeline`
 
 ### Jenkinsfile.launch
 
-Multi-platform launch pipeline. Jobs named `jdk${version}-launch-build-pipelines` use this file. It:
+Multi-platform launch pipeline. Jobs named `Build_openjdk<version>_launch` (in `OpenJDK_Build_launchers/`) use this file. It:
 
 1. Reads `jdk${version}_pipeline_config.json` from the config repo to discover available platforms
 2. Determines which platforms to build (all, or a subset from the `PLATFORMS` parameter)
@@ -62,15 +62,16 @@ Job DSL scripts that create and maintain all Jenkins jobs from code — no manua
 #### seed/seed_job_consolidated.groovy
 
 Bootstrap script. Run once from a Freestyle "seed job" to create all other jobs:
-- Creates `jdk${version}-launch-build-pipelines` jobs for each active JDK version defined in `jenkins_job_config.json`
+- Creates `OpenJDK_Build_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
 - Reads the config repo to discover active JDK versions and their platform lists
 - Configures log rotation, parameters, and SCM from the config repo's `jenkins_job_config.json`
+- Creates the `OpenJDK_Build_launchers/` and `Build_openjdk/` top-level folders
 
 #### openjdk_build_pipeline.groovy
 
 Called by the launch pipeline (via `jobDsl()` step) to create or update a single platform build job:
 - Fetches `jdk${version}_pipeline_config.json` from the config repo to extract `arch`, `os`, and `variant` for the platform
-- Creates `jdk${version}-${platform}-build-pipeline` under `/openjdk-builds/jdk${version}/`
+- Creates `Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>` following the AQA-style naming convention
 - Configures all pipeline parameters with defaults from `jenkins_job_config.json`
 - Sets `disableResume()`, `disableConcurrentBuilds()`, and `CopyArtifactPermissionProperty`
 
@@ -169,6 +170,7 @@ Optionally, vendor-specific stage overrides:
 
 ## Related Documentation
 
+- [docs/BUILD_JOB_NAMING_CONVENTION.md](../../docs/BUILD_JOB_NAMING_CONVENTION.md) — Job naming schema and folder layout
 - [docs/JOB_DSL_AUTOMATION.md](../../docs/JOB_DSL_AUTOMATION.md) — Full Job DSL setup guide
 - [docs/BUILD_UID_INTEGRATION.md](../../docs/BUILD_UID_INTEGRATION.md) — BUILD_UID lifecycle detail
 - [docs/JENKINS_RESTART_BEHAVIOR.md](../../docs/JENKINS_RESTART_BEHAVIOR.md) — Restart vs Rebuild

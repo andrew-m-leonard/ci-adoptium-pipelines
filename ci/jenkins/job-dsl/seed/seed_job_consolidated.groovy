@@ -144,16 +144,16 @@ def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
 def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
 def defaultParams = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
 
-// Create the openjdk-launch-pipelines folder for launch orchestrator jobs
-folder('openjdk-launch-pipelines') {
-    displayName('OpenJDK Launch Pipelines')
-    description('Launch orchestrator jobs that coordinate builds across multiple platforms')
+// Top-level folder for launch orchestrator jobs
+folder('OpenJDK_Build_launchers') {
+    displayName('OpenJDK Build Launchers')
+    description('Launch orchestrator jobs that trigger platform-specific builds across all selected platforms for a given JDK version')
 }
 
-// Create the openjdk-builds folder for platform-specific build jobs
-folder('openjdk-builds') {
-    displayName('OpenJDK Platform Builds')
-    description('Platform-specific build pipeline jobs organized by JDK version (created dynamically by launch jobs)')
+// Top-level folder for platform build jobs (AQA-style naming)
+folder('Build_openjdk') {
+    displayName('Build OpenJDK')
+    description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_openjdk<version>_<distro>_<arch>_<os> convention')
 }
 
 println "Creating launch orchestrator jobs for active JDK versions:"
@@ -186,21 +186,24 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         platforms = ['all']
     }
     
-    def jobName = "openjdk-launch-pipelines/${version}-launch-build-pipelines"
-    
+    // Launch orchestrator job lives in the OpenJDK_Build_launchers folder.
+    // Name pattern: OpenJDK_Build_launchers/Build_openjdk<version>_launch
+    def jobName = "OpenJDK_Build_launchers/Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch"
+
     pipelineJob(jobName) {
-        displayName("${version} Launch Build Pipelines${isLts ? ' (LTS)' : ''}")
+        displayName("Build OpenJDK ${version} Launch${isLts ? ' (LTS)' : ''}")
         description("""
             Launch orchestrator for JDK ${version} builds.
             ${isLts ? 'This is a Long Term Support (LTS) version.' : ''}
-            
+
             This job:
             1. Reads platform configuration from: ${configFile}
             2. Optionally creates/updates platform-specific build jobs
             3. Launches builds for selected platforms in parallel
             4. Aggregates and reports results
-            
-            Platform-specific jobs created: openjdk-builds/${version}/${version}-\${platform}-build-pipeline
+
+            Platform-specific jobs created under Build_openjdk/ follow the AQA-style naming:
+              Build_openjdk${version.replaceAll(/[^\d]/, '')}_<distro>_<arch>_<os>
         """.stripIndent().trim())
 
         quietPeriod(5)
@@ -422,10 +425,10 @@ println "✓ Seed job created successfully\n"
 // ============================================================================
 
 // Create a view for launch orchestrator jobs
-listView('JDK Pipeline Launchers') {
-    description('Launch orchestrator jobs for coordinating platform builds')
+listView('Build OpenJDK Launchers') {
+    description('Launch orchestrator jobs for coordinating platform builds (Build_openjdk<version>_launch)')
     jobs {
-        regex('openjdk-launch-pipelines/jdk\\d+-launch-build-pipelines|openjdk-launch-pipelines/\\d+-launch-build-pipelines')
+        regex('OpenJDK_Build_launchers/Build_openjdk\\d+_launch')
     }
     recurse(true)  // Include jobs in folders
     columns {
@@ -440,10 +443,10 @@ listView('JDK Pipeline Launchers') {
 }
 
 // Create a view for platform-specific build jobs
-listView('JDK Build Platform Pipelines') {
-    description('Platform-specific build jobs (created dynamically by launch jobs)')
+listView('Build OpenJDK Platform Pipelines') {
+    description('Platform-specific build jobs — AQA-style naming: Build_openjdk<version>_<distro>_<arch>_<os>')
     jobs {
-        regex('openjdk-builds/jdk\\d+/jdk\\d+-[^-]+-build-pipeline|openjdk-builds/\\d+/\\d+-[^-]+-build-pipeline')
+        regex('Build_openjdk/Build_openjdk\\d+_[^_]+_[^_]+_[^_]+')
     }
     recurse(true)  // Include jobs in folders
     columns {

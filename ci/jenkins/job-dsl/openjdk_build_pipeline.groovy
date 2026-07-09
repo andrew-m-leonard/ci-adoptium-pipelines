@@ -6,7 +6,12 @@
  * then loads the platform configuration to extract TARGET_OS, ARCHITECTURE, and VARIANT.
  *
  * Called by: Launch job (Jenkinsfile.launch)
- * Creates: jdk${version}-${platform}-build-pipeline jobs
+ * Creates: Build_openjdk<version>_<distro>_<arch>_<os> jobs under /Build_openjdk/
+ *
+ * Naming convention (mirrors AQA Test job naming):
+ *   Build_<version>_<distro>_<arch>_<os>
+ *   e.g. Build_openjdk21_temurin_x86-64_linux
+ *        Build_openjdk17_dragonwell_aarch64_mac
  *
  * Required Parameters (from launch job):
  *   - JDK_VERSION: The JDK version (e.g., "21")
@@ -17,7 +22,7 @@
  * The script loads jdk${version}_pipeline_config.json and extracts from the platform configuration:
  *   - TARGET_OS: Operating system (e.g., "linux", "mac")
  *   - ARCHITECTURE: CPU architecture (e.g., "x64", "aarch64")
- *   - VARIANT: Build variant (e.g., "temurin", "dragonwell")
+ *   - VARIANT/DISTRO: Build distro (e.g., "temurin", "dragonwell", "corretto")
  */
 
 import groovy.json.JsonSlurper
@@ -150,34 +155,38 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
     throw new RuntimeException(errorMsg)
 }
 
-// Ensure the openjdk-builds folder and JDK version subfolder exist
-// Use absolute paths (starting with /) to ensure folders are created at root level
-folder('/openjdk-builds') {
-    displayName('OpenJDK Platform Builds')
-    description('Platform-specific build pipeline jobs organized by JDK version (created dynamically by launch jobs)')
+// Ensure the top-level Build_openjdk folder exists.
+// All build jobs (both launch orchestrators and platform builds) live here,
+// mirroring the single top-level folder used by AQA test jobs.
+folder('/Build_openjdk') {
+    displayName('Build OpenJDK')
+    description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_<version>_<distro>_<arch>_<os> convention')
 }
 
-folder("/openjdk-builds/jdk${jdkVersion}") {
-    displayName("JDK ${jdkVersion}")
-    description("Build pipeline jobs for JDK ${jdkVersion}")
-}
-
-// Create platform-specific build job
-def jobName = "/openjdk-builds/jdk${jdkVersion}/jdk${jdkVersion}-${platform}-build-pipeline"
+// Build the AQA-style job name:
+//   Build_openjdk<version>_<distro>_<arch>_<os>
+// arch values follow AQA conventions (x86-64, aarch64, ppc64le, s390x, ppc64, aarch32, x86-32)
+// os   values follow AQA conventions (linux, mac, windows, aix, solaris)
+def archName = architecture   // already in AQA arch format from platform config (e.g. "x86-64", "aarch64")
+def osName   = targetOs       // already in AQA os format from platform config  (e.g. "linux", "mac")
+def jobName  = "/Build_openjdk/Build_openjdk${jdkVersion}_${variant}_${archName}_${osName}"
 
 println "Creating platform-specific build job: ${jobName}"
 
 pipelineJob(jobName) {
-    displayName("JDK ${jdkVersion} ${platform} Build Pipeline")
+    displayName("Build OpenJDK ${jdkVersion} ${variant} ${archName} ${osName}")
     description("""
-        Platform-specific build pipeline for JDK ${jdkVersion} on ${platform}.
-        
+        Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${archName}/${osName}.
+
+        Job name follows AQA-style convention:
+          Build_openjdk<version>_<distro>_<arch>_<os>
+
         This job executes the complete build pipeline including:
         - Build
         - Test (if enabled)
         - Sign (if enabled)
         - Publish (if enabled)
-        
+
         This pipeline supports restart from any stage and tracks build state across restarts.
     """.stripIndent().trim())
 
