@@ -353,6 +353,7 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
     return {
         "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
         "pipelineTimeoutHours": 8,
+        "activeNodeTimeoutMinutes": 10,
         "jobConfiguration": {
             "defaultParameters": {
                 "VARIANT": "temurin",
