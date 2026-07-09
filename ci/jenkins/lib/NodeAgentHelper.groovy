@@ -76,30 +76,34 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fail fast when no Jenkins agent currently matches the given label expression.
+ * Abort the build when no Jenkins agent matching the label expression is online.
  *
  * Jenkins queues builds when all matching agents are *busy* — that is the
  * expected behaviour and we leave it alone.  But when *zero* agents are
- * online and capable of running the label (e.g. a cloud template is
- * misconfigured, or all physical nodes are offline), a build would hang
- * indefinitely.  This guard detects that case and fails with a clear message
- * after timeoutMinutes, giving cloud provisioners (e.g. Kubernetes, EC2)
- * time to spin up a fresh agent.
+ * online for the label (e.g. a cloud template is misconfigured, or all
+ * physical nodes are offline), a build would hang indefinitely.  This guard
+ * detects that case and aborts with a clear message after timeoutMinutes,
+ * giving cloud provisioners (e.g. Kubernetes, EC2) time to spin up a fresh agent.
+ *
+ * Uses the sandboxed pipeline step nodesByLabel(label) (Pipeline Utility Steps
+ * plugin) — no Script Security approval required, works in both scripted and
+ * declarative pipelines.
  *
  * Logic:
- *   1. Count agents that are online AND whose label set satisfies the label
- *      expression (using Jenkins' built-in Label.parseExpression).
- *   2. If at least one such agent exists, return immediately — even if they
- *      are all busy (busy is fine; offline/missing is not).
- *   3. If zero agents match, wait POLL_INTERVAL_SECONDS and repeat.
- *   4. If timeoutMinutes elapses without any agent appearing, throw.
+ *   1. Call nodesByLabel(labelExpr) — returns names of ALL nodes carrying the
+ *      label, regardless of whether they are online or busy.
+ *   2. If the list is non-empty, at least one agent exists; return immediately
+ *      and let Jenkins queue the build normally (busy is fine).
+ *   3. If the list is empty (zero agents match the label at all), wait
+ *      POLL_INTERVAL_SECONDS and retry.
+ *   4. If timeoutMinutes elapses without any agent appearing, throw
+ *      FlowInterruptedException(ABORTED) — infrastructure issue, not a code bug.
  *
- * This function must be called from a non-agent Groovy step context (e.g.
- * inside a scripted `script {}` block or a lib function invoked from one).
- * It must NOT be called from inside an already-allocated node() block.
+ * Must be called from a controller-side step context (e.g. inside script {})
+ * and NOT from inside an already-allocated node() block.
  *
  * @param labelExpr      Label expression string (same value passed to node()).
- * @param timeoutMinutes How long to wait for at least one online agent.
+ * @param timeoutMinutes How long to wait for at least one matching agent to appear.
  *                       Defaults to CONFIG_ACTIVE_NODE_TIMEOUT env var or 10.
  */
 def waitForActiveNode(String labelExpr, Integer timeoutMinutes = null) {
@@ -112,44 +116,30 @@ def waitForActiveNode(String labelExpr, Integer timeoutMinutes = null) {
     def deadline = System.currentTimeMillis() + timeoutMins * 60 * 1000L
 
     while (true) {
-        // Count agents that are online and satisfy the label expression.
-        // Jenkins.instance is available in Groovy CPS scripts running on the
-        // controller when the Script Security whitelist permits it (or when
-        // using the Job DSL / Pipeline Groovy sandbox with approve-once).
-        def activeCount = 0
-        try {
-            def labelObj = jenkins.model.Jenkins.instance.getLabel(labelExpr)
-            if (labelObj != null) {
-                activeCount = labelObj.getNodes().count { node ->
-                    def computer = node.toComputer()
-                    computer != null && computer.isOnline() && !computer.isOffline()
-                }
-            }
-        } catch (Exception e) {
-            // If Jenkins API access is blocked by Script Security, fall through
-            // and let Jenkins queue the build normally — do not fail the build.
-            echo "WARNING: waitForActiveNode() could not inspect agents (Script Security?): ${e.message}"
-            echo "         Proceeding without active-node guard."
-            return
-        }
+        // nodesByLabel is a sandboxed Pipeline Utility Steps step — no Script Security
+        // approval needed.  It returns node names whose label set satisfies labelExpr,
+        // online or not.  An empty list means zero agents carry this label at all.
+        def matchingNodes = nodesByLabel(label: labelExpr, offline: true)
+        def activeCount = matchingNodes.size()
 
         if (activeCount > 0) {
-            echo "✓ Found ${activeCount} active agent(s) matching '${labelExpr}' — proceeding."
+            echo "✓ Found ${activeCount} agent(s) matching '${labelExpr}' — proceeding."
             return
         }
 
         def remaining = (deadline - System.currentTimeMillis()) / 1000
         if (remaining <= 0) {
+            // Log the reason first — FlowInterruptedException carries no message of its own
+            // in all Jenkins versions, so we echo before throwing.
+            echo "ABORT: No agent found for label '${labelExpr}' after ${timeoutMins} minute(s). " +
+                 "Ensure at least one agent with this label is online (busy agents are fine — " +
+                 "this timeout only fires when zero agents match the label). " +
+                 "If using cloud provisioning, verify the cloud template is configured correctly."
             // Throw FlowInterruptedException so Jenkins marks the build ABORTED rather than
             // FAILURE — no active agent is an infrastructure/provisioning issue, not a
-            // code or configuration bug.
-            def msg = "No active Jenkins agent found for label '${labelExpr}' after ${timeoutMins} minute(s). " +
-                      "Ensure at least one agent with this label is online (busy agents are fine — " +
-                      "this timeout only fires when zero agents match the label). " +
-                      "If using cloud provisioning, verify the cloud template is configured correctly."
+            // code or configuration bug.  The no-arg Result constructor is sandbox-safe.
             throw new org.jenkinsci.plugins.workflow.steps.FlowInterruptedException(
-                hudson.model.Result.ABORTED,
-                new jenkins.model.CauseOfInterruption.UserInterruption(msg)
+                hudson.model.Result.ABORTED
             )
         }
 
