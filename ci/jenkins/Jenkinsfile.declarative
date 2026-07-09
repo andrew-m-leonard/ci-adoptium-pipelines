@@ -14,7 +14,7 @@
  *   - PipelineHelper.groovy     — initializeStage, finalizeStage, executeStageWithTracking
  *   - StageScriptRunner.groovy  — vendor-overridable stage script resolution
  *   - ConfigHelper.groovy       — generatePipelineConfig, generateJenkinsConfig, summarizePipelineConfig
- *   - DockerAgentHelper.groovy  — withBuildAgent() for optional Docker container support
+ *   - NodeAgentHelper.groovy  — withBuildAgent() for optional Docker container support
  *   - BuildUidHelper.groovy     — unique build tracking (loaded by PipelineHelper)
  *
  * Core Principle: Every stage archives outputs, every stage copies inputs
@@ -27,7 +27,7 @@ import groovy.transform.Field
 @Field def pipelineHelper
 @Field def stageRunner
 @Field def configHelper
-@Field def dockerAgentHelper
+@Field def nodeAgentHelper
 
 /**
  * Ensure all helper libraries are loaded. Called once per agent allocation.
@@ -37,7 +37,7 @@ def ensureLibsLoaded() {
         pipelineHelper    = load('ci/jenkins/lib/PipelineHelper.groovy')
         stageRunner       = load('ci/jenkins/lib/StageScriptRunner.groovy')
         configHelper      = load('ci/jenkins/lib/ConfigHelper.groovy')
-        dockerAgentHelper = load('ci/jenkins/lib/DockerAgentHelper.groovy')
+        nodeAgentHelper = load('ci/jenkins/lib/NodeAgentHelper.groovy')
     }
 }
 
@@ -49,6 +49,16 @@ def ensureLibsLoaded() {
  * For the Initialize stage (evaluated before CONFIG_STAGE_AGENT_LABELS exists)
  * falls back to the INITIALIZE_LABEL job parameter baked in by the Job DSL.
  */
+/**
+ * Return the active-node timeout in minutes from CONFIG_ACTIVE_NODE_TIMEOUT,
+ * falling back to ACTIVE_NODE_TIMEOUT job parameter, then to 10 minutes.
+ */
+def getActiveNodeTimeout() {
+    if (env.CONFIG_ACTIVE_NODE_TIMEOUT) return env.CONFIG_ACTIVE_NODE_TIMEOUT.toInteger()
+    if (params.ACTIVE_NODE_TIMEOUT)     return params.ACTIVE_NODE_TIMEOUT.toInteger()
+    return 10
+}
+
 def getStageLabel(String stageName) {
     // CONFIG_STAGE_AGENT_LABELS is populated by ConfigHelper.generateJenkinsConfig()
     // during the Initialize stage.  Labels are already fully resolved — no
@@ -95,6 +105,12 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    // NOTE: CONFIG_ACTIVE_NODE_TIMEOUT is not yet set at this point — it is only
+                    // populated by ConfigHelper.generateJenkinsConfig() which runs *inside* this stage.
+                    // getActiveNodeTimeout() will therefore fall back to the ACTIVE_NODE_TIMEOUT job
+                    // parameter (seeded from jenkins_job_config.json by the Job DSL) or 10 minutes
+                    // if that parameter is also absent.
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Initialize') {
                         pipelineHelper.initializeStage('Initialize', [])
 
@@ -115,13 +131,13 @@ pipeline {
 
         stage('Build') {
             // agent none: the correct agent (plain node or Docker container) is
-            // selected at runtime by dockerAgentHelper.withBuildAgent(), because
+            // selected at runtime by nodeAgentHelper.withBuildAgent(), because
             // CONFIG_DOCKER_IMAGE is only known after the Initialize stage runs.
             agent none
             steps {
                 script {
                     ensureLibsLoaded()
-                    dockerAgentHelper.withBuildAgent {
+                    nodeAgentHelper.withBuildAgent {
                         pipelineHelper.executeStageWithTracking('Build') {
                             def config = pipelineHelper.initializeStage('Build', ['Initialize'])
 
@@ -162,6 +178,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Internal Code Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Internal Code Sign') {
                         def config = pipelineHelper.initializeStage('Internal Code Sign', ['Build'], 'pipeline-config.json,workspace/target/jmods/**/*')
 
@@ -191,6 +208,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Assemble Images'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Assemble Images') {
                         def config = pipelineHelper.initializeStage('Assemble Images', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
 
@@ -213,6 +231,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Post-Build Code Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Post-Build Code Sign') {
                         def config = pipelineHelper.initializeStage('Post-Build Code Sign', ['Assemble Images'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
@@ -235,6 +254,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Build Installers'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Build Installers') {
                         def config = pipelineHelper.initializeStage('Build Installers', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/metadata/**/*')
 
@@ -260,6 +280,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Code Sign Installer'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Code Sign Installer') {
                         def config = pipelineHelper.initializeStage('Code Sign Installer', ['Build Installers'], 'pipeline-config.json,installers/**/*')
 
@@ -288,6 +309,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('SBOM Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('SBOM Sign') {
                         def config = pipelineHelper.initializeStage('SBOM Sign', ['Post-Build Code Sign'], 'pipeline-config.json,**/*.json')
 
@@ -315,6 +337,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Digital Artifact Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Digital Artifact Sign') {
                         def config = pipelineHelper.initializeStage('Digital Artifact Sign', ['Post-Build Code Sign'], 'pipeline-config.json,signed/**/*,signed-installers/**/*,signed-sbom/**/*')
 
@@ -342,6 +365,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Verify Signing'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Verify Signing') {
                         def config = pipelineHelper.initializeStage('Verify Signing', ['Digital Artifact Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
@@ -364,6 +388,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Validate SBOM'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Validate SBOM') {
                         def config = pipelineHelper.initializeStage('Validate SBOM', ['Build'], 'pipeline-config.json,*sbom*.json')
 
@@ -393,6 +418,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Smoke Tests'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Smoke Tests') {
                         def config = pipelineHelper.initializeStage('Smoke Tests', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
@@ -429,6 +455,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Reproducible Compare Build'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Reproducible Compare Build') {
                         def config = pipelineHelper.initializeStage('Reproducible Compare Build', ['Build'], 'pipeline-config.json,*.tar.gz,*.zip')
 
@@ -468,6 +495,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('AQA Tests'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('AQA Tests') {
                         def config = pipelineHelper.initializeStage('AQA Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
@@ -501,6 +529,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('TCK Tests'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('TCK Tests') {
                         def config = pipelineHelper.initializeStage('TCK Tests', ['Smoke Tests'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/metadata/**/*')
 
@@ -523,6 +552,7 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    nodeAgentHelper.waitForActiveNode(getStageLabel('Publish Artifacts'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Publish Artifacts') {
                         def config = pipelineHelper.initializeStage('Publish Artifacts', ['Build'], 'pipeline-config.json,**/*.tar.gz,**/*.zip,**/*.msi,**/*.pkg,**/metadata/**/*')
 
@@ -552,6 +582,10 @@ pipeline {
 
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
                     try {
+                        // NOTE: If the pipeline failed before generateJenkinsConfig() completed,
+                        // CONFIG_ACTIVE_NODE_TIMEOUT may be unset; falls back to the ACTIVE_NODE_TIMEOUT
+                        // job parameter or 10 minutes.
+                        nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
                         node(getStageLabel('Initialize')) {
                             echo "Final workspace cleanup..."
                             cleanWs notFailBuild: true, deleteDirs: true

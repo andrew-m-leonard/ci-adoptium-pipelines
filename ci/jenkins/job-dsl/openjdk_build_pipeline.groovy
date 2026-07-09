@@ -258,6 +258,12 @@ pipelineJob(jobName) {
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
 
+        stringParam('ACTIVE_NODE_TIMEOUT',
+            (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
+            'Minutes to wait for at least one active (online) agent matching the stage label before failing. ' +
+            'Busy-but-online agents do not trigger this timeout — only zero matching agents do. ' +
+            'Set from activeNodeTimeoutMinutes in jenkins_job_config.json.')
+
         // Read from jenkins_job_config.json stageAgentLabels.Initialize at job-generation
         // time so the Jenkinsfile can select the correct agent for the Initialize stage
         // before CONFIG_STAGE_AGENT_LABELS is populated by that stage itself.

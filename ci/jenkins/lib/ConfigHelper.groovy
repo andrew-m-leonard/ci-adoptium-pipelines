@@ -192,6 +192,10 @@ def generateJenkinsConfig(String configRepoPath = './config-repo') {
         jenkinsConfig.resolvedStageAgentLabels ?: jenkinsConfig.stageAgentLabels ?: [:]
     )
 
+    // Publish the active-node timeout so NodeAgentHelper and the Jenkinsfile
+    // can enforce it at every node() allocation without re-reading config.
+    env.CONFIG_ACTIVE_NODE_TIMEOUT = (jenkinsConfig.activeNodeTimeoutMinutes ?: 10).toString()
+
     return jenkinsConfig
 }
 

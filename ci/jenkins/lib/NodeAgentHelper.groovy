@@ -1,8 +1,8 @@
 /**
- * DockerAgentHelper — container agent lifecycle for build stages.
+ * NodeAgentHelper — container agent lifecycle for build stages.
  *
  * Loaded with:
- *   def dockerAgentHelper = load('ci/jenkins/lib/DockerAgentHelper.groovy')
+ *   def nodeAgentHelper = load('ci/jenkins/lib/NodeAgentHelper.groovy')
  *
  * This file is a CpsScript. All pipeline steps (echo, sh, node, etc.)
  * are called directly — no 'steps.' prefix.
@@ -70,6 +70,87 @@
  *   BUILD_CONTAINER_RUNTIME   — 'docker' or 'podman'
  *   BUILD_CONTAINER_WORKSPACE — workspace path inside the container
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Active-node guard
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fail fast when no Jenkins agent currently matches the given label expression.
+ *
+ * Jenkins queues builds when all matching agents are *busy* — that is the
+ * expected behaviour and we leave it alone.  But when *zero* agents are
+ * online and capable of running the label (e.g. a cloud template is
+ * misconfigured, or all physical nodes are offline), a build would hang
+ * indefinitely.  This guard detects that case and fails with a clear message
+ * after timeoutMinutes, giving cloud provisioners (e.g. Kubernetes, EC2)
+ * time to spin up a fresh agent.
+ *
+ * Logic:
+ *   1. Count agents that are online AND whose label set satisfies the label
+ *      expression (using Jenkins' built-in Label.parseExpression).
+ *   2. If at least one such agent exists, return immediately — even if they
+ *      are all busy (busy is fine; offline/missing is not).
+ *   3. If zero agents match, wait POLL_INTERVAL_SECONDS and repeat.
+ *   4. If timeoutMinutes elapses without any agent appearing, throw.
+ *
+ * This function must be called from a non-agent Groovy step context (e.g.
+ * inside a scripted `script {}` block or a lib function invoked from one).
+ * It must NOT be called from inside an already-allocated node() block.
+ *
+ * @param labelExpr      Label expression string (same value passed to node()).
+ * @param timeoutMinutes How long to wait for at least one online agent.
+ *                       Defaults to CONFIG_ACTIVE_NODE_TIMEOUT env var or 10.
+ */
+def waitForActiveNode(String labelExpr, Integer timeoutMinutes = null) {
+    def timeoutMins = timeoutMinutes
+                   ?: (env.CONFIG_ACTIVE_NODE_TIMEOUT ? env.CONFIG_ACTIVE_NODE_TIMEOUT.toInteger() : 10)
+    final int POLL_INTERVAL_SECONDS = 30
+
+    echo "Checking for active agents matching label: '${labelExpr}' (timeout: ${timeoutMins} min)"
+
+    def deadline = System.currentTimeMillis() + timeoutMins * 60 * 1000L
+
+    while (true) {
+        // Count agents that are online and satisfy the label expression.
+        // Jenkins.instance is available in Groovy CPS scripts running on the
+        // controller when the Script Security whitelist permits it (or when
+        // using the Job DSL / Pipeline Groovy sandbox with approve-once).
+        def activeCount = 0
+        try {
+            def labelObj = jenkins.model.Jenkins.instance.getLabel(labelExpr)
+            if (labelObj != null) {
+                activeCount = labelObj.getNodes().count { node ->
+                    def computer = node.toComputer()
+                    computer != null && computer.isOnline() && !computer.isOffline()
+                }
+            }
+        } catch (Exception e) {
+            // If Jenkins API access is blocked by Script Security, fall through
+            // and let Jenkins queue the build normally — do not fail the build.
+            echo "WARNING: waitForActiveNode() could not inspect agents (Script Security?): ${e.message}"
+            echo "         Proceeding without active-node guard."
+            return
+        }
+
+        if (activeCount > 0) {
+            echo "✓ Found ${activeCount} active agent(s) matching '${labelExpr}' — proceeding."
+            return
+        }
+
+        def remaining = (deadline - System.currentTimeMillis()) / 1000
+        if (remaining <= 0) {
+            error("No active Jenkins agent found for label '${labelExpr}' after ${timeoutMins} minute(s). " +
+                  "Ensure at least one agent with this label is online (busy agents are fine — " +
+                  "this timeout only fires when zero agents match the label). " +
+                  "If using cloud provisioning, verify the cloud template is configured correctly.")
+        }
+
+        echo "  No active agent yet for '${labelExpr}'. Waiting ${POLL_INTERVAL_SECONDS}s " +
+             "(${remaining.toInteger()}s remaining)..."
+        sleep(POLL_INTERVAL_SECONDS)
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Runtime detection
@@ -231,19 +312,23 @@ def runInPodmanContainer(String image, String extraArgs, Closure body) {
  * Allocate a node and optionally run inside a container.
  *
  * With CONFIG_DOCKER_IMAGE set:
- *   1. Allocates a node by CONFIG_NODE_LABEL.
- *   2. Detects the container runtime (Docker or Podman).
- *   3. Performs registry login if CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are set.
- *   4. Starts the container via runInDockerContainer or runInPodmanContainer.
+ *   1. Checks that at least one agent matching CONFIG_NODE_LABEL is online
+ *      (waitForActiveNode — fails after CONFIG_ACTIVE_NODE_TIMEOUT minutes if
+ *      zero agents are online; busy agents are fine and do not trigger this).
+ *   2. Allocates a node by CONFIG_NODE_LABEL.
+ *   3. Detects the container runtime (Docker or Podman).
+ *   4. Performs registry login if CONFIG_DOCKER_REGISTRY + CONFIG_DOCKER_CREDENTIAL are set.
+ *   5. Starts the container via runInDockerContainer or runInPodmanContainer.
  *      Both use the scripted approach — see the module-level comment.
  *
  * Without CONFIG_DOCKER_IMAGE:
- *   Allocates a node by CONFIG_NODE_LABEL and runs body directly.
+ *   Checks active agents, then allocates a node by CONFIG_NODE_LABEL and runs body directly.
  */
 def withBuildAgent(Closure body) {
     def nodeLabel   = env.CONFIG_NODE_LABEL?.trim() ?: 'worker'
     def image       = env.CONFIG_DOCKER_IMAGE?.trim()
 
+    waitForActiveNode(nodeLabel)
     node(nodeLabel) {
         if (!image) {
             body()

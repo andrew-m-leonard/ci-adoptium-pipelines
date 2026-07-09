@@ -20,7 +20,7 @@
  * .sh and .py scripts receive config via environment variables set by initializeStage().
  *
  * Container dispatch:
- *   When BUILD_CONTAINER_ID is set (by DockerAgentHelper.withBuildAgent), .sh
+ *   When BUILD_CONTAINER_ID is set (by NodeAgentHelper.withBuildAgent), .sh
  *   and .py scripts are dispatched into the running container via
  *   `docker exec` or `podman exec` with -w set to BUILD_CONTAINER_WORKSPACE.
  *   .groovy scripts always run on the host JVM and cannot be dispatched
@@ -102,7 +102,7 @@ def containerEnvFlags() {
     flags << "-e 'PATH=/usr/local/libexec/git-core:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'"
 
     // Set HOME to the Jenkins agent's home directory.  The host home is
-    // bind-mounted into the container at the same path (by DockerAgentHelper),
+    // bind-mounted into the container at the same path (by NodeAgentHelper),
     // so it is writable.  Without a valid HOME, git's temp-file allocation fails.
     def jenkinsHome = env.getProperty('HOME') ?: '/home/jenkins'
     flags << "-e 'HOME=${jenkinsHome}'"
