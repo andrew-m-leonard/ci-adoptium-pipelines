@@ -140,10 +140,17 @@ def waitForActiveNode(String labelExpr, Integer timeoutMinutes = null) {
 
         def remaining = (deadline - System.currentTimeMillis()) / 1000
         if (remaining <= 0) {
-            error("No active Jenkins agent found for label '${labelExpr}' after ${timeoutMins} minute(s). " +
-                  "Ensure at least one agent with this label is online (busy agents are fine — " +
-                  "this timeout only fires when zero agents match the label). " +
-                  "If using cloud provisioning, verify the cloud template is configured correctly.")
+            // Throw FlowInterruptedException so Jenkins marks the build ABORTED rather than
+            // FAILURE — no active agent is an infrastructure/provisioning issue, not a
+            // code or configuration bug.
+            def msg = "No active Jenkins agent found for label '${labelExpr}' after ${timeoutMins} minute(s). " +
+                      "Ensure at least one agent with this label is online (busy agents are fine — " +
+                      "this timeout only fires when zero agents match the label). " +
+                      "If using cloud provisioning, verify the cloud template is configured correctly."
+            throw new org.jenkinsci.plugins.workflow.steps.FlowInterruptedException(
+                hudson.model.Result.ABORTED,
+                new jenkins.model.CauseOfInterruption.UserInterruption(msg)
+            )
         }
 
         echo "  No active agent yet for '${labelExpr}'. Waiting ${POLL_INTERVAL_SECONDS}s " +
