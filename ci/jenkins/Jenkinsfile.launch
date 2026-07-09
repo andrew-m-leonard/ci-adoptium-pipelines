@@ -4,7 +4,7 @@
  * This pipeline orchestrates builds across multiple platforms for a specific JDK version.
  * It dynamically creates platform-specific build jobs and launches them in parallel.
  *
- * Job Name Pattern: OpenJDK_Build_launchers/Build_openjdk<version>_launch
+ * Job Name Pattern: OpenJDK_build_launchers/Build_openjdk<version>_launch
  * Creates:          Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>
  */
 

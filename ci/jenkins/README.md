@@ -17,7 +17,7 @@ Single-platform build pipeline. Every `Build_openjdk<version>_<distro>_<arch>_<o
 
 ### Jenkinsfile.launch
 
-Multi-platform launch pipeline. Jobs named `Build_openjdk<version>_launch` (in `OpenJDK_Build_launchers/`) use this file. It:
+Multi-platform launch pipeline. Jobs named `Build_openjdk<version>_launch` (in `OpenJDK_build_launchers/`) use this file. It:
 
 1. Reads `jdk${version}_pipeline_config.json` from the config repo to discover available platforms
 2. Determines which platforms to build (all, or a subset from the `PLATFORMS` parameter)
@@ -62,10 +62,10 @@ Job DSL scripts that create and maintain all Jenkins jobs from code — no manua
 #### seed/seed_job_consolidated.groovy
 
 Bootstrap script. Run once from a Freestyle "seed job" to create all other jobs:
-- Creates `OpenJDK_Build_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
+- Creates `OpenJDK_build_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
 - Reads the config repo to discover active JDK versions and their platform lists
 - Configures log rotation, parameters, and SCM from the config repo's `jenkins_job_config.json`
-- Creates the `OpenJDK_Build_launchers/` and `Build_openjdk/` top-level folders
+- Creates the `OpenJDK_build_launchers/` and `Build_openjdk/` top-level folders
 
 #### openjdk_build_pipeline.groovy
 

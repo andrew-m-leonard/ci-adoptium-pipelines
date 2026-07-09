@@ -84,7 +84,7 @@ ci-adoptium-pipelines/
 seed-job (Freestyle)
   └─ seed_job_consolidated.groovy  ← creates/updates all jobs
        │
-       ├─ OpenJDK_Build_launchers/
+       ├─ OpenJDK_build_launchers/
        │    ├─ Build_openjdk21_launch  (Jenkinsfile.launch)
        │    │    └─ fans out in parallel to:
        │    │         ├─ Build_openjdk21_temurin_x86-64_linux   (Jenkinsfile.declarative)

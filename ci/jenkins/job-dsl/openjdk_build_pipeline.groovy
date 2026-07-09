@@ -159,7 +159,7 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
 // All build jobs (both launch orchestrators and platform builds) live here,
 // mirroring the single top-level folder used by AQA test jobs.
 folder('/Build_openjdk') {
-    displayName('Build OpenJDK')
+    displayName('Build_openjdk')
     description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_<version>_<distro>_<arch>_<os> convention')
 }
 
@@ -174,7 +174,7 @@ def jobName  = "/Build_openjdk/Build_openjdk${jdkVersion}_${variant}_${archName}
 println "Creating platform-specific build job: ${jobName}"
 
 pipelineJob(jobName) {
-    displayName("Build OpenJDK ${jdkVersion} ${variant} ${archName} ${osName}")
+    displayName("Build_openjdk${jdkVersion}_${variant}_${archName}_${osName}")
     description("""
         Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${archName}/${osName}.
 

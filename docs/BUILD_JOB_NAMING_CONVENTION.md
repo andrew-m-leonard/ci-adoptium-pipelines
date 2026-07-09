@@ -8,7 +8,7 @@ Build pipeline jobs follow the same structural naming convention as AQA test job
 
 | Folder | Contents |
 |---|---|
-| **`OpenJDK_Build_launchers`** | One launch orchestrator per active JDK version |
+| **`OpenJDK_build_launchers`** | One launch orchestrator per active JDK version |
 | **`Build_openjdk`** | One platform build job per version/distro/arch/os combination |
 
 ## Platform Build Job Name Format
@@ -31,14 +31,14 @@ Build_openjdk<version>_<distro>_<arch>_<os>
 Build_openjdk<version>_launch
 ```
 
-One per active JDK version, lives in `OpenJDK_Build_launchers/`.
+One per active JDK version, lives in `OpenJDK_build_launchers/`.
 
 ## Examples
 
 ```
-OpenJDK_Build_launchers/Build_openjdk21_launch
-OpenJDK_Build_launchers/Build_openjdk17_launch
-OpenJDK_Build_launchers/Build_openjdk11_launch
+OpenJDK_build_launchers/Build_openjdk21_launch
+OpenJDK_build_launchers/Build_openjdk17_launch
+OpenJDK_build_launchers/Build_openjdk11_launch
 
 Build_openjdk/Build_openjdk21_temurin_x86-64_linux
 Build_openjdk/Build_openjdk21_temurin_aarch64_linux
@@ -54,7 +54,7 @@ Build_openjdk/Build_openjdk8_temurin_ppc64_aix
 ## Folder Layout
 
 ```
-OpenJDK_Build_launchers/
+OpenJDK_build_launchers/
 ├── Build_openjdk21_launch      ← triggers all enabled JDK 21 platforms
 ├── Build_openjdk17_launch      ← triggers all enabled JDK 17 platforms
 └── Build_openjdk11_launch      ← triggers all enabled JDK 11 platforms
@@ -104,7 +104,7 @@ Two Jenkins views are created automatically by the seed job:
 
 | View | Matches |
 |---|---|
-| **Build OpenJDK Launchers** | `OpenJDK_Build_launchers/Build_openjdk<N>_launch` |
+| **Build OpenJDK Launchers** | `OpenJDK_build_launchers/Build_openjdk<N>_launch` |
 | **Build OpenJDK Platform Pipelines** | `Build_openjdk/Build_openjdk<N>_<distro>_<arch>_<os>` |
 
 ## `<arch>` and `<os>` Value Reference
