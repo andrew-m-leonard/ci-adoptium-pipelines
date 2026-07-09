@@ -145,8 +145,8 @@ def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
 def defaultParams = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
 
 // Top-level folder for launch orchestrator jobs
-folder('OpenJDK_build_launchers') {
-    displayName('OpenJDK_build_launchers')
+folder('Build_openjdk_launchers') {
+    displayName('Build_openjdk_launchers')
     description('Launch orchestrator jobs that trigger platform-specific builds across all selected platforms for a given JDK version')
 }
 
@@ -186,9 +186,9 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         platforms = ['all']
     }
     
-    // Launch orchestrator job lives in the OpenJDK_build_launchers folder.
-    // Name pattern: OpenJDK_build_launchers/Build_openjdk<version>_launch
-    def jobName = "OpenJDK_build_launchers/Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch"
+    // Launch orchestrator job lives in the Build_openjdk_launchers folder.
+    // Name pattern: Build_openjdk_launchers/Build_openjdk<version>_launch
+    def jobName = "Build_openjdk_launchers/Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch"
 
     pipelineJob(jobName) {
         displayName("Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch${isLts ? ' (LTS)' : ''}")
@@ -425,10 +425,10 @@ println "✓ Seed job created successfully\n"
 // ============================================================================
 
 // Create a view for launch orchestrator jobs
-listView('OpenJDK_Build_Launchers') {
+listView('Build_openjdk_launchers') {
     description('Launch orchestrator jobs for coordinating platform builds (Build_openjdk<version>_launch)')
     jobs {
-        regex('OpenJDK_build_launchers/Build_openjdk\\d+_launch')
+        regex('Build_openjdk_launchers/Build_openjdk\\d+_launch')
     }
     recurse(true)  // Include jobs in folders
     columns {

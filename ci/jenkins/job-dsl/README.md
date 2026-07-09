@@ -24,10 +24,10 @@ The seed job uses a **consolidated script** that contains all logic in a single 
 **Active Script:**
 - **`seed_job_consolidated.groovy`**: Main seed job script that:
   1. Loads configuration from `jenkins_job_config.json` and `adoptium_pipeline_config.json`
-  2. Creates `OpenJDK_build_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
-  3. Creates the `OpenJDK_build_launchers/` and `Build_openjdk/` top-level folders
+  2. Creates `Build_openjdk_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
+  3. Creates the `Build_openjdk_launchers/` and `Build_openjdk/` top-level folders
   4. Creates/updates the seed job itself (self-updating)
-  5. Creates the `OpenJDK_Build_Launchers` and `Build_openjdk` views
+  5. Creates the `Build_openjdk_launchers` and `Build_openjdk` views
 
 **Legacy Scripts (kept for reference):**
 - `load_config.groovy` - Original config loader (functionality now in consolidated script)
