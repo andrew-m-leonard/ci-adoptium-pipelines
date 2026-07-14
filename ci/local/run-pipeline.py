@@ -93,6 +93,9 @@ class PipelineRunner:
         All five standard variables are set:
           WORKSPACE, CONFIG_FILE, INPUT_ARTIFACTS_DIR, TARGET_DIR, BUILD_NUMBER
         plus PIPELINE_ROOT for vendor scripts that source shared lib utilities.
+
+        CONFIG_* variables are populated from pipeline-config.json so that
+        stage scripts (e.g. 02-build.sh) can read them without needing jq.
         """
         env = os.environ.copy()
         env['WORKSPACE']            = str(self.stage_workspace)
@@ -101,6 +104,37 @@ class PipelineRunner:
         env['INPUT_ARTIFACTS_DIR']  = str(self.stage_workspace)
         env['TARGET_DIR']           = str(self.stage_workspace / 'target')
         env['BUILD_NUMBER']         = self.build_number
+
+        # Inject CONFIG_* variables from pipeline-config.json so that stage
+        # shell scripts can consume them without a jq dependency.
+        config_path = self.build_artifacts_dir / 'pipeline-config.json'
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                cfg = json.load(f)
+
+            build_cfg = cfg.get('buildConfig', {})
+            # Map every buildConfig key → CONFIG_<KEY>
+            for key, value in build_cfg.items():
+                env[f'CONFIG_{key}'] = str(value) if value is not None else ''
+
+            params = cfg.get('parameters', {})
+            env['CONFIG_EA_BETA_BUILD']  = 'true' if params.get('eaBetaBuild')  else 'false'
+            env['CONFIG_COMPARE_BUILD']  = 'true' if params.get('compareBuild') else 'false'
+            env['CONFIG_RELEASE']        = 'true' if params.get('release')      else 'false'
+            env['CONFIG_CLEAN_WORKSPACE'] = 'true' if params.get('cleanWorkspaceAfterStage') else 'false'
+
+            refs = cfg.get('refs', {})
+            if refs.get('scmRef'):
+                env.setdefault('SCM_REF', refs['scmRef'])
+            if refs.get('buildRef'):
+                env['CONFIG_BUILD_REF'] = refs['buildRef']
+            if refs.get('buildRepoUrl'):
+                env['CONFIG_BUILD_REPO_URL'] = refs['buildRepoUrl']
+            if refs.get('aqaRef'):
+                env['CONFIG_AQA_REF'] = refs['aqaRef']
+            if refs.get('aqaRepoUrl'):
+                env['CONFIG_AQA_REPO_URL'] = refs['aqaRepoUrl']
+
         if extra:
             env.update(extra)
         return env
