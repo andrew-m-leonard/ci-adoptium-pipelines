@@ -39,35 +39,41 @@ import groovy.json.JsonSlurper
 // Called once per job generation. Uses --vendor-raw-base-url so no local
 // config-repo checkout is needed at Job DSL evaluation time.
 //
-// Runs via 'sh -c' so that the shell resolves python3/python on PATH — plain
-// JVM Runtime.exec() does not perform shell PATH lookups and fails on agents
-// where python3 is installed via pyenv, nix, or a non-standard prefix.
+// Runs via 'sh -c' from the job WORKSPACE so relative paths resolve correctly.
+// new File('.') is the JVM controller CWD — not the workspace — so the
+// WORKSPACE env var must be passed explicitly as workspaceDir.
 //
 // Returns a Map with keys:
 //   groups    — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings
 // ---------------------------------------------------------------------------
-def fetchCollatedStageParams(String repoPath, String branch) {
+def fetchCollatedStageParams(String repoPath, String branch, String workspaceDir) {
     def rawBase = "https://raw.githubusercontent.com/${repoPath}/${branch}"
     def tmpOut  = File.createTempFile('collated-stage-params', '.json')
     tmpOut.deleteOnExit()
 
-    // Run via 'sh -c' with the job workspace as CWD so relative paths
-    // (scripts/lib/python-runner.sh, scripts/stages/) resolve correctly.
-    // The List.execute(envp, workDir) overload sets the subprocess working dir.
+    def workDir = new File(workspaceDir)
     def shellCmd = "scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py" +
         " --default-stages-dir scripts/stages" +
         " --vendor-raw-base-url '${rawBase}'" +
         " --output '${tmpOut.absolutePath}'"
 
-    def proc = ['sh', '-c', shellCmd].execute(null, new File('.'))
+    println "Collating stage params from ${rawBase} (workdir: ${workDir.absolutePath})"
+    def proc = ['sh', '-c', shellCmd].execute(null, workDir)
+    def stdout = new StringBuilder()
+    def stderr = new StringBuilder()
+    proc.consumeProcessOutput(stdout, stderr)
     proc.waitFor()
+    if (stdout) println stdout.toString().trim()
     if (proc.exitValue() != 0) {
-        println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
-                "continuing with no collated stage params.\n${proc.err.text}"
-        return [groups: [], paramNames: []]
+        throw new RuntimeException(
+            "collect-stage-params.py failed (exit ${proc.exitValue()}).\n" +
+            "stderr: ${stderr.toString().trim()}\n" +
+            "stdout: ${stdout.toString().trim()}\n" +
+            "workdir: ${workDir.absolutePath}\n" +
+            "Ensure python3 or python is on PATH on the Jenkins controller."
+        )
     }
-    println proc.out.text.trim()
 
     return new JsonSlurper().parseText(tmpOut.text)
 }
@@ -204,7 +210,8 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
 // vendor-scripts/*.params.json overrides from the config repo.
 // Runs collect-stage-params.py at job-generation time against the config repo
 // raw URL so no local checkout is required.
-def collatedStageParams = fetchCollatedStageParams(repoPath, configRepoBranch)
+def workspace = binding.variables.get('WORKSPACE') ?: new File('.').absolutePath
+def collatedStageParams = fetchCollatedStageParams(repoPath, configRepoBranch, workspace)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
 
