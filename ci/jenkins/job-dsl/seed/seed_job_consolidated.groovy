@@ -49,7 +49,7 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
     def stems = defaultStagesPath.list('*.params.json')
         .collect { it.name.replace('.params.json', '') }
         .sort()
-    println "collateStageParams: discovered stems = ${stems}"
+    println "  Discovered param stems: ${stems}"
 
     stems.each { stem ->
         // Read default params via FilePath.child().readToString()
@@ -63,13 +63,17 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
             def vf = vendorScriptsPath.child("${stem}.params.json")
             if (vf.exists()) {
                 vendorData = slurper.parseText(vf.readToString())
+                println "  [${stem}] vendor override loaded from workspace"
+            } else {
+                println "  [${stem}] no vendor override in workspace"
             }
         } else if (vendorRawBaseUrl) {
             def vendorUrl = "${vendorRawBaseUrl.replaceAll('/+$', '')}/vendor-scripts/${stem}.params.json"
             try {
                 vendorData = slurper.parseText(new URL(vendorUrl).text)
+                println "  [${stem}] vendor override loaded from ${vendorUrl}"
             } catch (FileNotFoundException | java.io.IOException ignored) {
-                // No vendor override for this stem — expected
+                println "  [${stem}] no vendor override at ${vendorUrl}"
             }
         }
 
@@ -121,52 +125,20 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
                 allParamNames[p.name] = "${stem}/${grp.name}"
                 return true
             }
-            if (clean) outputGroups << [name: grp.name, description: grp.description,
-                                        stageId: grp.stageId, parameters: clean]
+            if (clean) {
+                println "  [${stem}] group '${grp.name}': ${clean.collect { it.name }}"
+                outputGroups << [name: grp.name, description: grp.description,
+                                 stageId: grp.stageId, parameters: clean]
+            }
         }
     }
 
+    def paramNames = allParamNames.keySet().toList()
+    println "  Total collated params: ${paramNames}"
     return [
         groups:     outputGroups,
-        paramNames: allParamNames.keySet().toList()
+        paramNames: paramNames
     ]
-}
-
-// ---------------------------------------------------------------------------
-// Helper: inject Parameter Separator nodes for each collated group into the
-// job's parameterDefinitions XML via a configure{} block.
-// ---------------------------------------------------------------------------
-def injectParamSeparators(def project, def collatedStageParams) {
-    if (!collatedStageParams.groups) return
-
-    def paramDefs = project / 'properties'
-        / 'hudson.model.ParametersDefinitionProperty'
-        / 'parameterDefinitions'
-
-    collatedStageParams.groups.each { group ->
-        if (!group.parameters) return
-
-        def sepNode = paramDefs.appendNode(
-            'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
-        )
-        sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
-        sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
-        sepNode.appendNode('sectionHeaderStyle', '')
-        if (group.description) {
-            sepNode.appendNode('sectionDescription', group.description)
-        }
-        sepNode.appendNode('separatorStyle', '')
-
-        group.parameters.each { p ->
-            def paramNode = paramDefs.'*'.find { node ->
-                node.'name'?.text() == p.name
-            }
-            if (paramNode) {
-                paramDefs.remove(paramNode)
-                paramDefs.append(paramNode)
-            }
-        }
-    }
 }
 
 // ============================================================================
@@ -309,22 +281,25 @@ folder('Build_openjdk') {
     description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_openjdk<version>_<distro>_<arch>_<os> convention')
 }
 
-// Collate stage parameters once — shared across all launch job versions.
-// Uses hudson.FilePath (Jenkins internal API) to list and read workspace files —
-// java.io.File is sandbox-blocked but FilePath is not.
-// Vendor params: config repo is not checked out locally, so fall back to raw URL.
-def wsFilePath      = hudson.model.Executor.currentExecutor().currentWorkspace
-def defaultStages   = wsFilePath.child('scripts/stages')
-def vendorScripts   = wsFilePath.child('config-repo/vendor-scripts')
-def vendorScriptsOk = vendorScripts.exists()
-def vendorRawBase   = vendorScriptsOk ? null : "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
-println "Workspace: ${wsFilePath.remote}"
-println "defaultStages exists: ${defaultStages.exists()}, vendorScripts local: ${vendorScriptsOk}"
-def collatedStageParams = collateStageParams(
-    defaultStages,
-    vendorScriptsOk ? vendorScripts : null,
-    vendorRawBase
-)
+// Collate stage parameters — reads defaults from workspace, vendor overrides
+// from config-repo/vendor-scripts/ (mandatory checkout, see JOB_DSL_AUTOMATION.md).
+def wsFilePath    = hudson.model.Executor.currentExecutor().currentWorkspace
+def defaultStages = wsFilePath.child('scripts/stages')
+def vendorScripts = wsFilePath.child('config-repo/vendor-scripts')
+println "Workspace     : ${wsFilePath.remote}"
+println "defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
+println "vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
+if (!vendorScripts.exists()) {
+    throw new RuntimeException("""
+config-repo/vendor-scripts not found in workspace at ${vendorScripts.remote}
+
+The seed job requires the config repo to be checked out into config-repo/
+before the 'Process Job DSLs' step runs.  See docs/JOB_DSL_AUTOMATION.md
+Step 3 for setup instructions (dual SCM checkout using \${CONFIG_REPO_URL}
+and \${CONFIG_REPO_BRANCH} job parameters).
+""".stripIndent().trim())
+}
+def collatedStageParams = collateStageParams(defaultStages, vendorScripts, null)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s) for launch jobs"
 
@@ -480,8 +455,39 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             disableResume()
         }
 
-        configure { project ->
-            injectParamSeparators(project, collatedStageParams)
+        // Inject Parameter Separator nodes for each collated group.
+        // Inlined — top-level def methods are not visible inside configure{} closures.
+        if (collatedStageParams.groups) {
+            configure { project ->
+                def paramDefs = project / 'properties'
+                    / 'hudson.model.ParametersDefinitionProperty'
+                    / 'parameterDefinitions'
+
+                collatedStageParams.groups.each { group ->
+                    if (!group.parameters) return
+
+                    def sepNode = paramDefs.appendNode(
+                        'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+                    )
+                    sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
+                    sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+                    sepNode.appendNode('sectionHeaderStyle', '')
+                    if (group.description) {
+                        sepNode.appendNode('sectionDescription', group.description)
+                    }
+                    sepNode.appendNode('separatorStyle', '')
+
+                    group.parameters.each { p ->
+                        def paramNode = paramDefs.'*'.find { node ->
+                            node.'name'?.text() == p.name
+                        }
+                        if (paramNode) {
+                            paramDefs.remove(paramNode)
+                            paramDefs.append(paramNode)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -489,102 +495,7 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 println "✓ Launch orchestrator jobs created successfully\n"
 
 // ============================================================================
-// STEP 3: Create Seed Job (Self-Updating)
-// ============================================================================
-
-// Repository configuration (from CI-agnostic pipeline config)
-def repoUrl = pipelineConfig.repository?.url ?: 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
-def repoBranch = "*/${pipelineConfig.repository?.branch ?: 'main'}"
-def repoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
-
-freeStyleJob('openjdk-build-seed-job') {
-    displayName('New OpenJDK Build CI - Seed Job - Job Generator')
-    description('''
-        This job generates all other Jenkins jobs from Job DSL scripts.
-        Run this job to create or update all pipeline jobs.
-
-        This job is self-updating - it will recreate itself from the DSL script.
-
-        Required Parameters:
-        - CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
-        - CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
-    '''.stripIndent().trim())
-
-    logRotator {
-        daysToKeep(30)
-        numToKeep(50)
-        artifactDaysToKeep(-1)
-        artifactNumToKeep(-1)
-    }
-
-    parameters {
-        stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
-            """⚠️  REQUIRED: URL of the configuration repository containing jenkins_job_config.json
-            
-            Example: https://github.com/adoptium/ci-temurin-config.git
-            
-            This parameter MUST be provided when running the seed job.
-            The value will be propagated to all generated launch jobs.""".stripIndent().trim())
-        
-        stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
-            """⚠️  REQUIRED: Branch of the configuration repository
-            
-            Example: main
-            
-            This parameter MUST be provided when running the seed job.
-            The value will be propagated to all generated launch jobs.""".stripIndent().trim())
-    }
-
-    scm {
-        git {
-            remote {
-                url(repoUrl)
-                if (repoCredentialsId) {
-                    credentials(repoCredentialsId)
-                }
-            }
-            branch(repoBranch)
-            extensions {
-                cleanBeforeCheckout()
-            }
-        }
-    }
-
-    triggers {
-        // Poll SCM every 15 mins to detect changes in Job DSL scripts
-        scm('H/15 * * * *')
-    }
-
-    steps {
-        dsl {
-            // Process the consolidated seed job script
-            external('ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy')
-
-            // NOTE: Scripts in ci/jenkins/job-dsl/ (not in seed/) are for dynamic job creation
-            // openjdk_build_pipeline.groovy is called by launch jobs via jobDsl step
-            // when REGENERATE_JOBS=true or when platform jobs don't exist yet.
-
-            // Remove jobs that are no longer defined in DSL
-            removeAction('DELETE')
-
-            // Remove views that are no longer defined in DSL
-            removeViewAction('DELETE')
-
-            // Additional classpath for helper classes (if needed)
-            additionalClasspath('ci/jenkins/job-dsl')
-        }
-    }
-
-    publishers {
-        // Send email notification on failure
-        mailer('', false, true)
-    }
-}
-
-println "✓ Seed job created successfully\n"
-
-// ============================================================================
-// STEP 4: Create Views
+// STEP 3: Create Views
 // ============================================================================
 
 // Create a view for launch orchestrator jobs
