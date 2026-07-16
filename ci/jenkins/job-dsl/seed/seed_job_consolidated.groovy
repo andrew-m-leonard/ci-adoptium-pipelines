@@ -40,11 +40,16 @@ def collateStageParams(String workspaceDir, String vendorRawBaseUrl) {
     def outputGroups    = []
     def allParamNames   = [:]   // name → source label, for dedup warnings
 
+    println "collateStageParams: stagesDir=${stagesDir.absolutePath} exists=${stagesDir.exists()} isDir=${stagesDir.isDirectory()}"
+
     // --- Load default *.params.json files from scripts/stages/ ---
-    def stems = stagesDir.listFiles()
+    def allFiles = stagesDir.listFiles()
+    println "collateStageParams: listFiles() returned ${allFiles == null ? 'null' : allFiles.length + ' entries'}"
+    def stems = allFiles
         ?.findAll { it.name.endsWith('.params.json') }
         ?.collect { it.name.replace('.params.json', '') }
         ?.sort() ?: []
+    println "collateStageParams: stems with .params.json = ${stems}"
 
     stems.each { stem ->
         def defaultData = slurper.parse(new File(stagesDir, "${stem}.params.json"))
