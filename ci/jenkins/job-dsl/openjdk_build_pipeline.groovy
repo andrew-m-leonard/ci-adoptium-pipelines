@@ -34,36 +34,14 @@
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: resolve the Python interpreter available on this agent.
-// Tries python3 first, falls back to python. Throws if neither is found.
-//
-// Uses 'sh -c "command -v ..."' so the probe goes through the shell's PATH
-// (plain .execute() on the JVM may miss entries that only appear in the shell
-// environment, e.g. pyenv shims, nix profiles, custom PATH in .bashrc).
-// ---------------------------------------------------------------------------
-def resolvePython() {
-    for (candidate in ['python3', 'python']) {
-        try {
-            def probe = ['sh', '-c', "command -v ${candidate}"].execute()
-            probe.waitFor()
-            if (probe.exitValue() == 0) {
-                return candidate
-            }
-        } catch (IOException ignored) {
-            // candidate not on PATH — try next
-        }
-    }
-    throw new RuntimeException(
-        "No Python interpreter found on PATH. " +
-        "Ensure python3 or python is installed on the Jenkins agent."
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Helper: run collect-stage-params.py and return the parsed collated output.
 //
 // Called once per job generation. Uses --vendor-raw-base-url so no local
 // config-repo checkout is needed at Job DSL evaluation time.
+//
+// Runs via 'sh -c' so that the shell resolves python3/python on PATH — plain
+// JVM Runtime.exec() does not perform shell PATH lookups and fails on agents
+// where python3 is installed via pyenv, nix, or a non-standard prefix.
 //
 // Returns a Map with keys:
 //   groups    — List of [ name, description, stageId, parameters: [...] ]
@@ -74,14 +52,12 @@ def fetchCollatedStageParams(String repoPath, String branch) {
     def tmpOut  = File.createTempFile('collated-stage-params', '.json')
     tmpOut.deleteOnExit()
 
-    def python = resolvePython()
-    def cmd = [
-        python, 'scripts/lib/collect-stage-params.py',
-        '--default-stages-dir', 'scripts/stages',
-        '--vendor-raw-base-url', rawBase,
-        '--output', tmpOut.absolutePath
-    ]
-    def proc = cmd.execute()
+    def shellCmd = "scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py" +
+        " --default-stages-dir scripts/stages" +
+        " --vendor-raw-base-url '${rawBase}'" +
+        " --output '${tmpOut.absolutePath}'"
+
+    def proc = ['sh', '-c', shellCmd].execute()
     proc.waitFor()
     if (proc.exitValue() != 0) {
         println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
