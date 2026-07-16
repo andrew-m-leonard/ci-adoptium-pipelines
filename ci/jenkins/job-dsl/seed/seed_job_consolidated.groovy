@@ -298,7 +298,11 @@ folder('Build_openjdk') {
 
 // Collate stage parameters once — shared across all launch job versions.
 // Pure-Groovy: reads local *.params.json files + fetches vendor overrides via URL.
-def workspace = binding.variables.get('WORKSPACE') ?: new File('.').absolutePath
+//
+// SEED_JOB.someWorkspace returns the default workspace FilePath for this job —
+// the standard Job DSL way to get the workspace path without needing WORKSPACE env.
+def workspace = SEED_JOB.someWorkspace.remote
+println "Stage params workspace root: ${workspace}"
 def vendorRawBase = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
 def collatedStageParams = collateStageParams(workspace, vendorRawBase)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +

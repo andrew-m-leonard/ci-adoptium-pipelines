@@ -251,7 +251,9 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
 }
 
 // Collate stage params: reads local *.params.json + fetches vendor overrides via URL.
-def workspace = binding.variables.get('WORKSPACE') ?: new File('.').absolutePath
+// SEED_JOB.someWorkspace gives the workspace FilePath without needing WORKSPACE env.
+def workspace = SEED_JOB.someWorkspace.remote
+println "Stage params workspace root: ${workspace}"
 def vendorRawBase = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
 def collatedStageParams = collateStageParams(workspace, vendorRawBase)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
