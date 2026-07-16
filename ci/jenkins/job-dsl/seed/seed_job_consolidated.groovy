@@ -23,45 +23,53 @@
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: collate stage parameters directly in Groovy — no subprocess needed.
+// Helper: collate stage parameters using FilePath for workspace access.
 //
-// Reads scripts/stages/*.params.json from the local workspace (file I/O,
-// always permitted in the Job DSL sandbox) and fetches vendor overrides via
-// new URL().text (HTTP, also permitted).  Mirrors the merge logic in
-// scripts/lib/collect-stage-params.py.
+// java.io.File is blocked by the Job DSL sandbox, but hudson.FilePath
+// (Jenkins internal API) is permitted and works on the actual workspace.
+//
+//   defaultStagesPath — FilePath pointing to scripts/stages/ in the workspace
+//   vendorScriptsPath — FilePath pointing to config-repo/vendor-scripts/ in
+//                       the workspace, or null if not checked out
+//   vendorRawBaseUrl  — fallback raw URL for vendor overrides when the config
+//                       repo is not checked out locally (may be null)
 //
 // Returns a Map with keys:
 //   groups    — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings (for STAGE_PARAM_NAMES)
 // ---------------------------------------------------------------------------
-def collateStageParams(String workspaceDir, String vendorRawBaseUrl) {
-    def slurper    = new JsonSlurper()
-    def stagesDir  = new File(workspaceDir, 'scripts/stages')
-    def outputGroups    = []
-    def allParamNames   = [:]   // name → source label, for dedup warnings
+def collateStageParams(hudson.FilePath defaultStagesPath,
+                       hudson.FilePath vendorScriptsPath,
+                       String vendorRawBaseUrl) {
+    def slurper       = new JsonSlurper()
+    def outputGroups  = []
+    def allParamNames = [:]
 
-    println "collateStageParams: stagesDir=${stagesDir.absolutePath} exists=${stagesDir.exists()} isDir=${stagesDir.isDirectory()}"
-
-    // --- Load default *.params.json files from scripts/stages/ ---
-    def allFiles = stagesDir.listFiles()
-    println "collateStageParams: listFiles() returned ${allFiles == null ? 'null' : allFiles.length + ' entries'}"
-    def stems = allFiles
-        ?.findAll { it.name.endsWith('.params.json') }
-        ?.collect { it.name.replace('.params.json', '') }
-        ?.sort() ?: []
-    println "collateStageParams: stems with .params.json = ${stems}"
+    // Discover stems from scripts/stages/*.params.json via FilePath.list()
+    def stems = defaultStagesPath.list('*.params.json')
+        .collect { it.name.replace('.params.json', '') }
+        .sort()
+    println "collateStageParams: discovered stems = ${stems}"
 
     stems.each { stem ->
-        def defaultData = slurper.parse(new File(stagesDir, "${stem}.params.json"))
+        // Read default params via FilePath.child().readToString()
+        def defaultData = slurper.parseText(
+            defaultStagesPath.child("${stem}.params.json").readToString()
+        )
 
-        // Try to fetch vendor override for this stem
+        // Read vendor override — prefer local FilePath, fall back to raw URL
         def vendorData = null
-        if (vendorRawBaseUrl) {
-            def url = "${vendorRawBaseUrl.replaceAll('/+$','')}/vendor-scripts/${stem}.params.json"
+        if (vendorScriptsPath) {
+            def vf = vendorScriptsPath.child("${stem}.params.json")
+            if (vf.exists()) {
+                vendorData = slurper.parseText(vf.readToString())
+            }
+        } else if (vendorRawBaseUrl) {
+            def vendorUrl = "${vendorRawBaseUrl.replaceAll('/+$', '')}/vendor-scripts/${stem}.params.json"
             try {
-                vendorData = slurper.parseText(new URL(url).text)
+                vendorData = slurper.parseText(new URL(vendorUrl).text)
             } catch (FileNotFoundException | java.io.IOException ignored) {
-                // 404 or network error — no vendor override for this stem
+                // No vendor override for this stem — expected
             }
         }
 
@@ -302,14 +310,21 @@ folder('Build_openjdk') {
 }
 
 // Collate stage parameters once — shared across all launch job versions.
-// Pure-Groovy: reads local *.params.json files + fetches vendor overrides via URL.
-//
-// SEED_JOB.someWorkspace returns the default workspace FilePath for this job —
-// the standard Job DSL way to get the workspace path without needing WORKSPACE env.
-def workspace = SEED_JOB.someWorkspace.remote
-println "Stage params workspace root: ${workspace}"
-def vendorRawBase = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
-def collatedStageParams = collateStageParams(workspace, vendorRawBase)
+// Uses hudson.FilePath (Jenkins internal API) to list and read workspace files —
+// java.io.File is sandbox-blocked but FilePath is not.
+// Vendor params: config repo is not checked out locally, so fall back to raw URL.
+def wsFilePath      = hudson.model.Executor.currentExecutor().currentWorkspace
+def defaultStages   = wsFilePath.child('scripts/stages')
+def vendorScripts   = wsFilePath.child('config-repo/vendor-scripts')
+def vendorScriptsOk = vendorScripts.exists()
+def vendorRawBase   = vendorScriptsOk ? null : "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
+println "Workspace: ${wsFilePath.remote}"
+println "defaultStages exists: ${defaultStages.exists()}, vendorScripts local: ${vendorScriptsOk}"
+def collatedStageParams = collateStageParams(
+    defaultStages,
+    vendorScriptsOk ? vendorScripts : null,
+    vendorRawBase
+)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s) for launch jobs"
 

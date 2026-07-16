@@ -34,38 +34,49 @@
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: collate stage parameters directly in Groovy — no subprocess needed.
+// Helper: collate stage parameters using FilePath for workspace access.
 //
-// Reads scripts/stages/*.params.json from the local workspace (file I/O,
-// always permitted in the Job DSL sandbox) and fetches vendor overrides via
-// new URL().text (HTTP, also permitted).  Mirrors the merge logic in
-// scripts/lib/collect-stage-params.py.
+// java.io.File is blocked by the Job DSL sandbox; hudson.FilePath is not.
+//
+//   defaultStagesPath — FilePath pointing to scripts/stages/ in the workspace
+//   vendorScriptsPath — FilePath pointing to config-repo/vendor-scripts/ in
+//                       the workspace, or null if not checked out
+//   vendorRawBaseUrl  — fallback raw URL for vendor overrides when the config
+//                       repo is not checked out locally (may be null)
 //
 // Returns a Map with keys:
 //   groups    — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings
 // ---------------------------------------------------------------------------
-def collateStageParams(String workspaceDir, String vendorRawBaseUrl) {
-    def slurper   = new JsonSlurper()
-    def stagesDir = new File(workspaceDir, 'scripts/stages')
+def collateStageParams(hudson.FilePath defaultStagesPath,
+                       hudson.FilePath vendorScriptsPath,
+                       String vendorRawBaseUrl) {
+    def slurper       = new JsonSlurper()
     def outputGroups  = []
-    def allParamNames = [:]   // name → source label, for dedup warnings
+    def allParamNames = [:]
 
-    def stems = stagesDir.listFiles()
-        ?.findAll { it.name.endsWith('.params.json') }
-        ?.collect { it.name.replace('.params.json', '') }
-        ?.sort() ?: []
+    def stems = defaultStagesPath.list('*.params.json')
+        .collect { it.name.replace('.params.json', '') }
+        .sort()
+    println "collateStageParams: discovered stems = ${stems}"
 
     stems.each { stem ->
-        def defaultData = slurper.parse(new File(stagesDir, "${stem}.params.json"))
+        def defaultData = slurper.parseText(
+            defaultStagesPath.child("${stem}.params.json").readToString()
+        )
 
         def vendorData = null
-        if (vendorRawBaseUrl) {
-            def url = "${vendorRawBaseUrl.replaceAll('/+$','')}/vendor-scripts/${stem}.params.json"
+        if (vendorScriptsPath) {
+            def vf = vendorScriptsPath.child("${stem}.params.json")
+            if (vf.exists()) {
+                vendorData = slurper.parseText(vf.readToString())
+            }
+        } else if (vendorRawBaseUrl) {
+            def vendorUrl = "${vendorRawBaseUrl.replaceAll('/+$', '')}/vendor-scripts/${stem}.params.json"
             try {
-                vendorData = slurper.parseText(new URL(url).text)
+                vendorData = slurper.parseText(new URL(vendorUrl).text)
             } catch (FileNotFoundException | java.io.IOException ignored) {
-                // 404 or network error — no vendor override for this stem
+                // No vendor override for this stem — expected
             }
         }
 
@@ -250,12 +261,19 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
     throw new RuntimeException(errorMsg)
 }
 
-// Collate stage params: reads local *.params.json + fetches vendor overrides via URL.
-// SEED_JOB.someWorkspace gives the workspace FilePath without needing WORKSPACE env.
-def workspace = SEED_JOB.someWorkspace.remote
-println "Stage params workspace root: ${workspace}"
-def vendorRawBase = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
-def collatedStageParams = collateStageParams(workspace, vendorRawBase)
+// Collate stage params using FilePath — java.io.File is sandbox-blocked.
+def wsFilePath      = hudson.model.Executor.currentExecutor().currentWorkspace
+def defaultStages   = wsFilePath.child('scripts/stages')
+def vendorScripts   = wsFilePath.child('config-repo/vendor-scripts')
+def vendorScriptsOk = vendorScripts.exists()
+def vendorRawBase   = vendorScriptsOk ? null : "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
+println "Workspace: ${wsFilePath.remote}"
+println "defaultStages exists: ${defaultStages.exists()}, vendorScripts local: ${vendorScriptsOk}"
+def collatedStageParams = collateStageParams(
+    defaultStages,
+    vendorScriptsOk ? vendorScripts : null,
+    vendorRawBase
+)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
 
