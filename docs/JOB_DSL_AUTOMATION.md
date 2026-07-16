@@ -91,24 +91,7 @@ cloned into `config-repo/` before the Job DSL step runs.
 
 **Config repo checkout — choose one of the following options:**
 
-**Option A — Shell step before Job DSL** *(simplest, no extra plugin needed)*:
-
-Add an **Execute Shell** build step **before** the Process Job DSLs step:
-
-```sh
-git clone \
-  --depth 1 \
-  --branch "${CONFIG_REPO_BRANCH}" \
-  "${CONFIG_REPO_URL}" \
-  config-repo
-```
-
-For private repos, use SSH URLs and ensure the Jenkins agent has the appropriate
-SSH key configured, or use a `git clone` with a Jenkins credential via the
-[`withCredentials`](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/)
-approach if available in freestyle shell steps on your Jenkins.
-
-**Option B — Multiple SCMs plugin**:
+**Option A — Multiple SCMs plugin** *(recommended — supports Jenkins-managed credentials)*:
 
 Install the [Multiple SCMs plugin](https://plugins.jenkins.io/multiple-scms/).
 Change the SCM type to **Multiple SCMs** and add two Git SCM entries:
@@ -118,12 +101,31 @@ Change the SCM type to **Multiple SCMs** and add two Git SCM entries:
   - Repository URL: `${CONFIG_REPO_URL}`
   - Branch: `${CONFIG_REPO_BRANCH}`
   - Additional Behaviours → **Check out to a sub-directory**: `config-repo`
-  - Add credentials if the config repo is private
+  - **Credentials**: select the Jenkins-managed credential for the config repo
+
+This is the recommended option because credentials are stored and managed in the
+Jenkins Credentials store — no SSH keys need to be placed on agents directly.
 
 > Note: the Git plugin's "Check out to a sub-directory" additional behaviour is
-> **job-level** in a single SCM block — it applies to the whole checkout, not to
-> individual repositories. The Multiple SCMs plugin gives each entry its own
-> behaviours, which is why it is needed for per-repo sub-directory control.
+> **job-level** in a single SCM block — it applies to the whole checkout, not per
+> repository. The Multiple SCMs plugin gives each entry its own independent behaviours.
+
+**Option B — Shell step before Job DSL** *(public repos only)*:
+
+If the config repo is **public**, add an **Execute Shell** build step **before**
+the Process Job DSLs step:
+
+```sh
+rm -rf config-repo
+git clone \
+  --depth 1 \
+  --branch "${CONFIG_REPO_BRANCH}" \
+  "${CONFIG_REPO_URL}" \
+  config-repo
+```
+
+> ⚠️ This option does not support Jenkins-managed credentials. For private config
+> repositories, use Option A.
 
 ### Step 4: Add Build Step
 
