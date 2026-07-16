@@ -74,38 +74,56 @@ Click **This project is parameterized** and add two String Parameters:
 
 Example values: `https://github.com/adoptium/ci-temurin-config.git` / `main`
 
-### Step 3: Configure Source Code Management (two checkouts — both required)
+### Step 3: Configure Source Code Management + Config Repo Checkout
 
-The seed job needs two repositories checked out before the Job DSL step runs:
-
-**Checkout 1 — pipeline repo** (contains the DSL scripts):
-- **Repository URL**: `https://github.com/adoptium/ci-adoptium-pipelines.git`
-- **Branch**: `*/main`
-- *(checked out to workspace root — no sub-directory)*
-
-**Checkout 2 — vendor config repo** (provides vendor stage param overrides):
-- **Repository URL**: `${CONFIG_REPO_URL}` ← references the job parameter
-- **Branch**: `${CONFIG_REPO_BRANCH}` ← references the job parameter
-- **Check out to sub-directory**: `config-repo`
-- Add credentials if the config repo is private
+The seed job needs the pipeline repo checked out (SCM) and the vendor config repo
+cloned into `config-repo/` before the Job DSL step runs.
 
 > **The seed job will fail** with a clear error if `config-repo/vendor-scripts/` is not
 > present when the Job DSL step runs. This is intentional — vendor param overrides are
 > a required part of job generation.
 
-Use one of the following methods to configure the dual checkout:
+**SCM — pipeline repo** (contains the DSL scripts):
+- **SCM**: Git
+- **Repository URL**: `https://github.com/adoptium/ci-adoptium-pipelines.git`
+- **Branch**: `*/main`
+- Add credentials if the pipeline repo is private
 
-**Option A — Git plugin "Additional Behaviours"** *(recommended if available)*:
+**Config repo checkout — choose one of the following options:**
 
-In the **Source Code Management** section, configure the pipeline repo as usual,
-then add a second repository entry and apply the
-**"Check out to a sub-directory"** additional behaviour set to `config-repo`.
+**Option A — Shell step before Job DSL** *(simplest, no extra plugin needed)*:
+
+Add an **Execute Shell** build step **before** the Process Job DSLs step:
+
+```sh
+git clone \
+  --depth 1 \
+  --branch "${CONFIG_REPO_BRANCH}" \
+  "${CONFIG_REPO_URL}" \
+  config-repo
+```
+
+For private repos, use SSH URLs and ensure the Jenkins agent has the appropriate
+SSH key configured, or use a `git clone` with a Jenkins credential via the
+[`withCredentials`](https://www.jenkins.io/doc/pipeline/steps/credentials-binding/)
+approach if available in freestyle shell steps on your Jenkins.
 
 **Option B — Multiple SCMs plugin**:
 
-Change the SCM type to **Multiple SCMs**, add both Git entries as separate
-SCM blocks, applying **"Check out to a sub-directory: config-repo"** to the
-second entry.
+Install the [Multiple SCMs plugin](https://plugins.jenkins.io/multiple-scms/).
+Change the SCM type to **Multiple SCMs** and add two Git SCM entries:
+
+- **Entry 1 — pipeline repo**: URL as above, no sub-directory behaviour
+- **Entry 2 — config repo**:
+  - Repository URL: `${CONFIG_REPO_URL}`
+  - Branch: `${CONFIG_REPO_BRANCH}`
+  - Additional Behaviours → **Check out to a sub-directory**: `config-repo`
+  - Add credentials if the config repo is private
+
+> Note: the Git plugin's "Check out to a sub-directory" additional behaviour is
+> **job-level** in a single SCM block — it applies to the whole checkout, not to
+> individual repositories. The Multiple SCMs plugin gives each entry its own
+> behaviours, which is why it is needed for per-repo sub-directory control.
 
 ### Step 4: Add Build Step
 
