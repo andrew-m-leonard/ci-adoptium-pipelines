@@ -486,7 +486,7 @@ class PipelineRunner:
             )
 
         cmd = [
-            'python3', str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
+            sys.executable, str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
             '--jdk-version',   self.args.jdk_version,
             '--variant',       variant,
             '--target-os',     self.args.target_os,

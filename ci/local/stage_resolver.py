@@ -30,6 +30,7 @@ Callers decide whether to raise or continue (e.g. UNSTABLE-equivalent).
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -169,7 +170,7 @@ class StageResolver:
         if script.suffix == '.sh':
             cmd = ['bash', str(script)]
         elif script.suffix == '.py':
-            cmd = ['python3', str(script)]
+            cmd = [sys.executable, str(script)]
         else:
             raise ValueError(f"Unsupported script type: {script.suffix}")
 

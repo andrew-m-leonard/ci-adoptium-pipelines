@@ -121,8 +121,9 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
         pythonArgs.add("--ea-beta-build")
     }
 
-    // Execute CI-agnostic Python script — produces pipeline-config.json
-    sh "python3 scripts/lib/load-json-config.py ${pythonArgs.join(' ')}"
+    // Execute CI-agnostic Python script — produces pipeline-config.json.
+    // python-runner.sh resolves python3/python once and execs the script.
+    sh "scripts/lib/python-runner.sh scripts/lib/load-json-config.py ${pythonArgs.join(' ')}"
 
     // Read the generated pipeline-config.json
     def pipelineConfig = readJSON(file: 'pipeline-config.json')
@@ -176,7 +177,7 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
  * @return parsed jenkins-config.json as a Map (jenkinsConfig)
  */
 def generateJenkinsConfig(String configRepoPath = './config-repo') {
-    sh "python3 ci/jenkins/lib/load-jenkins-json-config.py" +
+    sh "scripts/lib/python-runner.sh ci/jenkins/lib/load-jenkins-json-config.py" +
        " --config-repo-path ${configRepoPath}" +
        " --pipeline-config  ./pipeline-config.json" +
        " --output           ./jenkins-config.json"

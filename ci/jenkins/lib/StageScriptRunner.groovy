@@ -187,11 +187,12 @@ def run(String scriptStem, def config = null) {
             return script(config) ?: 0
 
         case 'py':
+            // python-runner.sh resolves python3/python and execs the script.
             if (containerId) {
                 def eFlags = containerEnvFlags()
-                return sh(script: "${runtime} exec ${eFlags} -w '${containerWs}' '${containerId}' python3 '${found.path}'", returnStatus: true)
+                return sh(script: "${runtime} exec ${eFlags} -w '${containerWs}' '${containerId}' scripts/lib/python-runner.sh '${found.path}'", returnStatus: true)
             }
-            return sh(script: "python3 ${found.path}", returnStatus: true)
+            return sh(script: "scripts/lib/python-runner.sh '${found.path}'", returnStatus: true)
     }
 }
 
