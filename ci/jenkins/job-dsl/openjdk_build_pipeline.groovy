@@ -23,9 +23,49 @@
  *   - TARGET_OS: Operating system (e.g., "linux", "mac")
  *   - ARCHITECTURE: CPU architecture (e.g., "x64", "aarch64")
  *   - VARIANT/DISTRO: Build distro (e.g., "temurin", "dragonwell", "corretto")
+ *
+ * Stage parameters are collated dynamically from scripts/stages/*.params.json (defaults)
+ * merged with config-repo/vendor-scripts/*.params.json (vendor overrides) via
+ * scripts/lib/collect-stage-params.py. The collated list is emitted as job parameters
+ * grouped by Jenkins Parameter Separators, plus a hidden STAGE_PARAM_NAMES meta-parameter
+ * that Jenkinsfile.launch uses to forward all stage params to platform build jobs.
  */
 
 import groovy.json.JsonSlurper
+
+// ---------------------------------------------------------------------------
+// Helper: run collect-stage-params.py and return the parsed collated output.
+//
+// Called once per job generation. Uses --vendor-raw-base-url so no local
+// config-repo checkout is needed at Job DSL evaluation time.
+//
+// Returns a Map with keys:
+//   groups    — List of [ name, description, stageId, parameters: [...] ]
+//   paramNames — List of all parameter name strings
+// ---------------------------------------------------------------------------
+def fetchCollatedStageParams(String repoPath, String branch) {
+    def rawBase = "https://raw.githubusercontent.com/${repoPath}/${branch}"
+    def tmpOut  = File.createTempFile('collated-stage-params', '.json')
+    tmpOut.deleteOnExit()
+
+    // collect-stage-params.py lives in scripts/lib/ (CI-agnostic)
+    def cmd = [
+        'python3', 'scripts/lib/collect-stage-params.py',
+        '--default-stages-dir', 'scripts/stages',
+        '--vendor-raw-base-url', rawBase,
+        '--output', tmpOut.absolutePath
+    ]
+    def proc = cmd.execute()
+    proc.waitFor()
+    if (proc.exitValue() != 0) {
+        println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
+                "continuing with no collated stage params.\n${proc.err.text}"
+        return [groups: [], paramNames: []]
+    }
+    println proc.out.text.trim()
+
+    return new JsonSlurper().parseText(tmpOut.text)
+}
 
 // Get parameters from launch job
 def jdkVersion = binding.variables.get('JDK_VERSION')
@@ -155,6 +195,14 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
     throw new RuntimeException(errorMsg)
 }
 
+// Collate stage parameters from default *.params.json files merged with any
+// vendor-scripts/*.params.json overrides from the config repo.
+// Runs collect-stage-params.py at job-generation time against the config repo
+// raw URL so no local checkout is required.
+def collatedStageParams = fetchCollatedStageParams(repoPath, configRepoBranch)
+println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
+        "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
+
 // Ensure the top-level Build_openjdk folder exists.
 // All build jobs (both launch orchestrators and platform builds) live here,
 // mirroring the single top-level folder used by AQA test jobs.
@@ -193,84 +241,85 @@ pipelineJob(jobName) {
     quietPeriod(5)
 
     parameters {
-        // Fixed parameters (set by launch job from platform configuration)
-        stringParam('JDK_VERSION', jdkVersion, 'JDK version (fixed)')
-        stringParam('TARGET_OS', targetOs, 'Target operating system (fixed)')
-        stringParam('ARCHITECTURE', architecture, 'Target architecture (fixed)')
-        
-        // Configuration repository
+        // ── Fixed / infrastructure ────────────────────────────────────────
+        // These are set at job-generation time from platform config and are
+        // not visible as operator-editable fields on the "Build with Parameters"
+        // form because their values are fixed for the lifetime of this job.
+        stringParam('JDK_VERSION', jdkVersion,
+            'JDK version number — fixed at job-generation time from platform config')
+        stringParam('TARGET_OS', targetOs,
+            'Target operating system — fixed at job-generation time from platform config')
+        stringParam('ARCHITECTURE', architecture,
+            'Target CPU architecture — fixed at job-generation time from platform config')
         stringParam('CONFIG_REPO_URL', configRepoUrl,
-            'URL of the configuration repository')
+            'URL of the configuration repository (set by seed job)')
         stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
-            'Branch of the configuration repository')
-        
-        // Build configuration - with safe navigation and fallback defaults
-        stringParam('VARIANT',
-            variant,
-            'Build variant (temurin, dragonwell, etc.)')
-        
+            'Branch of the configuration repository (set by seed job)')
+        stringParam('GROUP_UID', '',
+            'Group identifier linking all platform builds from the same launch. Auto-generated by the launch job if empty.')
+        stringParam('INITIALIZE_LABEL', initializeLabel,
+            'Agent label for the Initialize stage — fixed at job-generation time from stageAgentLabels.Initialize in jenkins_job_config.json')
+        stringParam('ACTIVE_NODE_TIMEOUT',
+            (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
+            'Minutes to wait for an active agent before failing. Set from activeNodeTimeoutMinutes in jenkins_job_config.json.')
+
+        // ── Pipeline gate flags ───────────────────────────────────────────
+        // Control which stages run. These are pipeline-level decisions that
+        // span all stage scripts and are not stage-script-specific.
         booleanParam('RUN_TESTS',
             defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
             'Run test stages (smoke tests, AQA, TCK)')
-        
         booleanParam('SIGN_ARTIFACTS',
             defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
             'Sign artifacts and installers')
-        
         booleanParam('PUBLISH_ARTIFACTS',
             defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
             'Publish artifacts to release repository')
-        
-        booleanParam('RUN_REPRODUCIBLE_COMPARE',
-            defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
-            'Run reproducible build comparison')
-        
-        // Additional build parameters
-        choiceParam('RELEASE_TYPE',
-            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-            'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
-
-        stringParam('GROUP_UID', '',
-            'Optional group identifier linking all platform builds from the same launch (set automatically by Launch pipeline)')
-
-        stringParam('SCM_REF', '',
-            'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
-
-        stringParam('BUILD_REF', '',
-            'Git reference for the build scripts repository (empty = use config repo default)')
-
-        stringParam('AQA_REF', '',
-            'Git reference (tag/branch) for the aqa-tests repository (empty = use config repo default)')
-
         booleanParam('ENABLE_INSTALLERS',
             defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
-            'Build installers')
-
+            'Build platform-specific installers')
         booleanParam('ENABLE_TCK',
             false,
             'Run TCK tests (Temurin only, release/weekly builds)')
-        
+        booleanParam('RUN_REPRODUCIBLE_COMPARE',
+            defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
+            'Run reproducible build comparison against a production Adoptium binary')
         booleanParam('REPRODUCIBLE_COMPARE_BUILD',
             defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
-            'Enable reproducible build comparison against production Adoptium binaries (requires SCM_REF to be set)')
-
+            'Enable reproducible build comparison (requires SCM_REF to be set)')
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
+        choiceParam('RELEASE_TYPE',
+            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
+            'Type of release build (NIGHTLY = default nightly, WEEKLY = EA beta, RELEASE = official)')
 
-        stringParam('ACTIVE_NODE_TIMEOUT',
-            (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
-            'Minutes to wait for at least one active (online) agent matching the stage label before failing. ' +
-            'Busy-but-online agents do not trigger this timeout — only zero matching agents do. ' +
-            'Set from activeNodeTimeoutMinutes in jenkins_job_config.json.')
+        // ── Collated stage parameters ─────────────────────────────────────
+        // Dynamically generated from scripts/stages/*.params.json (defaults)
+        // merged with config-repo/vendor-scripts/*.params.json (vendor overrides)
+        // via scripts/lib/collect-stage-params.py at job-generation time.
+        //
+        // Parameters are grouped by parameterGroup using Jenkins Parameter
+        // Separator plugin entries injected via the configure block below.
+        // The flat STAGE_PARAM_NAMES meta-param lets Jenkinsfile.launch forward
+        // every stage param to platform builds without hardcoding their names.
 
-        // Read from jenkins_job_config.json stageAgentLabels.Initialize at job-generation
-        // time so the Jenkinsfile can select the correct agent for the Initialize stage
-        // before CONFIG_STAGE_AGENT_LABELS is populated by that stage itself.
-        // This value will not change unless jenkins_job_config.json is updated and the
-        // job is regenerated via the seed job.
-        stringParam('INITIALIZE_LABEL', initializeLabel,
-            'Jenkins node label for the Initialize stage (fixed at job generation from stageAgentLabels.Initialize in jenkins_job_config.json)')
+        // Hidden meta-param: comma-separated list of all collated stage param names.
+        // Used by Jenkinsfile.launch to forward them all dynamically.
+        stringParam('STAGE_PARAM_NAMES',
+            (collatedStageParams.paramNames ?: []).join(','),
+            'Collated stage parameter names — set at job-generation time, do not edit manually')
+
+        // Emit each collated stage parameter
+        collatedStageParams.groups?.each { group ->
+            group.parameters?.each { p ->
+                if (p.type == 'boolean') {
+                    booleanParam(p.name, p.default == true, p.description ?: '')
+                } else {
+                    stringParam(p.name, p.default ?: '', p.description ?: '')
+                }
+            }
+        }
     }
 
     definition {
@@ -309,8 +358,61 @@ pipelineJob(jobName) {
         disableConcurrentBuilds()
     }
     
-    // Configure copyArtifact permission using configure block
+    // Configure block: inject Parameter Separator entries for each collated stage
+    // parameter group, and set copyArtifact permission.
+    //
+    // Jenkins Parameter Separator plugin (io.jenkins.plugins.parameter_separator):
+    //   Each separator is inserted into the parameter definitions list immediately
+    //   before the first parameter of its group, giving operators a clear visual
+    //   heading and description on the "Build with Parameters" form.
     configure { project ->
+        // ── Parameter Separators ─────────────────────────────────────────
+        // Build an ordered list of parameter definition XML nodes:
+        //   existing fixed/gate params  (already added by parameters{} block)
+        //   then for each collated group:
+        //     <separator name="__sep_<group>" sectionHeader="<group>" ... />
+        //     <param name="PARAM_1" ... />
+        //     <param name="PARAM_2" ... />
+        //
+        // The Job DSL parameters{} block inserts plain <hudson.model.*Parameter>
+        // nodes into the XML. The configure block can append separator nodes to
+        // the same parameterDefinitions list.
+        if (collatedStageParams.groups) {
+            def paramDefs = project / 'properties'
+                / 'hudson.model.ParametersDefinitionProperty'
+                / 'parameterDefinitions'
+
+            collatedStageParams.groups.each { group ->
+                if (!group.parameters) return
+
+                // Insert a separator node before the group's parameters
+                def sepNode = paramDefs.appendNode(
+                    'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+                )
+                sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
+                sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+                sepNode.appendNode('sectionHeaderStyle', '')
+                if (group.description) {
+                    sepNode.appendNode('sectionDescription', group.description)
+                }
+                sepNode.appendNode('separatorStyle', '')
+
+                // Move each group param node to immediately after its separator.
+                // The parameters{} block already added them to paramDefs — we just
+                // need to re-order them so they sit after the separator.
+                group.parameters.each { p ->
+                    def paramNode = paramDefs.'*'.find { node ->
+                        node.'name'?.text() == p.name
+                    }
+                    if (paramNode) {
+                        paramDefs.remove(paramNode)
+                        paramDefs.append(paramNode)
+                    }
+                }
+            }
+        }
+
+        // ── copyArtifact permission ──────────────────────────────────────
         project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
             projectNameList {
                 string('*')

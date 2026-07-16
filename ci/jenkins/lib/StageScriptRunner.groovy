@@ -87,7 +87,19 @@ def containerEnvFlags() {
         'AQA_REF',
         'SMOKE_TESTS_PASSED',
     ]
+
+    // Also forward all collated stage params (names baked into STAGE_PARAM_NAMES
+    // at job-generation time by the Job DSL). This ensures any vendor-specific
+    // parameter (e.g. OPENJ9_REPO) is automatically available inside the container
+    // without needing manual additions to the list above.
+    def stageParamNames = (env.getProperty('STAGE_PARAM_NAMES') ?: '')
+        .split(',')
+        .collect { it.trim() }
+        .findAll { it }
+    vars = vars + stageParamNames
+
     def flags = vars
+        .unique()
         .findAll { env.getProperty(it) != null && env.getProperty(it) != '' }
         .collect { "-e '${it}=${env.getProperty(it)}'" }
 

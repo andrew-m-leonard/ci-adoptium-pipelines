@@ -177,36 +177,57 @@ pipeline {
                     def versionConfigText = env.VERSION_CONFIG
                     def versionConfig = new groovy.json.JsonSlurper().parseText(versionConfigText)
 
+                    // Build the list of collated stage params to forward from the launch job
+                    // to each platform build job. STAGE_PARAM_NAMES is a comma-separated list
+                    // baked in at job-generation time by the seed job DSL. We read each param
+                    // value from this job's own params and forward it verbatim.
+                    // PLATFORMS and REGENERATE_JOBS are launch-job-only and are excluded.
+                    def launchOnlyParams = ['PLATFORMS', 'REGENERATE_JOBS'] as Set
+                    def stageParamNames = (params.STAGE_PARAM_NAMES ?: '')
+                        .split(',')
+                        .collect { it.trim() }
+                        .findAll  { it && !launchOnlyParams.contains(it) }
+
                     platforms.each { platform ->
                         def platformCfg = versionConfig.buildConfigurations[platform]
                         def arch    = platformCfg?.arch    ?: platform
                         def os      = platformCfg?.os      ?: platform
-                        def distro  = platformCfg?.variant ?: params.VARIANT ?: 'temurin'
+                        def distro  = platformCfg?.variant ?: 'temurin'
                         def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${distro}_${arch}_${os}"
                         
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
                                 echo "Launching build for ${platform}..."
-                                
+
+                                // Fixed pipeline-level params forwarded explicitly
+                                def forwardedParams = [
+                                    string(name: 'JDK_VERSION',        value: env.JDK_VERSION),
+                                    string(name: 'BUILD_ARGS',         value: params.BUILD_ARGS ?: ''),
+                                    string(name: 'CONFIG_REPO_URL',    value: params.CONFIG_REPO_URL),
+                                    string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
+                                    string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE),
+                                    string(name: 'GROUP_UID',          value: env.GROUP_UID),
+                                    booleanParam(name: 'RUN_TESTS',              value: params.RUN_TESTS),
+                                    booleanParam(name: 'ENABLE_INSTALLERS',      value: params.ENABLE_INSTALLERS),
+                                    booleanParam(name: 'SIGN_ARTIFACTS',         value: params.SIGN_ARTIFACTS),
+                                    booleanParam(name: 'PUBLISH_ARTIFACTS',      value: params.PUBLISH_ARTIFACTS),
+                                    booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE),
+                                ]
+
+                                // Dynamically forward all collated stage params by reading
+                                // their values from this job's own param set.
+                                stageParamNames.each { name ->
+                                    def val = params[name]
+                                    if (val instanceof Boolean) {
+                                        forwardedParams << booleanParam(name: name, value: val)
+                                    } else {
+                                        forwardedParams << string(name: name, value: val?.toString() ?: '')
+                                    }
+                                }
+
                                 def buildResult = build(
                                     job: jobName,
-                                    parameters: [
-                                        string(name: 'JDK_VERSION', value: env.JDK_VERSION),
-                                        string(name: 'VARIANT', value: params.VARIANT),
-                                        string(name: 'BUILD_ARGS', value: params.BUILD_ARGS ?: ''),
-                                        string(name: 'CONFIG_REPO_URL', value: params.CONFIG_REPO_URL),
-                                        string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
-                                        string(name: 'SCM_REF', value: params.SCM_REF ?: ''),
-                                        string(name: 'BUILD_REF', value: params.BUILD_REF ?: ''),
-                                        string(name: 'AQA_REF', value: params.AQA_REF ?: ''),
-                                        string(name: 'RELEASE_TYPE', value: params.RELEASE_TYPE),
-                                        string(name: 'GROUP_UID', value: env.GROUP_UID),
-                                        booleanParam(name: 'RUN_TESTS', value: params.RUN_TESTS),
-                                        booleanParam(name: 'ENABLE_INSTALLERS', value: params.ENABLE_INSTALLERS),
-                                        booleanParam(name: 'SIGN_ARTIFACTS', value: params.SIGN_ARTIFACTS),
-                                        booleanParam(name: 'PUBLISH_ARTIFACTS', value: params.PUBLISH_ARTIFACTS),
-                                        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE)
-                                    ],
+                                    parameters: forwardedParams,
                                     wait: true,
                                     propagate: false  // Don't fail immediately, collect all results first
                                 )

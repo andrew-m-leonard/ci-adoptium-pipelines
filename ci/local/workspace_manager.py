@@ -47,17 +47,22 @@ class WorkspaceManager:
         self.build_artifacts_dir = self.pipeline_workspace / 'build_artifacts'
         self.config_file = Path(config_file)
 
-    def validate_and_setup(self, is_restarting, clean_requested, start_from_stage=None):
+    def validate_and_setup(self, is_restarting, clean_requested,
+                           start_from_stage=None, initialize_already_run=False):
         """
         Validate workspace state and set up directory structure.
 
         Args:
-            is_restarting: True if restarting from a specific stage
-            clean_requested: True if --clean-workspace flag was provided
-            start_from_stage: Name of stage to restart from (if restarting)
+            is_restarting:           True if restarting from a specific stage.
+            clean_requested:         True if --clean-workspace flag was provided.
+            start_from_stage:        Name of stage to restart from (if restarting).
+            initialize_already_run:  True when main() has already called
+                                     stage_initialize() before invoking run().
+                                     Skips the "workspace must not exist" guard
+                                     because Initialize created it intentionally.
 
         Raises:
-            ValueError: If workspace state is invalid for the requested operation
+            ValueError: If workspace state is invalid for the requested operation.
         """
         workspace_exists = self.pipeline_workspace.exists()
 
@@ -91,6 +96,10 @@ class WorkspaceManager:
             print(f"ℹ️  Restarting from stage '{start_from_stage}'")
             print(f"   Using existing workspace: {self.pipeline_workspace}")
             print(f"   Build artifacts store:    {self.build_artifacts_dir}")
+        elif initialize_already_run:
+            # Initialize has already created and populated the workspace in this
+            # same invocation — nothing to set up, nothing to validate.
+            pass
         else:
             # Fresh build: workspace must NOT exist (unless cleaning)
             if workspace_exists:

@@ -12,9 +12,107 @@
  *   2. Add "Process Job DSLs" build step
  *   3. Point it to this script
  *   4. Run the job to create all pipeline jobs
+ *
+ * Stage parameters are collated dynamically from scripts/stages/*.params.json (defaults)
+ * merged with config-repo/vendor-scripts/*.params.json (vendor overrides) via
+ * scripts/lib/collect-stage-params.py. The same collated list is emitted on both the
+ * launch job and each platform build job so operators can set all params once on the
+ * launch job and have them forwarded to every platform build automatically.
  */
 
 import groovy.json.JsonSlurper
+
+// ---------------------------------------------------------------------------
+// Helper: run collect-stage-params.py and return the parsed collated output.
+// Identical to the helper in openjdk_build_pipeline.groovy — both must stay
+// in sync. Uses --vendor-raw-base-url so no local config-repo checkout is
+// needed at Job DSL evaluation time.
+//
+// Returns a Map with keys:
+//   groups    — List of [ name, description, stageId, parameters: [...] ]
+//   paramNames — List of all parameter name strings (for STAGE_PARAM_NAMES)
+// ---------------------------------------------------------------------------
+def fetchCollatedStageParams(String repoPath, String branch) {
+    def rawBase = "https://raw.githubusercontent.com/${repoPath}/${branch}"
+    def tmpOut  = File.createTempFile('collated-stage-params', '.json')
+    tmpOut.deleteOnExit()
+
+    def cmd = [
+        'python3', 'scripts/lib/collect-stage-params.py',
+        '--default-stages-dir', 'scripts/stages',
+        '--vendor-raw-base-url', rawBase,
+        '--output', tmpOut.absolutePath
+    ]
+    def proc = cmd.execute()
+    proc.waitFor()
+    if (proc.exitValue() != 0) {
+        println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
+                "continuing with no collated stage params.\n${proc.err.text}"
+        return [groups: [], paramNames: []]
+    }
+    println proc.out.text.trim()
+
+    return new JsonSlurper().parseText(tmpOut.text)
+}
+
+// ---------------------------------------------------------------------------
+// Helper: emit collated stage parameter definitions into a parameters{} block.
+// Call this inside a parameters { } closure — it emits stringParam and
+// booleanParam calls for every entry in collatedStageParams.
+// ---------------------------------------------------------------------------
+def emitCollatedParams(def collatedStageParams) {
+    // Hidden meta-param forwarded to platform builds by Jenkinsfile.launch
+    stringParam('STAGE_PARAM_NAMES',
+        (collatedStageParams.paramNames ?: []).join(','),
+        'Collated stage parameter names — set at job-generation time, do not edit manually')
+
+    collatedStageParams.groups?.each { group ->
+        group.parameters?.each { p ->
+            if (p.type == 'boolean') {
+                booleanParam(p.name, p.default == true, p.description ?: '')
+            } else {
+                stringParam(p.name, p.default ?: '', p.description ?: '')
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: inject Parameter Separator nodes for each collated group into the
+// job's parameterDefinitions XML via a configure{} block.
+// ---------------------------------------------------------------------------
+def injectParamSeparators(def project, def collatedStageParams) {
+    if (!collatedStageParams.groups) return
+
+    def paramDefs = project / 'properties'
+        / 'hudson.model.ParametersDefinitionProperty'
+        / 'parameterDefinitions'
+
+    collatedStageParams.groups.each { group ->
+        if (!group.parameters) return
+
+        def sepNode = paramDefs.appendNode(
+            'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+        )
+        sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
+        sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+        sepNode.appendNode('sectionHeaderStyle', '')
+        if (group.description) {
+            sepNode.appendNode('sectionDescription', group.description)
+        }
+        sepNode.appendNode('separatorStyle', '')
+
+        group.parameters.each { p ->
+            def paramNode = paramDefs.'*'.find { node ->
+                node.'name'?.text() == p.name
+            }
+            if (paramNode) {
+                paramDefs.remove(paramNode)
+                paramDefs.append(paramNode)
+            }
+        }
+    }
+}
 
 // ============================================================================
 // STEP 1: Load Configuration
@@ -156,6 +254,13 @@ folder('Build_openjdk') {
     description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_openjdk<version>_<distro>_<arch>_<os> convention')
 }
 
+// Collate stage parameters once — shared across all launch job versions.
+// The same collated set is used for every JDK version's launch job so that
+// all launch jobs present an identical stage-parameter surface to operators.
+def collatedStageParams = fetchCollatedStageParams(repoPath, configRepoBranch)
+println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
+        "across ${collatedStageParams.groups?.size() ?: 0} group(s) for launch jobs"
+
 println "Creating launch orchestrator jobs for active JDK versions:"
 pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     def version = versionInfo.version
@@ -204,86 +309,60 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
             Platform-specific jobs created under Build_openjdk/ follow the AQA-style naming:
               Build_openjdk${version.replaceAll(/[^\d]/, '')}_<distro>_<arch>_<os>
+
+            Stage parameters are collated from scripts/stages/*.params.json and any
+            vendor-scripts/*.params.json overrides in the config repo. All collated
+            params are forwarded automatically to every platform build job launched.
         """.stripIndent().trim())
 
         quietPeriod(5)
 
         parameters {
-            // JDK version parameter (fixed for this job)
+            // ── Fixed / infrastructure ────────────────────────────────────
             stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
-                "JDK version number (e.g., 21, 17, 11) - Fixed for this job")
-            
-            // Configuration repository parameters (propagated from seed job)
-            // These values are set when the seed job runs and should not normally be changed
+                'JDK version number — fixed for this launch job')
             stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
-                """URL of the configuration repository containing jenkins_job_config.json
-                
-                ⚠️  This value is automatically set by the seed job.
-                Current value: ${configRepoUrl ?: '(NOT SET - Re-run seed job with CONFIG_REPO_URL parameter!)'}
-                
-                If this is empty, the seed job was not run with proper parameters.
-                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
-            
+                """URL of the configuration repository (set by seed job).
+                ⚠️  Current value: ${configRepoUrl ?: '(NOT SET — re-run seed job with CONFIG_REPO_URL)'}""".stripIndent().trim())
             stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
-                """Branch of the configuration repository
-                
-                ⚠️  This value is automatically set by the seed job.
-                Current value: ${configRepoBranch ?: '(NOT SET - Re-run seed job with CONFIG_REPO_BRANCH parameter!)'}
-                
-                If this is empty, the seed job was not run with proper parameters.
-                Re-run the seed job with CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters.""".stripIndent().trim())
-            
-            // Job management
+                """Branch of the configuration repository (set by seed job).
+                ⚠️  Current value: ${configRepoBranch ?: '(NOT SET — re-run seed job with CONFIG_REPO_BRANCH)'}""".stripIndent().trim())
+            stringParam('GROUP_UID', '',
+                'Group identifier for this launch run. Auto-generated if empty.')
+
+            // ── Launch-job-only controls ──────────────────────────────────
+            // These are not forwarded to platform build jobs.
             booleanParam('REGENERATE_JOBS', false,
                 'Force regeneration of platform-specific build jobs (use after config changes)')
-            
-            // Platform selection - dynamically populated from config with 'all' at the top
             choiceParam('PLATFORMS', ['all'] + platforms,
                 'Select platform to build, or "all" for all available platforms')
-            
-            // Build configuration parameters (passed to platform jobs)
-            stringParam('VARIANT', defaultBuildVariant,
-                'Build variant (temurin, dragonwell, etc.)')
 
-            // Source control parameters
-            stringParam('SCM_REF', '',
-                'Git reference (tag/branch) for the JDK source code (e.g., jdk-21.0.12+6_adopt)')
-
-            stringParam('BUILD_REF', '',
-                'Git reference for the build scripts repository (empty = use config repo default)')
-
-            stringParam('AQA_REF', '',
-                'Git reference (tag/branch) for the aqa-tests repository (empty = use config repo default)')
-
+            // ── Pipeline gate flags ───────────────────────────────────────
+            stringParam('BUILD_ARGS', defaultBuildArgs,
+                'Additional build arguments passed to the build stage')
             choiceParam('RELEASE_TYPE',
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-                'Type of release build (NIGHTLY=default nightly builds, WEEKLY=weekly EA beta builds, RELEASE=official releases)')
-
-            stringParam('GROUP_UID', '',
-                'Optional group identifier to associate all platform builds from this launch together (e.g., "April 2026 CPU JDK 21"). Auto-generated if not specified.')
-
-            stringParam('BUILD_ARGS', defaultBuildArgs,
-                'Additional build arguments')
-
+                'Type of release build (NIGHTLY = default nightly, WEEKLY = EA beta, RELEASE = official)')
             booleanParam('RUN_TESTS',
                 defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : false,
                 'Run test stages (smoke tests, AQA, TCK)')
-            
             booleanParam('ENABLE_INSTALLERS',
                 defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
-                'Build installers')
-            
+                'Build platform-specific installers')
             booleanParam('SIGN_ARTIFACTS',
                 defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
                 'Sign artifacts and installers')
-            
             booleanParam('PUBLISH_ARTIFACTS',
                 defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
                 'Publish artifacts to release repository')
-            
             booleanParam('RUN_REPRODUCIBLE_COMPARE',
                 defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
-                'Run reproducible build comparison')
+                'Run reproducible build comparison against a production Adoptium binary')
+
+            // ── Collated stage parameters ─────────────────────────────────
+            // Same set as the platform build jobs. Set values here once and
+            // Jenkinsfile.launch forwards them to every platform build job.
+            emitCollatedParams(collatedStageParams)
         }
 
         definition {
@@ -319,6 +398,10 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }
             }
             disableResume()
+        }
+
+        configure { project ->
+            injectParamSeparators(project, collatedStageParams)
         }
     }
 }

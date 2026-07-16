@@ -2,6 +2,11 @@
 """
 Local Pipeline Runner — orchestrates OpenJDK build pipeline stages locally.
 
+Stage-specific parameters are loaded dynamically from scripts/stages/*.params.json
+(and any vendor-scripts/*.params.json overrides in a checked-out config repo) via
+scripts/lib/collect-stage-params.py. This ensures the local runner always presents
+the same parameter surface as the Jenkins jobs without any hardcoding.
+
 Usage:
     python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64
     python3 run-pipeline.py --help
@@ -19,13 +24,129 @@ from workspace_manager import WorkspaceManager
 from stage_resolver import StageResolver
 
 
+# ---------------------------------------------------------------------------
+# Stage parameter collation (CI-agnostic helper)
+# ---------------------------------------------------------------------------
+
+def _collect_stage_params(script_dir: Path, vendor_scripts_dir: Path | None) -> dict:
+    """
+    Run scripts/lib/collect-stage-params.py and return the parsed output.
+
+    Args:
+        script_dir:          Root of the ci-adoptium-pipelines checkout.
+        vendor_scripts_dir:  Path to config-repo/vendor-scripts, or None.
+
+    Returns:
+        Dict with keys 'groups' and 'paramNames', or empty structure on failure.
+    """
+    import tempfile
+
+    collector = script_dir / 'scripts' / 'lib' / 'collect-stage-params.py'
+    if not collector.exists():
+        return {'groups': [], 'paramNames': []}
+
+    stages_dir = script_dir / 'scripts' / 'stages'
+    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as tmp:
+        tmp_path = tmp.name
+
+    cmd = [
+        sys.executable, str(collector),
+        '--default-stages-dir', str(stages_dir),
+        '--output', tmp_path,
+    ]
+    if vendor_scripts_dir and vendor_scripts_dir.exists():
+        cmd += ['--vendor-scripts-dir', str(vendor_scripts_dir)]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"WARNING: collect-stage-params.py failed — stage params not loaded.\n"
+              f"{result.stderr.strip()}", file=sys.stderr)
+        return {'groups': [], 'paramNames': []}
+
+    if result.stdout.strip():
+        print(f"  {result.stdout.strip()}")
+
+    with open(tmp_path, 'r') as f:
+        return json.load(f)
+
+
+def _param_name_to_cli_flag(name: str) -> str:
+    """Convert UPPER_SNAKE_CASE param name to --lower-kebab-case CLI flag."""
+    return '--' + name.lower().replace('_', '-')
+
+
+def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]]:
+    """
+    Parse a list of raw unknown CLI tokens (e.g. ['--openj9-repo', 'url', '--personal-build'])
+    against the collated stage parameter definitions.
+
+    Returns:
+        (stage_params, unrecognised)
+          stage_params   — dict of PARAM_NAME → value for every recognised token
+          unrecognised   — list of flag names that matched no collated param
+    """
+    # Build a lookup: --lower-kebab-case flag → param def dict
+    flag_to_param: dict[str, dict] = {}
+    for group in collated.get('groups', []):
+        for p in group.get('parameters', []):
+            flag_to_param[_param_name_to_cli_flag(p['name'])] = p
+
+    stage_params: dict[str, str] = {}
+    unrecognised: list[str] = []
+
+    i = 0
+    while i < len(extra):
+        token = extra[i]
+        if not token.startswith('--'):
+            i += 1
+            continue
+
+        # Handle --flag=value and --flag value forms
+        if '=' in token:
+            flag, value = token.split('=', 1)
+        else:
+            flag = token
+            value = None
+
+        p = flag_to_param.get(flag)
+        if p is None:
+            unrecognised.append(flag)
+            i += 1
+            continue
+
+        if p['type'] == 'boolean':
+            # Boolean flags carry no value token
+            stage_params[p['name']] = 'true'
+            i += 1
+        else:
+            if value is None:
+                # Consume the next token as the value
+                if i + 1 < len(extra) and not extra[i + 1].startswith('--'):
+                    value = extra[i + 1]
+                    i += 2
+                else:
+                    print(f"WARNING: flag '{flag}' expects a value but none was found — skipping.",
+                          file=sys.stderr)
+                    i += 1
+                    continue
+            stage_params[p['name']] = value
+            i += 1
+
+    return stage_params, unrecognised
+
+
 class PipelineRunner:
     # Define stage order
     STAGES = ['initialize', 'build', 'validate-sbom', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
 
-    def __init__(self, args):
+    def __init__(self, args, stage_params: dict | None = None):
         self.args = args
         self.script_dir = Path(__file__).parent.parent.parent.resolve()  # ci-adoptium-pipelines root
+
+        # Collated stage params: { paramName → value } derived from
+        # scripts/stages/*.params.json + vendor-scripts/*.params.json.
+        # Injected into every stage environment via _stage_env().
+        self._stage_param_values: dict[str, str] = stage_params or {}
 
         # Initialize workspace manager
         pipeline_workspace = Path(args.workspace).expanduser().resolve()
@@ -135,6 +256,13 @@ class PipelineRunner:
             if refs.get('aqaRepoUrl'):
                 env['CONFIG_AQA_REPO_URL'] = refs['aqaRepoUrl']
 
+        # Inject collated stage params so vendor stage scripts can read them
+        # as environment variables without needing any other mechanism.
+        # setdefault ensures pipeline-config.json values (set above) take
+        # precedence; explicit extra_env values applied next will override all.
+        for name, value in self._stage_param_values.items():
+            env.setdefault(name, str(value))
+
         if extra:
             env.update(extra)
         return env
@@ -205,8 +333,15 @@ class PipelineRunner:
     # Pipeline entry point
     # ------------------------------------------------------------------
 
-    def run(self):
-        """Run the complete pipeline."""
+    def run(self, skip_initialize: bool = False):
+        """Run the complete pipeline.
+
+        Args:
+            skip_initialize: When True the Initialize stage is not run by this
+                method — the caller (main) has already run it so that the
+                config repo is available before stage params are validated.
+                Also suppresses the workspace-exists guard in validate_and_setup.
+        """
         print("=" * 80)
         print("OpenJDK Build Pipeline - Local Runner")
         print("=" * 80)
@@ -217,11 +352,12 @@ class PipelineRunner:
         self.workspace_mgr.validate_and_setup(
             is_restarting=self.args.start_from_stage is not None,
             clean_requested=self.args.clean_workspace,
-            start_from_stage=self.args.start_from_stage
+            start_from_stage=self.args.start_from_stage,
+            initialize_already_run=skip_initialize,
         )
 
         try:
-            if 'initialize' in self.stages_to_run:
+            if not skip_initialize and 'initialize' in self.stages_to_run:
                 self.stage_initialize()
 
             if 'build' in self.stages_to_run:
@@ -403,23 +539,46 @@ class PipelineRunner:
 
 
 def main():
+    script_dir = Path(__file__).parent.parent.parent.resolve()
+
+    # -----------------------------------------------------------------------
+    # Phase 1: parse known fixed args; capture everything else as raw tokens.
+    #
+    # Unknown args (e.g. --openj9-repo, --personal-build) are kept as-is and
+    # validated after the Initialize stage has cloned the config repo and we
+    # know the full set of collated stage parameters for this vendor.
+    # -----------------------------------------------------------------------
     parser = argparse.ArgumentParser(
         description='Run OpenJDK build pipeline locally',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Standard build
+  # Standard nightly build
   python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64
 
-  # Release build, resume from sign stage, with reproducible comparison
+  # Release build with reproducible compare, resume from build stage
   python3 run-pipeline.py \\
       --jdk-version jdk21 --target-os linux --architecture x64 \\
-      --release-type RELEASE --scm-ref jdk-21.0.2+13 --compare-build \\
-      --start-from-stage sign
+      --release-type RELEASE --scm-ref jdk-21.0.7+6_adopt --compare-build \\
+      --start-from-stage build
+
+  # Personal build against a specific source tag
+  python3 run-pipeline.py \\
+      --jdk-version jdk21 --target-os mac --architecture aarch64 \\
+      --scm-ref jdk-21.0.7+6_adopt --personal-build \\
+      --custom-description "testing JDK-8345678 backport" --no-tests
+
+  # IBM OpenJ9 personal fork — stage params accepted and validated after
+  # the config repo is cloned during the Initialize stage
+  python3 run-pipeline.py \\
+      --jdk-version jdk21 --target-os linux --architecture s390x \\
+      --config-repo-url https://github.com/myorg/ci-openj9-config.git \\
+      --openj9-repo git@github.ibm.com:myuser/openj9.git \\
+      --openj9-branch my-feature-branch --personal-build
         """
     )
 
-    # Required arguments
+    # ── Required ─────────────────────────────────────────────────────────────
     parser.add_argument('--jdk-version', required=True,
                         help='JDK version to build (e.g., jdk21, jdk8). Format: jdkNN.')
     parser.add_argument('--target-os', required=True,
@@ -429,15 +588,42 @@ Examples:
                         choices=['aarch64', 'x64', 'x32', 'ppc64', 's390x'],
                         help='Target architecture')
 
-    # Optional arguments
+    # ── Pipeline / workspace control ─────────────────────────────────────────
     parser.add_argument('--workspace', default='~/openjdk-build',
                         help='Workspace directory (default: ~/openjdk-build)')
     parser.add_argument('--build-number',
                         help='Build number (default: local-YYYYMMDD-HHMMSS)')
-    parser.add_argument('--release-type', type=str,
-                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
+    parser.add_argument('--clean-workspace', action='store_true',
+                        help='Remove existing workspace before starting (ensures clean build)')
+    parser.add_argument('--start-from-stage',
+                        choices=['initialize', 'build', 'sign', 'installer',
+                                 'smoke-tests', 'reproducible-compare'],
+                        help='Start pipeline from a specific stage (skips earlier stages)')
 
-    # Git refs
+    # ── Release / build type ──────────────────────────────────────────────────
+    parser.add_argument('--release-type', type=str,
+                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE')
+    parser.add_argument('--compare-build', action='store_true',
+                        help='Enable reproducible build comparison (requires --scm-ref)')
+
+    # ── Stage gate flags ──────────────────────────────────────────────────────
+    parser.add_argument('--no-tests',      dest='enable_tests',     action='store_false',
+                        help='Disable test stages')
+    parser.add_argument('--no-installers', dest='enable_installers', action='store_false',
+                        help='Disable installer building')
+    parser.add_argument('--no-signer',     dest='enable_signer',     action='store_false',
+                        help='Disable artifact signing')
+    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
+
+    # ── Configuration repository ──────────────────────────────────────────────
+    parser.add_argument('--config-repo-url',
+                        default='https://github.com/adoptium/ci-temurin-config.git',
+                        help='Configuration repository URL')
+    parser.add_argument('--config-repo-branch', default='main',
+                        help='Configuration repository branch (default: main)')
+
+    # ── Git refs (also accepted as stage params after init, registered here
+    #    first so they always appear in --help regardless of vendor config) ────
     parser.add_argument('--scm-ref',
                         help='OpenJDK source branch/tag (default: HEAD)')
     parser.add_argument('--build-ref',
@@ -449,43 +635,80 @@ Examples:
     parser.add_argument('--aqa-repo-url',
                         help='aqa-tests repository URL (overrides adoptium_pipeline_config.json)')
 
-    # Configuration repository
-    parser.add_argument('--config-repo-url',
-                        default='https://github.com/adoptium/ci-temurin-config.git',
-                        help='Configuration repository URL (default: https://github.com/adoptium/ci-temurin-config.git)')
-    parser.add_argument('--config-repo-branch',
-                        default='main',
-                        help='Configuration repository branch (default: main)')
-
-    # Workspace control
-    parser.add_argument('--clean-workspace', action='store_true',
-                        help='Remove existing workspace before starting (ensures clean build)')
-
-    # Stage control
-    parser.add_argument('--start-from-stage',
-                        choices=['initialize', 'build', 'sign', 'installer', 'smoke-tests', 'reproducible-compare'],
-                        help='Start pipeline from a specific stage (skips earlier stages)')
-    parser.add_argument('--no-tests',      dest='enable_tests',      action='store_false',
-                        help='Disable tests')
-    parser.add_argument('--no-installers', dest='enable_installers',  action='store_false',
-                        help='Disable installer building')
-    parser.add_argument('--no-signer',     dest='enable_signer',      action='store_false',
-                        help='Disable artifact signing')
-    parser.add_argument('--compare-build', action='store_true',
-                        help='Enable reproducible build comparison against production Adoptium binaries (requires --scm-ref)')
-
-    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True)
-
-    args = parser.parse_args()
+    # parse_known_args: fixed args parsed normally; anything else returned as
+    # a flat list of raw tokens for post-init validation against the collated
+    # stage params loaded from the vendor config repo.
+    args, extra_tokens = parser.parse_known_args()
 
     if not re.match(r'^jdk\d+$', args.jdk_version):
         parser.error(
             f"Invalid --jdk-version format: '{args.jdk_version}'. "
-            f"Must be in format jdkNN where NN is the version number (e.g., jdk21, jdk8)."
+            f"Must be in format jdkNN (e.g., jdk21, jdk8)."
         )
 
-    runner = PipelineRunner(args)
-    return runner.run()
+    if args.compare_build and not args.scm_ref:
+        parser.error("--compare-build requires --scm-ref to be specified.")
+
+    # -----------------------------------------------------------------------
+    # Phase 2: run Initialize (clones config repo) then collate stage params
+    # from the freshly checked-out vendor-scripts directory.
+    # -----------------------------------------------------------------------
+
+    # Create a minimal runner just to drive the Initialize stage.
+    # stage_params is empty at this point — extra_tokens are not yet injected.
+    runner = PipelineRunner(args, stage_params={})
+
+    # Run Initialize if it is in scope (i.e. not skipping past it)
+    if not args.start_from_stage or args.start_from_stage == 'initialize':
+        try:
+            runner.stage_initialize()
+        except Exception as e:
+            print(f"\n❌ Initialize stage failed: {e}")
+            return 1
+
+    # Collate stage params now that vendor-scripts is available
+    vendor_dir = runner.workspace / 'config-repo' / 'vendor-scripts'
+    collated   = _collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None)
+
+    # -----------------------------------------------------------------------
+    # Phase 3: validate the extra tokens against the collated stage params.
+    # Recognised tokens → stage_params dict injected into stage environments.
+    # Unrecognised tokens → warning printed; build continues (user intent is
+    # preserved even if a typo slips through — a hard error here would be
+    # more annoying than useful for a local dev tool).
+    # -----------------------------------------------------------------------
+    stage_params, unrecognised = _parse_extra_args(extra_tokens, collated)
+
+    if unrecognised:
+        print(f"\n⚠️  Unrecognised parameters (not defined in any *.params.json for this config repo):")
+        for flag in unrecognised:
+            print(f"   {flag}")
+        print("   These will be ignored. Check --help or the vendor-scripts/*.params.json files.\n")
+
+    if stage_params:
+        print("Stage parameters accepted:")
+        for name, value in stage_params.items():
+            print(f"  {name} = {value!r}")
+        print()
+
+    # Also map the fixed git-ref args into stage_params under their canonical
+    # UPPER_SNAKE_CASE names so stage scripts receive them consistently.
+    fixed_ref_map = {
+        'scm_ref':       'SCM_REF',
+        'build_ref':     'BUILD_REF',
+        'aqa_ref':       'AQA_REF',
+        'build_repo_url': 'BUILD_REPO_URL',
+        'aqa_repo_url':  'AQA_REPO_URL',
+    }
+    for attr, env_name in fixed_ref_map.items():
+        value = getattr(args, attr, None)
+        if value:
+            stage_params.setdefault(env_name, value)
+
+    # Inject into the runner and continue from the next stage
+    runner._stage_param_values = stage_params
+
+    return runner.run(skip_initialize=True)
 
 
 if __name__ == '__main__':

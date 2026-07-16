@@ -1,0 +1,18 @@
+{
+  "stageId": "13-smoke-tests",
+  "description": "Parameters consumed by the smoke test stage script. All fields are optional — the default implementation runs a standard set of JDK smoke tests.",
+  "parameterGroups": [
+    {
+      "name": "Smoke Test Options",
+      "description": "Controls for the quick post-build validation tests. These tests verify the JDK binary is functional before any signing or publishing steps run.",
+      "parameters": [
+        {
+          "name": "SMOKE_TEST_TIMEOUT",
+          "type": "string",
+          "default": "10",
+          "description": "Maximum time in minutes to allow the smoke tests to run before failing. Increase for slow platforms (e.g. s390x)."
+        }
+      ]
+    }
+  ]
+}
