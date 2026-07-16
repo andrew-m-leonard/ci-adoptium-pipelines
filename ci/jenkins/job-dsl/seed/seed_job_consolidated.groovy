@@ -23,26 +23,100 @@
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: read the pre-computed collated stage params JSON file.
+// Helper: collate stage parameters directly in Groovy — no subprocess needed.
 //
-// collect-stage-params.py must be run by a shell step BEFORE the Job DSL
-// step executes — the Job DSL sandbox does not permit spawning subprocesses.
-// The shell step writes collated-stage-params.json into the workspace root;
-// this helper just reads it.
+// Reads scripts/stages/*.params.json from the local workspace (file I/O,
+// always permitted in the Job DSL sandbox) and fetches vendor overrides via
+// new URL().text (HTTP, also permitted).  Mirrors the merge logic in
+// scripts/lib/collect-stage-params.py.
 //
 // Returns a Map with keys:
 //   groups    — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings (for STAGE_PARAM_NAMES)
 // ---------------------------------------------------------------------------
-def readCollatedStageParams(String workspaceDir) {
-    def paramsFile = new File(workspaceDir, 'collated-stage-params.json')
-    if (!paramsFile.exists()) {
-        throw new RuntimeException(
-            "collated-stage-params.json not found at ${paramsFile.absolutePath}.\n" +
-            "The shell step that runs collect-stage-params.py must execute before the Job DSL step."
-        )
+def collateStageParams(String workspaceDir, String vendorRawBaseUrl) {
+    def slurper    = new JsonSlurper()
+    def stagesDir  = new File(workspaceDir, 'scripts/stages')
+    def outputGroups    = []
+    def allParamNames   = [:]   // name → source label, for dedup warnings
+
+    // --- Load default *.params.json files from scripts/stages/ ---
+    def stems = stagesDir.listFiles()
+        ?.findAll { it.name.endsWith('.params.json') }
+        ?.collect { it.name.replace('.params.json', '') }
+        ?.sort() ?: []
+
+    stems.each { stem ->
+        def defaultData = slurper.parse(new File(stagesDir, "${stem}.params.json"))
+
+        // Try to fetch vendor override for this stem
+        def vendorData = null
+        if (vendorRawBaseUrl) {
+            def url = "${vendorRawBaseUrl.replaceAll('/+$','')}/vendor-scripts/${stem}.params.json"
+            try {
+                vendorData = slurper.parseText(new URL(url).text)
+            } catch (FileNotFoundException | java.io.IOException ignored) {
+                // 404 or network error — no vendor override for this stem
+            }
+        }
+
+        // Build default group map: groupName → group
+        def defaultGroups = [:]
+        def paramToGroup  = [:]
+        defaultData.parameterGroups?.each { grp ->
+            defaultGroups[grp.name] = [
+                name:        grp.name,
+                description: grp.description ?: '',
+                stageId:     stem,
+                parameters:  new ArrayList(grp.parameters ?: [])
+            ]
+            grp.parameters?.each { p -> paramToGroup[p.name] = grp.name }
+        }
+
+        if (vendorData) {
+            // Apply ignoreDefaultParams
+            vendorData.ignoreDefaultParams?.each { name ->
+                def gname = paramToGroup[name]
+                if (gname) {
+                    defaultGroups[gname].parameters.removeAll { it.name == name }
+                    if (!defaultGroups[gname].parameters) defaultGroups.remove(gname)
+                }
+            }
+            // Merge vendor parameterGroups
+            vendorData.parameterGroups?.each { vgrp ->
+                if (defaultGroups.containsKey(vgrp.name)) {
+                    def existing = defaultGroups[vgrp.name].parameters.collectEntries { [it.name, it] }
+                    vgrp.parameters?.each { vp -> existing[vp.name] = vp }
+                    defaultGroups[vgrp.name].parameters = existing.values().toList()
+                } else {
+                    defaultGroups[vgrp.name] = [
+                        name:        vgrp.name,
+                        description: vgrp.description ?: '',
+                        stageId:     stem,
+                        parameters:  new ArrayList(vgrp.parameters ?: [])
+                    ]
+                }
+            }
+        }
+
+        defaultGroups.values().each { grp ->
+            def clean = grp.parameters.findAll { p ->
+                if (allParamNames.containsKey(p.name)) {
+                    println "WARNING: duplicate param '${p.name}' in ${stem}/${grp.name} — skipping"
+                    return false
+                }
+                allParamNames[p.name] = "${stem}/${grp.name}"
+                return true
+            }
+            if (clean) outputGroups << [name: grp.name, description: grp.description,
+                                        stageId: grp.stageId, parameters: clean]
+        }
     }
-    return new JsonSlurper().parseText(paramsFile.text)
+
+    return [
+        groups:     outputGroups,
+        paramNames: allParamNames.keySet().toList()
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +297,10 @@ folder('Build_openjdk') {
 }
 
 // Collate stage parameters once — shared across all launch job versions.
-// The file was written by the shell step that runs before this Job DSL step.
+// Pure-Groovy: reads local *.params.json files + fetches vendor overrides via URL.
 def workspace = binding.variables.get('WORKSPACE') ?: new File('.').absolutePath
-def collatedStageParams = readCollatedStageParams(workspace)
+def vendorRawBase = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
+def collatedStageParams = collateStageParams(workspace, vendorRawBase)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s) for launch jobs"
 
@@ -457,17 +532,6 @@ freeStyleJob('openjdk-build-seed-job') {
     }
 
     steps {
-        // Run collect-stage-params.py BEFORE the Job DSL step.
-        // The Job DSL sandbox cannot spawn subprocesses, so we produce the
-        // collated-stage-params.json file here in a normal shell step and the
-        // DSL script reads it via readCollatedStageParams().
-        shell(
-            'scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py' +
-            ' --default-stages-dir scripts/stages' +
-            " --vendor-raw-base-url \"https://raw.githubusercontent.com/\${CONFIG_REPO_URL#*github.com/}\"" +
-            ' --output collated-stage-params.json'
-        )
-
         dsl {
             // Process the consolidated seed job script
             external('ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy')
