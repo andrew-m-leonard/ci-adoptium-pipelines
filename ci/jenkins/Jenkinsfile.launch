@@ -127,22 +127,34 @@ pipeline {
             }
             steps {
                 script {
-                    if (params.REGENERATE_JOBS) {
-                        echo "Force regenerating platform jobs (REGENERATE_JOBS=true)..."
-                    } else {
-                        echo "First run - creating platform jobs..."
-                    }
-                    
-                    def platforms = env.SELECTED_PLATFORMS.split(',')
-
-                    platforms.each { platform ->
-                        // Job name is determined by openjdk_build_pipeline.groovy using arch/os/distro
-                        // from the platform config. We echo the platform key here for traceability.
-                        echo "  → Creating/updating build job for platform: ${platform}"
-                        
-                        // Use Job DSL to create/update the job
-                        // IMPORTANT: Use ignoreMissingFiles and ignoreExisting to prevent modifying this launch job
-                        jobDsl(
+                        if (params.REGENERATE_JOBS) {
+                            echo "Force regenerating platform jobs (REGENERATE_JOBS=true)..."
+                        } else {
+                            echo "First run - creating platform jobs..."
+                        }
+    
+                        // Produce collated-stage-params.json before the jobDsl step runs.
+                        // The Job DSL sandbox cannot spawn subprocesses, so collect-stage-params.py
+                        // must run here in a normal sh step and write the file to the workspace.
+                        // openjdk_build_pipeline.groovy reads it via readCollatedStageParams().
+                        def rawBase = "https://raw.githubusercontent.com/${params.CONFIG_REPO_URL.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')}/${params.CONFIG_REPO_BRANCH}"
+                        sh """
+                            scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py \\
+                                --default-stages-dir scripts/stages \\
+                                --vendor-raw-base-url '${rawBase}' \\
+                                --output collated-stage-params.json
+                        """
+    
+                        def platforms = env.SELECTED_PLATFORMS.split(',')
+    
+                        platforms.each { platform ->
+                            // Job name is determined by openjdk_build_pipeline.groovy using arch/os/distro
+                            // from the platform config. We echo the platform key here for traceability.
+                            echo "  → Creating/updating build job for platform: ${platform}"
+                            
+                            // Use Job DSL to create/update the job
+                            // IMPORTANT: Use ignoreMissingFiles and ignoreExisting to prevent modifying this launch job
+                            jobDsl(
                             targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
                             removedJobAction: 'IGNORE',
                             removedViewAction: 'IGNORE',
