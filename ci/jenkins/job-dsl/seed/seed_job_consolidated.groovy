@@ -40,12 +40,15 @@ def fetchCollatedStageParams(String repoPath, String branch) {
     def tmpOut  = File.createTempFile('collated-stage-params', '.json')
     tmpOut.deleteOnExit()
 
+    // Run via 'sh -c' with the seed job workspace as CWD so relative paths
+    // (scripts/lib/python-runner.sh, scripts/stages/) resolve correctly.
+    // The List.execute(envp, workDir) overload sets the subprocess working dir.
     def shellCmd = "scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py" +
         " --default-stages-dir scripts/stages" +
         " --vendor-raw-base-url '${rawBase}'" +
         " --output '${tmpOut.absolutePath}'"
 
-    def proc = ['sh', '-c', shellCmd].execute()
+    def proc = ['sh', '-c', shellCmd].execute(null, new File('.'))
     proc.waitFor()
     if (proc.exitValue() != 0) {
         println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
@@ -55,28 +58,6 @@ def fetchCollatedStageParams(String repoPath, String branch) {
     println proc.out.text.trim()
 
     return new JsonSlurper().parseText(tmpOut.text)
-}
-
-// ---------------------------------------------------------------------------
-// Helper: emit collated stage parameter definitions into a parameters{} block.
-// Call this inside a parameters { } closure — it emits stringParam and
-// booleanParam calls for every entry in collatedStageParams.
-// ---------------------------------------------------------------------------
-def emitCollatedParams(def collatedStageParams) {
-    // Hidden meta-param forwarded to platform builds by Jenkinsfile.launch
-    stringParam('STAGE_PARAM_NAMES',
-        (collatedStageParams.paramNames ?: []).join(','),
-        'Collated stage parameter names — set at job-generation time, do not edit manually')
-
-    collatedStageParams.groups?.each { group ->
-        group.parameters?.each { p ->
-            if (p.type == 'boolean') {
-                booleanParam(p.name, p.default == true, p.description ?: '')
-            } else {
-                stringParam(p.name, p.default ?: '', p.description ?: '')
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +345,20 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             // ── Collated stage parameters ─────────────────────────────────
             // Same set as the platform build jobs. Set values here once and
             // Jenkinsfile.launch forwards them to every platform build job.
-            emitCollatedParams(collatedStageParams)
+            // Inlined (not a helper def) — Job DSL closure delegates prevent
+            // top-level def methods being visible inside parameters{}.
+            stringParam('STAGE_PARAM_NAMES',
+                (collatedStageParams.paramNames ?: []).join(','),
+                'Collated stage parameter names — set at job-generation time, do not edit manually')
+            collatedStageParams.groups?.each { group ->
+                group.parameters?.each { p ->
+                    if (p.type == 'boolean') {
+                        booleanParam(p.name, p.default == true, p.description ?: '')
+                    } else {
+                        stringParam(p.name, p.default ?: '', p.description ?: '')
+                    }
+                }
+            }
         }
 
         definition {

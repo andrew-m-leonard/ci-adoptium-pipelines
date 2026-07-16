@@ -52,12 +52,15 @@ def fetchCollatedStageParams(String repoPath, String branch) {
     def tmpOut  = File.createTempFile('collated-stage-params', '.json')
     tmpOut.deleteOnExit()
 
+    // Run via 'sh -c' with the job workspace as CWD so relative paths
+    // (scripts/lib/python-runner.sh, scripts/stages/) resolve correctly.
+    // The List.execute(envp, workDir) overload sets the subprocess working dir.
     def shellCmd = "scripts/lib/python-runner.sh scripts/lib/collect-stage-params.py" +
         " --default-stages-dir scripts/stages" +
         " --vendor-raw-base-url '${rawBase}'" +
         " --output '${tmpOut.absolutePath}'"
 
-    def proc = ['sh', '-c', shellCmd].execute()
+    def proc = ['sh', '-c', shellCmd].execute(null, new File('.'))
     proc.waitFor()
     if (proc.exitValue() != 0) {
         println "WARNING: collect-stage-params.py failed (exit ${proc.exitValue()}) — " +
