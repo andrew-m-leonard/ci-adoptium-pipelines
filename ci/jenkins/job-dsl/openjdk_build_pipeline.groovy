@@ -262,18 +262,25 @@ Ensure jdk${jdkVersion}_pipeline_config.json exists and contains configuration f
 }
 
 // Collate stage params using FilePath — java.io.File is sandbox-blocked.
-def wsFilePath      = hudson.model.Executor.currentExecutor().currentWorkspace
-def defaultStages   = wsFilePath.child('scripts/stages')
-def vendorScripts   = wsFilePath.child('config-repo/vendor-scripts')
-def vendorScriptsOk = vendorScripts.exists()
-def vendorRawBase   = vendorScriptsOk ? null : "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}"
-println "Workspace: ${wsFilePath.remote}"
-println "defaultStages exists: ${defaultStages.exists()}, vendorScripts local: ${vendorScriptsOk}"
-def collatedStageParams = collateStageParams(
-    defaultStages,
-    vendorScriptsOk ? vendorScripts : null,
-    vendorRawBase
-)
+// Workspace layout when called from Jenkinsfile.launch jobDsl() step:
+//   scripts/stages/        — ci-adoptium-pipelines default *.params.json
+//   config-repo/vendor-scripts/ — vendor override *.params.json
+def wsFilePath    = hudson.model.Executor.currentExecutor().currentWorkspace
+def defaultStages = wsFilePath.child('scripts/stages')
+def vendorScripts = wsFilePath.child('config-repo/vendor-scripts')
+println "Workspace     : ${wsFilePath.remote}"
+println "defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
+println "vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
+if (!vendorScripts.exists()) {
+    throw new RuntimeException("""
+config-repo/vendor-scripts/ not found in workspace at ${vendorScripts.remote}
+
+The launch job must check out the vendor config repo into config-repo/
+before calling the jobDsl() step.  See Jenkinsfile.launch and
+docs/JOB_DSL_AUTOMATION.md for setup instructions.
+""".stripIndent().trim())
+}
+def collatedStageParams = collateStageParams(defaultStages, vendorScripts, null)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
 

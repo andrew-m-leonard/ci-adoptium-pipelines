@@ -1,23 +1,28 @@
 /**
  * Consolidated Seed Job DSL Script
  *
- * This is the bootstrap job that creates all other jobs from the Job DSL scripts.
- * Run this once to set up a new Jenkins instance with all required jobs.
+ * Run by Jenkinsfile.seed (in this directory) via the jobDsl() step.
+ * Do not run this directly as a Freestyle Job DSL step.
  *
- * This consolidated version includes all logic in a single file to avoid
- * binding issues between separate external() script calls.
+ * What this script does:
+ *   1. Reads adoptium_pipeline_config.json and jenkins_job_config.json from
+ *      the vendor config repo checkout in the workspace root.
+ *   2. Collates stage parameters from:
+ *        pipelines/scripts/stages/*.params.json  (defaults, in workspace)
+ *        vendor-scripts/*.params.json            (vendor overrides, in workspace)
+ *   3. Creates Build_openjdk_launchers/ folder and one launch job per enabled
+ *      JDK version, each carrying the full collated stage parameter set.
+ *   4. Creates Build_openjdk/ folder and Jenkins views.
  *
- * Usage:
- *   1. Create a new Freestyle job in Jenkins named "seed-job"
- *   2. Add "Process Job DSLs" build step
- *   3. Point it to this script
- *   4. Run the job to create all pipeline jobs
- *
- * Stage parameters are collated dynamically from scripts/stages/*.params.json (defaults)
- * merged with config-repo/vendor-scripts/*.params.json (vendor overrides) via
- * scripts/lib/collect-stage-params.py. The same collated list is emitted on both the
- * launch job and each platform build job so operators can set all params once on the
- * launch job and have them forwarded to every platform build automatically.
+ * Workspace layout (set up by Jenkinsfile.seed):
+ *   <workspace>/
+ *     adoptium_pipeline_config.json   — vendor config repo root (SCM checkout)
+ *     jenkins_job_config.json         — vendor config repo root
+ *     configurations/                 — per-version platform configs
+ *     vendor-scripts/                 — vendor stage param overrides
+ *     pipelines/                      — ci-adoptium-pipelines checkout
+ *       scripts/stages/               — default *.params.json files
+ *       ci/jenkins/job-dsl/
  */
 
 import groovy.json.JsonSlurper
@@ -28,53 +33,36 @@ import groovy.json.JsonSlurper
 // java.io.File is blocked by the Job DSL sandbox, but hudson.FilePath
 // (Jenkins internal API) is permitted and works on the actual workspace.
 //
-//   defaultStagesPath — FilePath pointing to scripts/stages/ in the workspace
-//   vendorScriptsPath — FilePath pointing to config-repo/vendor-scripts/ in
-//                       the workspace, or null if not checked out
-//   vendorRawBaseUrl  — fallback raw URL for vendor overrides when the config
-//                       repo is not checked out locally (may be null)
+//   defaultStagesPath — FilePath pointing to pipelines/scripts/stages/
+//   vendorScriptsPath — FilePath pointing to vendor-scripts/
 //
 // Returns a Map with keys:
-//   groups    — List of [ name, description, stageId, parameters: [...] ]
+//   groups     — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings (for STAGE_PARAM_NAMES)
 // ---------------------------------------------------------------------------
 def collateStageParams(hudson.FilePath defaultStagesPath,
-                       hudson.FilePath vendorScriptsPath,
-                       String vendorRawBaseUrl) {
+                       hudson.FilePath vendorScriptsPath) {
     def slurper       = new JsonSlurper()
     def outputGroups  = []
     def allParamNames = [:]
 
-    // Discover stems from scripts/stages/*.params.json via FilePath.list()
     def stems = defaultStagesPath.list('*.params.json')
         .collect { it.name.replace('.params.json', '') }
         .sort()
     println "  Discovered param stems: ${stems}"
 
     stems.each { stem ->
-        // Read default params via FilePath.child().readToString()
         def defaultData = slurper.parseText(
             defaultStagesPath.child("${stem}.params.json").readToString()
         )
 
-        // Read vendor override — prefer local FilePath, fall back to raw URL
         def vendorData = null
-        if (vendorScriptsPath) {
-            def vf = vendorScriptsPath.child("${stem}.params.json")
-            if (vf.exists()) {
-                vendorData = slurper.parseText(vf.readToString())
-                println "  [${stem}] vendor override loaded from workspace"
-            } else {
-                println "  [${stem}] no vendor override in workspace"
-            }
-        } else if (vendorRawBaseUrl) {
-            def vendorUrl = "${vendorRawBaseUrl.replaceAll('/+$', '')}/vendor-scripts/${stem}.params.json"
-            try {
-                vendorData = slurper.parseText(new URL(vendorUrl).text)
-                println "  [${stem}] vendor override loaded from ${vendorUrl}"
-            } catch (FileNotFoundException | java.io.IOException ignored) {
-                println "  [${stem}] no vendor override at ${vendorUrl}"
-            }
+        def vf = vendorScriptsPath.child("${stem}.params.json")
+        if (vf.exists()) {
+            vendorData = slurper.parseText(vf.readToString())
+            println "  [${stem}] vendor override loaded"
+        } else {
+            println "  [${stem}] no vendor override"
         }
 
         // Build default group map: groupName → group
@@ -142,199 +130,124 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 }
 
 // ============================================================================
-// STEP 1: Load Configuration
+// STEP 1: Resolve workspace FilePaths
 // ============================================================================
 
-// Get configuration repository details from seed job parameters
-def configRepoUrl = binding.variables.get('CONFIG_REPO_URL')
-def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH')
+def wsFilePath    = hudson.model.Executor.currentExecutor().currentWorkspace
+def defaultStages = wsFilePath.child('pipelines/scripts/stages')
+def vendorScripts = wsFilePath.child('vendor-scripts')
+def configRoot    = wsFilePath   // config repo is checked out to workspace root
 
 println "=" * 80
-println "SEED JOB CONFIGURATION"
+println "SEED JOB — workspace: ${wsFilePath.remote}"
 println "=" * 80
-println "CONFIG_REPO_URL: ${configRepoUrl ?: '(empty)'}"
-println "CONFIG_REPO_BRANCH: ${configRepoBranch ?: '(empty)'}"
+println "  defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
+println "  vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
 println "=" * 80
 println ""
 
-// Validate required parameters
-if (!configRepoUrl || configRepoUrl.trim().isEmpty()) {
-    throw new IllegalArgumentException("""
-ERROR: CONFIG_REPO_URL parameter is required but not provided!
-
-The seed job must be configured with the following parameters:
-- CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
-- CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
-
-Please configure the seed job with these parameters and try again.
-""".stripIndent())
+if (!defaultStages.exists()) {
+    throw new RuntimeException(
+        "pipelines/scripts/stages/ not found at ${defaultStages.remote}\n" +
+        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed ran successfully."
+    )
 }
-
-if (!configRepoBranch || configRepoBranch.trim().isEmpty()) {
-    throw new IllegalArgumentException("""
-ERROR: CONFIG_REPO_BRANCH parameter is required but not provided!
-
-The seed job must be configured with the following parameters:
-- CONFIG_REPO_URL: URL of the configuration repository (e.g., https://github.com/adoptium/ci-temurin-config.git)
-- CONFIG_REPO_BRANCH: Branch of the configuration repository (e.g., main)
-
-Please configure the seed job with these parameters and try again.
-""".stripIndent())
+if (!vendorScripts.exists()) {
+    throw new RuntimeException(
+        "vendor-scripts/ not found at ${vendorScripts.remote}\n\n" +
+        "Expected workspace layout (created by Jenkinsfile.seed):\n" +
+        "  pipelines/      — ci-adoptium-pipelines checkout\n" +
+        "  vendor-scripts/ — vendor config repo vendor-scripts/ directory\n" +
+        "                    (the config repo is checked out to the workspace root\n" +
+        "                     by the Pipeline SCM step in Jenkinsfile.seed)\n\n" +
+        "See ci/jenkins/job-dsl/seed/Jenkinsfile.seed and docs/JOB_DSL_AUTOMATION.md."
+    )
 }
-
-// Extract GitHub owner/repo from URL for raw.githubusercontent.com access
-def repoPath = configRepoUrl.replaceAll(/^https?:\/\/github\.com\//, '').replaceAll(/\.git$/, '')
-
-// -------------------------------------------------------------------------
-// Load CI-agnostic pipeline configuration (adoptium_pipeline_config.json)
-// -------------------------------------------------------------------------
-def pipelineConfig
-try {
-    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/adoptium_pipeline_config.json"
-    println "Loading Adoptium pipeline configuration from ${configUrl}"
-    println "  Repository: ${configRepoUrl}"
-    println "  Branch: ${configRepoBranch}"
-    
-    def configText = new URL(configUrl).text
-    pipelineConfig = new JsonSlurper().parseText(configText)
-    println "✓ Successfully loaded adoptium_pipeline_config.json"
-    println "  Active JDK versions: ${pipelineConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
-} catch (Exception e) {
-    def errorMsg = """
-ERROR: Failed to load adoptium_pipeline_config.json from configuration repository!
-
-Configuration Repository: ${configRepoUrl}
-Branch: ${configRepoBranch}
-Configuration URL: https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/adoptium_pipeline_config.json
-Error: ${e.message}
-
-The adoptium_pipeline_config.json file must exist in the configuration repository.
-This file defines CI-agnostic settings: active JDK versions, default build args, repository info.
-
-Please ensure:
-1. The configuration repository is accessible
-2. The adoptium_pipeline_config.json file exists at the root
-3. The file contains valid JSON with activeJdkVersions array
-4. The CONFIG_REPO_URL and CONFIG_REPO_BRANCH parameters are correct
-
-Seed job cannot proceed without this configuration.
-""".stripIndent()
-    
-    println errorMsg
-    throw new RuntimeException(errorMsg)
-}
-
-// -------------------------------------------------------------------------
-// Load Jenkins-specific job configuration (jenkins_job_config.json)
-// -------------------------------------------------------------------------
-def jenkinsConfig
-try {
-    def configUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json"
-    println "Loading Jenkins job configuration from ${configUrl}"
-    
-    def configText = new URL(configUrl).text
-    jenkinsConfig = new JsonSlurper().parseText(configText)
-    println "✓ Successfully loaded jenkins_job_config.json"
-} catch (Exception e) {
-    def errorMsg = """
-ERROR: Failed to load jenkins_job_config.json from configuration repository!
-
-Configuration Repository: ${configRepoUrl}
-Branch: ${configRepoBranch}
-Configuration URL: https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/jenkins_job_config.json
-Error: ${e.message}
-
-The jenkins_job_config.json file must exist in the configuration repository.
-This file defines Jenkins-specific settings: job parameters, log rotation, Jenkinsfile path.
-""".stripIndent()
-    
-    println errorMsg
-    throw new RuntimeException(errorMsg)
-}
-
-println "✓ Configuration loaded successfully\n"
 
 // ============================================================================
-// STEP 2: Create Launch Orchestrator Jobs
+// STEP 2: Load Configuration from workspace
 // ============================================================================
 
-// Default values from CI-agnostic pipeline config
-def defaultBuildVariant = pipelineConfig.defaultVariant ?: 'temurin'
-def defaultBuildArgs = pipelineConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
-def pipelineRepoUrl = pipelineConfig.repository?.url ?: 'https://github.com/andrew-m-leonard/ci-adoptium-pipelines.git'
-def pipelineRepoBranch = pipelineConfig.repository?.branch ?: 'main'
-def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
+def slurper = new JsonSlurper()
 
-// Default values from Jenkins-specific config
-def defaultPipelineTimeoutHours = jenkinsConfig.pipelineTimeoutHours ?: 8
-def defaultParams = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
+// CI-agnostic pipeline configuration (adoptium_pipeline_config.json)
+def pipelineConfigFile = configRoot.child('adoptium_pipeline_config.json')
+if (!pipelineConfigFile.exists()) {
+    throw new RuntimeException(
+        "adoptium_pipeline_config.json not found at ${pipelineConfigFile.remote}\n" +
+        "This file must exist in the vendor config repo root."
+    )
+}
+def pipelineConfig = slurper.parseText(pipelineConfigFile.readToString())
+println "✓ Loaded adoptium_pipeline_config.json"
+println "  Active JDK versions: ${pipelineConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
 
-// Top-level folder for launch orchestrator jobs
+// Jenkins-specific job configuration (jenkins_job_config.json)
+def jenkinsConfigFile = configRoot.child('jenkins_job_config.json')
+if (!jenkinsConfigFile.exists()) {
+    throw new RuntimeException(
+        "jenkins_job_config.json not found at ${jenkinsConfigFile.remote}\n" +
+        "This file must exist in the vendor config repo root."
+    )
+}
+def jenkinsConfig = slurper.parseText(jenkinsConfigFile.readToString())
+println "✓ Loaded jenkins_job_config.json\n"
+
+// ============================================================================
+// STEP 3: Collate stage parameters
+// ============================================================================
+
+def collatedStageParams = collateStageParams(defaultStages, vendorScripts)
+println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
+        "across ${collatedStageParams.groups?.size() ?: 0} group(s)\n"
+
+// ============================================================================
+// STEP 4: Create folders
+// ============================================================================
+
 folder('Build_openjdk_launchers') {
     displayName('Build_openjdk_launchers')
     description('Launch orchestrator jobs that trigger platform-specific builds across all selected platforms for a given JDK version')
 }
 
-// Top-level folder for platform build jobs (AQA-style naming)
 folder('Build_openjdk') {
     displayName('Build_openjdk')
     description('OpenJDK platform build pipeline jobs, named using the AQA-style Build_openjdk<version>_<distro>_<arch>_<os> convention')
 }
 
-// Collate stage parameters — reads defaults from workspace, vendor overrides
-// from config-repo/vendor-scripts/ (mandatory checkout, see JOB_DSL_AUTOMATION.md).
-def wsFilePath    = hudson.model.Executor.currentExecutor().currentWorkspace
-def defaultStages = wsFilePath.child('scripts/stages')
-def vendorScripts = wsFilePath.child('config-repo/vendor-scripts')
-println "Workspace     : ${wsFilePath.remote}"
-println "defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
-println "vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
-if (!vendorScripts.exists()) {
-    throw new RuntimeException("""
-config-repo/vendor-scripts not found in workspace at ${vendorScripts.remote}
+// ============================================================================
+// STEP 5: Create Launch Orchestrator Jobs
+// ============================================================================
 
-The seed job requires the config repo to be checked out into config-repo/
-before the 'Process Job DSLs' step runs.  See docs/JOB_DSL_AUTOMATION.md
-Step 3 for setup instructions (dual SCM checkout using \${CONFIG_REPO_URL}
-and \${CONFIG_REPO_BRANCH} job parameters).
-""".stripIndent().trim())
-}
-def collatedStageParams = collateStageParams(defaultStages, vendorScripts, null)
-println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
-        "across ${collatedStageParams.groups?.size() ?: 0} group(s) for launch jobs"
+def defaultBuildArgs          = pipelineConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
+def pipelineRepoUrl           = pipelineConfig.repository?.url ?: 'https://github.com/adoptium/ci-adoptium-pipelines.git'
+def pipelineRepoBranch        = pipelineConfig.repository?.branch ?: 'main'
+def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
+
+def defaultParams             = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
 
 println "Creating launch orchestrator jobs for active JDK versions:"
 pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
-    def version = versionInfo.version
+    def version    = versionInfo.version
     def configFile = "${pipelineConfig.configFilePrefix ?: 'configurations/'}${version}${pipelineConfig.configFileSuffix ?: '_pipeline_config.json'}"
-    
-    // Determine if LTS based on version number
-    // LTS versions: 8, 11, then every 4 versions from 17 onwards (17, 21, 25, 29, 33, ...)
+
     def versionNum = version.replaceAll(/[^\d]/, '').toInteger()
-    def isLts = (versionNum == 8 || versionNum == 11 || (versionNum >= 17 && (versionNum - 17) % 4 == 0))
-    
+    def isLts      = (versionNum == 8 || versionNum == 11 || (versionNum >= 17 && (versionNum - 17) % 4 == 0))
+
     println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
-    
-    // Load platform configuration to get available platforms
+
+    // Load platform list from the per-version config file in the workspace
     def platforms = []
-    try {
-        def jdkConfigUrl = "https://raw.githubusercontent.com/${repoPath}/${configRepoBranch}/${configFile}"
-        
-        println "    Loading platforms from ${jdkConfigUrl}"
-        def jdkConfigText = new URL(jdkConfigUrl).text
-        def jdkConfig = new groovy.json.JsonSlurper().parseText(jdkConfigText)
-        
-        platforms = jdkConfig.buildConfigurations.keySet() as List
-        platforms.sort()  // Sort alphabetically
+    def jdkConfigFile = configRoot.child(configFile)
+    if (jdkConfigFile.exists()) {
+        def jdkConfig = slurper.parseText(jdkConfigFile.readToString())
+        platforms = (jdkConfig.buildConfigurations?.keySet() as List)?.sort() ?: []
         println "    Available platforms: ${platforms.join(', ')}"
-    } catch (Exception e) {
-        println "    WARNING: Could not load platform configuration: ${e.message}"
-        println "    Using 'all' as default platform choice"
+    } else {
+        println "    WARNING: ${configFile} not found — using 'all' as default platform choice"
         platforms = ['all']
     }
-    
-    // Launch orchestrator job lives in the Build_openjdk_launchers folder.
-    // Name pattern: Build_openjdk_launchers/Build_openjdk<version>_launch
+
     def jobName = "Build_openjdk_launchers/Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch"
 
     pipelineJob(jobName) {
@@ -349,9 +262,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             3. Launches builds for selected platforms in parallel
             4. Aggregates and reports results
 
-            Platform-specific jobs created under Build_openjdk/ follow the AQA-style naming:
-              Build_openjdk${version.replaceAll(/[^\d]/, '')}_<distro>_<arch>_<os>
-
             Stage parameters are collated from scripts/stages/*.params.json and any
             vendor-scripts/*.params.json overrides in the config repo. All collated
             params are forwarded automatically to every platform build job launched.
@@ -363,17 +273,10 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             // ── Fixed / infrastructure ────────────────────────────────────
             stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
                 'JDK version number — fixed for this launch job')
-            stringParam('CONFIG_REPO_URL', configRepoUrl ?: '',
-                """URL of the configuration repository (set by seed job).
-                ⚠️  Current value: ${configRepoUrl ?: '(NOT SET — re-run seed job with CONFIG_REPO_URL)'}""".stripIndent().trim())
-            stringParam('CONFIG_REPO_BRANCH', configRepoBranch ?: '',
-                """Branch of the configuration repository (set by seed job).
-                ⚠️  Current value: ${configRepoBranch ?: '(NOT SET — re-run seed job with CONFIG_REPO_BRANCH)'}""".stripIndent().trim())
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
 
             // ── Launch-job-only controls ──────────────────────────────────
-            // These are not forwarded to platform build jobs.
             booleanParam('REGENERATE_JOBS', false,
                 'Force regeneration of platform-specific build jobs (use after config changes)')
             choiceParam('PLATFORMS', ['all'] + platforms,
@@ -402,8 +305,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Run reproducible build comparison against a production Adoptium binary')
 
             // ── Collated stage parameters ─────────────────────────────────
-            // Same set as the platform build jobs. Set values here once and
-            // Jenkinsfile.launch forwards them to every platform build job.
             // Inlined (not a helper def) — Job DSL closure delegates prevent
             // top-level def methods being visible inside parameters{}.
             stringParam('STAGE_PARAM_NAMES',
@@ -495,16 +396,15 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 println "✓ Launch orchestrator jobs created successfully\n"
 
 // ============================================================================
-// STEP 3: Create Views
+// STEP 6: Create Views
 // ============================================================================
 
-// Create a view for launch orchestrator jobs
 listView('Build_openjdk_launchers') {
     description('Launch orchestrator jobs for coordinating platform builds (Build_openjdk<version>_launch)')
     jobs {
         regex('Build_openjdk_launchers/Build_openjdk\\d+_launch')
     }
-    recurse(true)  // Include jobs in folders
+    recurse(true)
     columns {
         status()
         weather()
@@ -516,13 +416,12 @@ listView('Build_openjdk_launchers') {
     }
 }
 
-// Create a view for platform-specific build jobs
 listView('Build_openjdk') {
     description('Platform-specific build jobs — AQA-style naming: Build_openjdk<version>_<distro>_<arch>_<os>')
     jobs {
         regex('Build_openjdk/Build_openjdk\\d+_[^_]+_[^_]+_[^_]+')
     }
-    recurse(true)  // Include jobs in folders
+    recurse(true)
     columns {
         status()
         weather()
@@ -538,5 +437,3 @@ println "✓ Views created successfully\n"
 println "=" * 80
 println "Seed job execution complete!"
 println "=" * 80
-
-// Made with Bob
