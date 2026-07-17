@@ -214,8 +214,11 @@ def collatedStageParams = collateStageParams(
     'vendor-scripts',
     vendorStemSet
 )
+// Capture groups at script scope — configure{} runs with a different delegate
+// and cannot reliably access variables defined inside pipelineJob{} closures.
+def collatedParamGroups = collatedStageParams.groups ?: []
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
-        "across ${collatedStageParams.groups?.size() ?: 0} group(s)\n"
+        "across ${collatedParamGroups.size()} group(s)\n"
 
 // ============================================================================
 // STEP 4: Create folders
@@ -317,7 +320,7 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
             // Inlined (not a helper def) — Job DSL closure delegates prevent
             // top-level def methods being visible inside parameters{}.
-            collatedStageParams.groups?.each { group ->
+            collatedParamGroups.each { group ->
                 group.parameters?.each { p ->
                     if (p.type == 'boolean') {
                         booleanParam(p.name, p.default == true, p.description ?: '')
@@ -370,38 +373,35 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         }
 
         // Inject Parameter Separator nodes for each collated group.
-        // Strategy: remove every collated param node from its current position,
-        // then re-append in group order with a separator preceding each group.
-        // This ensures separators appear immediately before their group's params.
-        if (collatedStageParams.groups) {
-            configure { project ->
-                def paramDefs = project / 'properties'
-                    / 'hudson.model.ParametersDefinitionProperty'
-                    / 'parameterDefinitions'
+        // configure{} must be at the top level of the job block — wrapping it
+        // in an if() causes Job DSL to silently ignore it.
+        // Strategy: detach each group's param nodes, then re-append separator +
+        // params in order so separators appear immediately before their group.
+        configure { project ->
+            def paramDefs = project / 'properties'
+                / 'hudson.model.ParametersDefinitionProperty'
+                / 'parameterDefinitions'
 
-                collatedStageParams.groups.each { group ->
-                    if (!group.parameters) return
+            collatedParamGroups.each { group ->
+                if (!group.parameters) return
 
-                    // Detach all param nodes for this group first
-                    def detached = group.parameters.collect { p ->
-                        paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
-                    }.findAll { it != null }
-                    detached.each { paramDefs.remove(it) }
+                def detached = group.parameters.collect { p ->
+                    paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
+                }.findAll { it != null }
+                detached.each { paramDefs.remove(it) }
 
-                    // Append separator, then the group's params in order
-                    def sepNode = paramDefs.appendNode(
-                        'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
-                    )
-                    sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
-                    sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
-                    sepNode.appendNode('sectionHeaderStyle', '')
-                    if (group.description) {
-                        sepNode.appendNode('sectionDescription', group.description)
-                    }
-                    sepNode.appendNode('separatorStyle', '')
-
-                    detached.each { paramDefs.append(it) }
+                def sepNode = paramDefs.appendNode(
+                    'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+                )
+                sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
+                sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+                sepNode.appendNode('sectionHeaderStyle', '')
+                if (group.description) {
+                    sepNode.appendNode('sectionDescription', group.description)
                 }
+                sepNode.appendNode('separatorStyle', '')
+
+                detached.each { paramDefs.append(it) }
             }
         }
     }

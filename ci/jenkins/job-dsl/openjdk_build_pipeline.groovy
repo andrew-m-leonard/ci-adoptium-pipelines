@@ -182,9 +182,12 @@ def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.
 // STEP 3: Collate stage parameters
 // ============================================================================
 
-def collatedStageParams = collateStageParams('scripts/stages', 'config-repo/vendor-scripts', vendorStemSet)
+def collatedStageParams  = collateStageParams('scripts/stages', 'config-repo/vendor-scripts', vendorStemSet)
+// Capture groups at script scope — configure{} runs with a different delegate
+// and cannot reliably access variables defined inside pipelineJob{} closures.
+def collatedParamGroups  = collatedStageParams.groups ?: []
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
-        "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
+        "across ${collatedParamGroups.size()} group(s)"
 
 // ============================================================================
 // STEP 4: Create platform build job
@@ -247,7 +250,7 @@ pipelineJob(jobName) {
             'Type of release build')
 
         // Collated stage parameters
-        collatedStageParams.groups?.each { group ->
+        collatedParamGroups.each { group ->
             group.parameters?.each { p ->
                 if (p.type == 'boolean') {
                     booleanParam(p.name, p.default == true, p.description ?: '')
@@ -308,7 +311,7 @@ pipelineJob(jobName) {
         // ── Parameter Separators ─────────────────────────────────────────
         // Detach each group's param nodes first, then re-append separator + params
         // in order. This guarantees the separator is immediately before its group.
-        collatedStageParams.groups?.each { group ->
+        collatedParamGroups.each { group ->
             if (!group.parameters) return
 
             def detached = group.parameters.collect { p ->
