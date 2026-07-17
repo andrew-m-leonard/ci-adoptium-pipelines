@@ -8,10 +8,6 @@
  * minimal: check out the ci-adoptium-pipelines repo, then run the Job DSL
  * script that generates the launch (and platform build) jobs.
  *
- * All configuration is read directly from files already present in the
- * workspace (adoptium_pipeline_config.json, jenkins_job_config.json,
- * configurations/, vendor-scripts/) — no parameters are required.
- *
  * VENDOR SETUP
  * ------------
  * 1. Copy this file into your vendor config repository:
@@ -27,7 +23,11 @@
  *      - Branch         : <your config repo branch, e.g. main>
  *      - Script Path    : Jenkinsfile.seed   (or wherever you placed this file)
  *
- * 4. Run the seed job.  It will:
+ * 4. Add two String parameters to the seed job:
+ *      CONFIG_REPO_URL    — URL of this vendor config repository
+ *      CONFIG_REPO_BRANCH — Branch of this vendor config repository (e.g. main)
+ *
+ * 5. Run the seed job with those parameters set.  It will:
  *      - Check out ci-adoptium-pipelines into a 'pipelines/' subdirectory
  *      - Run the Job DSL script to create all launch jobs, reading all
  *        configuration directly from the workspace
@@ -56,6 +56,19 @@ def PIPELINES_REPO_BRANCH = 'main'
 
 pipeline {
     agent any
+
+    parameters {
+        string(
+            name:         'CONFIG_REPO_URL',
+            defaultValue: '',
+            description:  'URL of this vendor config repository — used by generated launch jobs to check out the config repo at runtime (REQUIRED)'
+        )
+        string(
+            name:         'CONFIG_REPO_BRANCH',
+            defaultValue: 'main',
+            description:  'Branch of this vendor config repository'
+        )
+    }
 
     options {
         timestamps()
@@ -89,7 +102,9 @@ pipeline {
                     removedViewAction:    'DELETE',
                     additionalClasspath:  'pipelines/ci/jenkins/job-dsl',
                     additionalParameters: [
-                        WORKSPACE: env.WORKSPACE
+                        WORKSPACE:          env.WORKSPACE,
+                        CONFIG_REPO_URL:    params.CONFIG_REPO_URL,
+                        CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
                     ]
                 )
             }

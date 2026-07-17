@@ -130,126 +130,101 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 }
 
 // ============================================================================
-// STEP 1: Resolve workspace FilePaths
+// STEP 1: Resolve workspace FilePaths and job parameters
 // ============================================================================
 
-// WORKSPACE is passed in via additionalParameters from Jenkinsfile.seed.
-// hudson.FilePath wraps it so we can traverse the workspace without
+// WORKSPACE, CONFIG_REPO_URL and CONFIG_REPO_BRANCH are all passed in via
+// additionalParameters from Jenkinsfile.seed (see that file for the jobDsl() call).
+// hudson.FilePath wraps WORKSPACE so we can traverse the workspace without
 // java.io.File (which is sandbox-blocked in the Job DSL groovy context).
 def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
 def defaultStages = wsFilePath.child('pipelines/scripts/stages')
 def vendorScripts = wsFilePath.child('vendor-scripts')
 def configRoot    = wsFilePath   // config repo is checked out to workspace root
 
-// ---------------------------------------------------------------------------
-// Discover the config repo's own remote URL and branch from its .git metadata.
-// The config repo was checked out to the workspace root by the Pipeline SCM
-// step in Jenkinsfile.seed, so .git/config and .git/HEAD are present here.
-// These values are baked into each generated launch job as CONFIG_REPO_URL /
-// CONFIG_REPO_BRANCH so Jenkinsfile.launch can check out the config repo at
-// runtime without the operator having to re-enter them.
-// ---------------------------------------------------------------------------
-def configRepoUrl    = ''
-def configRepoBranch = ''
+def configRepoUrl    = binding.variables.get('CONFIG_REPO_URL')    ?: ''
+def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH') ?: ''
 
-def gitConfigFile = wsFilePath.child('.git/config')
-if (!gitConfigFile.exists()) {
+if (!configRepoUrl?.trim()) {
     throw new RuntimeException(
-        ".git/config not found at ${gitConfigFile.remote}\n" +
-        "The workspace root must be a git checkout of the vendor config repo."
+        "CONFIG_REPO_URL is required but was not provided.\n" +
+        "Set it as a parameter on the seed job (see docs/JOB_DSL_AUTOMATION.md)."
     )
 }
-def gitConfigText = gitConfigFile.readToString()
-def urlMatch = gitConfigText =~ /(?m)^\s*url\s*=\s*(.+)\s*$/
-if (urlMatch) {
-    configRepoUrl = urlMatch[0][1].trim()
-}
-if (!configRepoUrl) {
+if (!configRepoBranch?.trim()) {
     throw new RuntimeException(
-        "Could not determine config repo URL from ${gitConfigFile.remote}\n" +
-        "Expected a 'url = ...' entry under [remote \"origin\"] in .git/config."
-    )
-}
-
-def gitHeadFile = wsFilePath.child('.git/HEAD')
-if (!gitHeadFile.exists()) {
-    throw new RuntimeException(
-        ".git/HEAD not found at ${gitHeadFile.remote}\n" +
-        "The workspace root must be a git checkout of the vendor config repo."
-    )
-}
-def headText = gitHeadFile.readToString().trim()
-if (headText.startsWith('ref: refs/heads/')) {
-    configRepoBranch = headText.replace('ref: refs/heads/', '').trim()
-}
-if (!configRepoBranch) {
-    throw new RuntimeException(
-        "Could not determine config repo branch from ${gitHeadFile.remote}\n" +
-        "HEAD content: '${headText}'\n" +
-        "The workspace must be on a named branch, not a detached HEAD."
+        "CONFIG_REPO_BRANCH is required but was not provided.\n" +
+        "Set it as a parameter on the seed job (see docs/JOB_DSL_AUTOMATION.md)."
     )
 }
 
 println "=" * 80
 println "SEED JOB — workspace: ${wsFilePath.remote}"
-println "=" * 80
-println "  defaultStages    : ${defaultStages.remote} (exists=${defaultStages.exists()})"
-println "  vendorScripts    : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
-println "  configRepoUrl    : ${configRepoUrl}"
-println "  configRepoBranch : ${configRepoBranch}"
+println "  CONFIG_REPO_URL    : ${configRepoUrl}"
+println "  CONFIG_REPO_BRANCH : ${configRepoBranch}"
 println "=" * 80
 println ""
-
-if (!defaultStages.exists()) {
-    throw new RuntimeException(
-        "pipelines/scripts/stages/ not found at ${defaultStages.remote}\n" +
-        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed ran successfully."
-    )
-}
-if (!vendorScripts.exists()) {
-    throw new RuntimeException(
-        "vendor-scripts/ not found at ${vendorScripts.remote}\n\n" +
-        "Expected workspace layout (created by Jenkinsfile.seed):\n" +
-        "  pipelines/      — ci-adoptium-pipelines checkout\n" +
-        "  vendor-scripts/ — vendor config repo vendor-scripts/ directory\n" +
-        "                    (the config repo is checked out to the workspace root\n" +
-        "                     by the Pipeline SCM step in Jenkinsfile.seed)\n\n" +
-        "See ci/jenkins/job-dsl/seed/Jenkinsfile.seed and docs/JOB_DSL_AUTOMATION.md."
-    )
-}
 
 // ============================================================================
 // STEP 2: Load Configuration from workspace
 // ============================================================================
 
+// Note: FilePath.exists() is unreliable in the Job DSL sandbox.
+// We call readToString() directly and catch FileNotFoundException, which gives
+// a clear error if the file is missing.
+
 def slurper = new JsonSlurper()
 
-// CI-agnostic pipeline configuration (adoptium_pipeline_config.json)
-def pipelineConfigFile = configRoot.child('adoptium_pipeline_config.json')
-if (!pipelineConfigFile.exists()) {
+def pipelineConfigText
+try {
+    pipelineConfigText = configRoot.child('adoptium_pipeline_config.json').readToString()
+} catch (java.io.FileNotFoundException e) {
     throw new RuntimeException(
-        "adoptium_pipeline_config.json not found at ${pipelineConfigFile.remote}\n" +
-        "This file must exist in the vendor config repo root."
+        "adoptium_pipeline_config.json not found in the vendor config repo workspace.\n" +
+        "Expected path: ${configRoot.remote}/adoptium_pipeline_config.json"
     )
 }
-def pipelineConfig = slurper.parseText(pipelineConfigFile.readToString())
+def pipelineConfig = slurper.parseText(pipelineConfigText)
 println "✓ Loaded adoptium_pipeline_config.json"
 println "  Active JDK versions: ${pipelineConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
 
-// Jenkins-specific job configuration (jenkins_job_config.json)
-def jenkinsConfigFile = configRoot.child('jenkins_job_config.json')
-if (!jenkinsConfigFile.exists()) {
+def jenkinsConfigText
+try {
+    jenkinsConfigText = configRoot.child('jenkins_job_config.json').readToString()
+} catch (java.io.FileNotFoundException e) {
     throw new RuntimeException(
-        "jenkins_job_config.json not found at ${jenkinsConfigFile.remote}\n" +
-        "This file must exist in the vendor config repo root."
+        "jenkins_job_config.json not found in the vendor config repo workspace.\n" +
+        "Expected path: ${configRoot.remote}/jenkins_job_config.json"
     )
 }
-def jenkinsConfig = slurper.parseText(jenkinsConfigFile.readToString())
+def jenkinsConfig = slurper.parseText(jenkinsConfigText)
 println "✓ Loaded jenkins_job_config.json\n"
 
 // ============================================================================
 // STEP 3: Collate stage parameters
 // ============================================================================
+
+// Guard: if defaultStages has no *.params.json files it means the pipelines
+// checkout didn't land correctly — fail early with a clear message.
+def paramStems = defaultStages.list('*.params.json')
+if (!paramStems) {
+    throw new RuntimeException(
+        "No *.params.json files found under ${defaultStages.remote}\n" +
+        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed completed successfully\n" +
+        "and that ci-adoptium-pipelines was checked out into pipelines/."
+    )
+}
+
+// Guard: vendor-scripts/ must exist — fail fast with actionable message.
+def vendorParamFiles = vendorScripts.list('*.params.json')
+// vendorScripts.list() returns null if the directory doesn't exist at all
+if (vendorParamFiles == null) {
+    throw new RuntimeException(
+        "vendor-scripts/ not found in workspace at ${vendorScripts.remote}\n" +
+        "The vendor config repo must contain a vendor-scripts/ directory.\n" +
+        "See ci/jenkins/job-dsl/seed/Jenkinsfile.seed and docs/JOB_DSL_AUTOMATION.md."
+    )
+}
 
 def collatedStageParams = collateStageParams(defaultStages, vendorScripts)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +

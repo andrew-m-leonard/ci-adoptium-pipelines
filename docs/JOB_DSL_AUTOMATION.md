@@ -82,7 +82,16 @@ For a fork or a pinned branch, change these values. Commit and push.
 
 1. In Jenkins, create a new **Pipeline** job named `openjdk-build-seed-job`
 
-2. Under **Pipeline**:
+2. **Add Parameters** — click *This project is parameterized* and add two String Parameters:
+
+   | Name | Default | Description |
+   |---|---|---|
+   | `CONFIG_REPO_URL` | *(empty)* | URL of your vendor config repository — **REQUIRED** |
+   | `CONFIG_REPO_BRANCH` | `main` | Branch of your vendor config repository |
+
+   These are baked into the generated launch jobs so `Jenkinsfile.launch` can check out the config repo at runtime on each build agent.
+
+3. Under **Pipeline**:
    - **Definition**: `Pipeline script from SCM`
    - **SCM**: Git
    - **Repository URL**: your vendor config repo URL
@@ -90,7 +99,7 @@ For a fork or a pinned branch, change these values. Commit and push.
    - **Branch Specifier**: your config repo branch (e.g. `main`)
    - **Script Path**: `Jenkinsfile.seed` *(or the path you chose in Step 1)*
 
-3. Save the job.
+4. Save the job.
 
 > **Note**: The Pipeline SCM step checks out the vendor config repo to the workspace
 > root, so `adoptium_pipeline_config.json`, `jenkins_job_config.json`,
@@ -100,7 +109,10 @@ For a fork or a pinned branch, change these values. Commit and push.
 
 ### Step 3: Run the seed job
 
-1. Click **Build Now**
+1. Click **Build with Parameters**
+2. Set `CONFIG_REPO_URL` to your config repo URL (e.g. `https://github.com/adoptium/ci-temurin-config.git`)
+3. Set `CONFIG_REPO_BRANCH` to your branch (e.g. `main`)
+4. Click **Build**
 
 The job will:
 - Check out `ci-adoptium-pipelines` into `pipelines/`
@@ -217,6 +229,12 @@ def PIPELINES_REPO_BRANCH = 'v2.1.0'   // pin to a tag or branch
 Commit and push, then re-run the seed job.
 
 ## Troubleshooting
+
+### Seed Job Fails with "CONFIG_REPO_URL is required"
+
+**Cause**: Seed job run without parameters.
+
+**Fix**: Use **Build with Parameters** and supply `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH`.
 
 ### Seed Job Fails with "vendor-scripts/ not found"
 
