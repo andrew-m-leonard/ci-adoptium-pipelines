@@ -49,8 +49,7 @@ pipeline {
                     resolveGroupUid()
 
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
-                    echo "Configuration Repository: ${params.CONFIG_REPO_URL}"
-                    echo "Configuration Branch: ${params.CONFIG_REPO_BRANCH}"
+                    echo "Config Repo: ${params.CONFIG_REPO_URL} @ ${params.CONFIG_REPO_BRANCH}"
                     echo "Regenerate Jobs: ${params.REGENERATE_JOBS}"
                     echo "Platforms: ${params.PLATFORMS}"
                     echo "GROUP_UID: ${env.GROUP_UID}"
@@ -62,9 +61,7 @@ pipeline {
             steps {
                 script {
                     echo "Fetching configuration for JDK ${env.JDK_VERSION}..."
-                    echo "  Repository: ${params.CONFIG_REPO_URL}"
-                    echo "  Branch: ${params.CONFIG_REPO_BRANCH}"
-                    
+
                     def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
                     
                     // Checkout configuration repository
@@ -140,22 +137,22 @@ pipeline {
                             // from the platform config. We echo the platform key here for traceability.
                             echo "  → Creating/updating build job for platform: ${platform}"
                             
-                            // Use Job DSL to create/update the job
-                            // IMPORTANT: Use ignoreMissingFiles and ignoreExisting to prevent modifying this launch job
+                            // Use Job DSL to create/update the platform build job.
+                            // The DSL script reads all config from the workspace (config-repo/
+                            // already checked out by 'Fetch Configuration' above) — no
+                            // CONFIG_REPO_URL/BRANCH needed here.
                             jobDsl(
-                            targets: 'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
-                            removedJobAction: 'IGNORE',
-                            removedViewAction: 'IGNORE',
-                            ignoreExisting: false,  // Allow updates to existing platform jobs
-                            ignoreMissingFiles: false,
-                            lookupStrategy: 'SEED_JOB',  // Use seed job's workspace for script lookup
-                            additionalParameters: [
-                                JDK_VERSION: env.JDK_VERSION,
-                                PLATFORM: platform,
-                                CONFIG_REPO_URL: params.CONFIG_REPO_URL,
-                                CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
-                            ]
-                        )
+                                targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                                removedJobAction:    'IGNORE',
+                                removedViewAction:   'IGNORE',
+                                ignoreExisting:      false,
+                                ignoreMissingFiles:  false,
+                                lookupStrategy:      'SEED_JOB',
+                                additionalParameters: [
+                                    JDK_VERSION: env.JDK_VERSION,
+                                    PLATFORM:    platform
+                                ]
+                            )
                     }
                     
                     echo "✓ Platform jobs created/updated successfully"

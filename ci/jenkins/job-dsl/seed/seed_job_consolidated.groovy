@@ -133,16 +133,70 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 // STEP 1: Resolve workspace FilePaths
 // ============================================================================
 
-def wsFilePath    = hudson.model.Executor.currentExecutor().currentWorkspace
+// WORKSPACE is injected into every Job DSL execution context by Jenkins.
+// hudson.FilePath wraps it so we can traverse the workspace without
+// java.io.File (which is sandbox-blocked).
+def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
 def defaultStages = wsFilePath.child('pipelines/scripts/stages')
 def vendorScripts = wsFilePath.child('vendor-scripts')
 def configRoot    = wsFilePath   // config repo is checked out to workspace root
 
+// ---------------------------------------------------------------------------
+// Discover the config repo's own remote URL and branch from its .git metadata.
+// The config repo was checked out to the workspace root by the Pipeline SCM
+// step in Jenkinsfile.seed, so .git/config and .git/HEAD are present here.
+// These values are baked into each generated launch job as CONFIG_REPO_URL /
+// CONFIG_REPO_BRANCH so Jenkinsfile.launch can check out the config repo at
+// runtime without the operator having to re-enter them.
+// ---------------------------------------------------------------------------
+def configRepoUrl    = ''
+def configRepoBranch = ''
+
+def gitConfigFile = wsFilePath.child('.git/config')
+if (!gitConfigFile.exists()) {
+    throw new RuntimeException(
+        ".git/config not found at ${gitConfigFile.remote}\n" +
+        "The workspace root must be a git checkout of the vendor config repo."
+    )
+}
+def gitConfigText = gitConfigFile.readToString()
+def urlMatch = gitConfigText =~ /(?m)^\s*url\s*=\s*(.+)\s*$/
+if (urlMatch) {
+    configRepoUrl = urlMatch[0][1].trim()
+}
+if (!configRepoUrl) {
+    throw new RuntimeException(
+        "Could not determine config repo URL from ${gitConfigFile.remote}\n" +
+        "Expected a 'url = ...' entry under [remote \"origin\"] in .git/config."
+    )
+}
+
+def gitHeadFile = wsFilePath.child('.git/HEAD')
+if (!gitHeadFile.exists()) {
+    throw new RuntimeException(
+        ".git/HEAD not found at ${gitHeadFile.remote}\n" +
+        "The workspace root must be a git checkout of the vendor config repo."
+    )
+}
+def headText = gitHeadFile.readToString().trim()
+if (headText.startsWith('ref: refs/heads/')) {
+    configRepoBranch = headText.replace('ref: refs/heads/', '').trim()
+}
+if (!configRepoBranch) {
+    throw new RuntimeException(
+        "Could not determine config repo branch from ${gitHeadFile.remote}\n" +
+        "HEAD content: '${headText}'\n" +
+        "The workspace must be on a named branch, not a detached HEAD."
+    )
+}
+
 println "=" * 80
 println "SEED JOB — workspace: ${wsFilePath.remote}"
 println "=" * 80
-println "  defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
-println "  vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
+println "  defaultStages    : ${defaultStages.remote} (exists=${defaultStages.exists()})"
+println "  vendorScripts    : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
+println "  configRepoUrl    : ${configRepoUrl}"
+println "  configRepoBranch : ${configRepoBranch}"
 println "=" * 80
 println ""
 
@@ -319,6 +373,12 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                     }
                 }
             }
+
+            // ── Config repo (used by Jenkinsfile.launch to checkout config repo at runtime)
+            stringParam('CONFIG_REPO_URL', configRepoUrl,
+                'Vendor config repo URL — set at job-generation time from the seed job workspace')
+            stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
+                'Vendor config repo branch — set at job-generation time from the seed job workspace')
         }
 
         definition {
