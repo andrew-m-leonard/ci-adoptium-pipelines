@@ -117,8 +117,6 @@ pipeline {
         stage('Create/Update Platform Jobs') {
             when {
                 expression {
-                    // Create jobs on first run or when explicitly requested
-                    // Note: If platform jobs are deleted later, set REGENERATE_JOBS=true to recreate them
                     return params.REGENERATE_JOBS || currentBuild.number == 1
                 }
             }
@@ -129,33 +127,36 @@ pipeline {
                     } else {
                         echo "First run - creating platform jobs..."
                     }
-                    
-                    def platforms = env.SELECTED_PLATFORMS.split(',')
 
+                    // Pre-compute stem lists for openjdk_build_pipeline.groovy
+                    def paramStemsRaw = sh(
+                        script: "ls scripts/stages/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//'",
+                        returnStdout: true
+                    ).trim()
+                    def vendorStemsRaw = sh(
+                        script: "ls config-repo/vendor-scripts/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    def platforms = env.SELECTED_PLATFORMS.split(',')
                     platforms.each { platform ->
-                            // Job name is determined by openjdk_build_pipeline.groovy using arch/os/distro
-                            // from the platform config. We echo the platform key here for traceability.
-                            echo "  → Creating/updating build job for platform: ${platform}"
-                            
-                            // Use Job DSL to create/update the platform build job.
-                            // The DSL script reads all config from the workspace (config-repo/
-                            // already checked out by 'Fetch Configuration' above) — no
-                            // CONFIG_REPO_URL/BRANCH needed here.
-                            jobDsl(
-                                targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
-                                removedJobAction:    'IGNORE',
-                                removedViewAction:   'IGNORE',
-                                ignoreExisting:      false,
-                                ignoreMissingFiles:  false,
-                                lookupStrategy:      'SEED_JOB',
-                                additionalParameters: [
-                                    WORKSPACE:   env.WORKSPACE,
-                                    JDK_VERSION: env.JDK_VERSION,
-                                    PLATFORM:    platform
-                                ]
-                            )
+                        echo "  → Creating/updating build job for platform: ${platform}"
+                        jobDsl(
+                            targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                            removedJobAction:    'IGNORE',
+                            removedViewAction:   'IGNORE',
+                            ignoreExisting:      false,
+                            ignoreMissingFiles:  false,
+                            lookupStrategy:      'SEED_JOB',
+                            additionalParameters: [
+                                JDK_VERSION:  env.JDK_VERSION,
+                                PLATFORM:     platform,
+                                PARAM_STEMS:  paramStemsRaw,
+                                VENDOR_STEMS: vendorStemsRaw
+                            ]
+                        )
                     }
-                    
+
                     echo "✓ Platform jobs created/updated successfully"
                 }
             }
@@ -175,16 +176,10 @@ pipeline {
                     def versionConfigText = env.VERSION_CONFIG
                     def versionConfig = new groovy.json.JsonSlurper().parseText(versionConfigText)
 
-                    // Build the list of collated stage params to forward from the launch job
-                    // to each platform build job. STAGE_PARAM_NAMES is a comma-separated list
-                    // baked in at job-generation time by the seed job DSL. We read each param
-                    // value from this job's own params and forward it verbatim.
-                    // PLATFORMS and REGENERATE_JOBS are launch-job-only and are excluded.
-                    def launchOnlyParams = ['PLATFORMS', 'REGENERATE_JOBS'] as Set
-                    def stageParamNames = (params.STAGE_PARAM_NAMES ?: '')
-                        .split(',')
-                        .collect { it.trim() }
-                        .findAll  { it && !launchOnlyParams.contains(it) }
+                    // These params exist only on the launch job and must not be forwarded.
+                    def launchOnlyParams = [
+                        'PLATFORMS', 'REGENERATE_JOBS', 'JDK_VERSION', 'GROUP_UID'
+                    ] as Set
 
                     platforms.each { platform ->
                         def platformCfg = versionConfig.buildConfigurations[platform]
@@ -192,30 +187,22 @@ pipeline {
                         def os      = platformCfg?.os      ?: platform
                         def distro  = platformCfg?.variant ?: 'temurin'
                         def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${distro}_${arch}_${os}"
-                        
+
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
                                 echo "Launching build for ${platform}..."
 
-                                // Fixed pipeline-level params forwarded explicitly
+                                // Start with the fixed params that must have specific values
+                                // (not simply passed through from the launch job params).
                                 def forwardedParams = [
-                                    string(name: 'JDK_VERSION',        value: env.JDK_VERSION),
-                                    string(name: 'BUILD_ARGS',         value: params.BUILD_ARGS ?: ''),
-                                    string(name: 'CONFIG_REPO_URL',    value: params.CONFIG_REPO_URL),
-                                    string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH),
-                                    string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE),
-                                    string(name: 'GROUP_UID',          value: env.GROUP_UID),
-                                    booleanParam(name: 'RUN_TESTS',              value: params.RUN_TESTS),
-                                    booleanParam(name: 'ENABLE_INSTALLERS',      value: params.ENABLE_INSTALLERS),
-                                    booleanParam(name: 'SIGN_ARTIFACTS',         value: params.SIGN_ARTIFACTS),
-                                    booleanParam(name: 'PUBLISH_ARTIFACTS',      value: params.PUBLISH_ARTIFACTS),
-                                    booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE', value: params.RUN_REPRODUCIBLE_COMPARE),
+                                    string(name: 'JDK_VERSION',  value: env.JDK_VERSION),
+                                    string(name: 'GROUP_UID',    value: env.GROUP_UID),
                                 ]
 
-                                // Dynamically forward all collated stage params by reading
-                                // their values from this job's own param set.
-                                stageParamNames.each { name ->
-                                    def val = params[name]
+                                // Forward every other launch job param to the platform build job,
+                                // excluding launch-only params handled above.
+                                params.each { name, val ->
+                                    if (launchOnlyParams.contains(name)) return
                                     if (val instanceof Boolean) {
                                         forwardedParams << booleanParam(name: name, value: val)
                                     } else {

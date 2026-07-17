@@ -303,9 +303,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
             // Inlined (not a helper def) — Job DSL closure delegates prevent
             // top-level def methods being visible inside parameters{}.
-            stringParam('STAGE_PARAM_NAMES',
-                (collatedStageParams.paramNames ?: []).join(','),
-                'Collated stage parameter names — set at job-generation time, do not edit manually')
             collatedStageParams.groups?.each { group ->
                 group.parameters?.each { p ->
                     if (p.type == 'boolean') {
@@ -359,7 +356,9 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         }
 
         // Inject Parameter Separator nodes for each collated group.
-        // Inlined — top-level def methods are not visible inside configure{} closures.
+        // Strategy: remove every collated param node from its current position,
+        // then re-append in group order with a separator preceding each group.
+        // This ensures separators appear immediately before their group's params.
         if (collatedStageParams.groups) {
             configure { project ->
                 def paramDefs = project / 'properties'
@@ -369,6 +368,13 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 collatedStageParams.groups.each { group ->
                     if (!group.parameters) return
 
+                    // Detach all param nodes for this group first
+                    def detached = group.parameters.collect { p ->
+                        paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
+                    }.findAll { it != null }
+                    detached.each { paramDefs.remove(it) }
+
+                    // Append separator, then the group's params in order
                     def sepNode = paramDefs.appendNode(
                         'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
                     )
@@ -380,15 +386,7 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                     }
                     sepNode.appendNode('separatorStyle', '')
 
-                    group.parameters.each { p ->
-                        def paramNode = paramDefs.'*'.find { node ->
-                            node.'name'?.text() == p.name
-                        }
-                        if (paramNode) {
-                            paramDefs.remove(paramNode)
-                            paramDefs.append(paramNode)
-                        }
-                    }
+                    detached.each { paramDefs.append(it) }
                 }
             }
         }

@@ -2,7 +2,7 @@
  * Job DSL Script for Platform-Specific OpenJDK Build Pipeline Jobs
  *
  * Called by the launch job (Jenkinsfile.launch) via jobDsl() step.
- * Reads all configuration directly from the workspace — no HTTP fetching.
+ * Reads all configuration via readFileFromWorkspace — no FilePath, no HTTP.
  *
  * Workspace layout when called from Jenkinsfile.launch:
  *   <workspace>/
@@ -13,9 +13,11 @@
  *       configurations/jdk<N>_pipeline_config.json
  *       vendor-scripts/            — vendor override *.params.json
  *
- * Required binding variables (additionalParameters from Jenkinsfile.launch):
- *   JDK_VERSION — numeric version (e.g. "21")
- *   PLATFORM    — platform key from buildConfigurations (e.g. "x86-64_linux")
+ * Binding variables (additionalParameters from Jenkinsfile.launch):
+ *   JDK_VERSION   — numeric version (e.g. "21")
+ *   PLATFORM      — platform key from buildConfigurations (e.g. "x86-64_linux")
+ *   PARAM_STEMS   — comma-separated default stage param stems
+ *   VENDOR_STEMS  — comma-separated vendor override stems (may be empty)
  *
  * Creates: Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>
  */
@@ -23,28 +25,28 @@
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: collate stage parameters using FilePath for workspace access.
+// Helper: collate stage parameters using readFileFromWorkspace.
 // ---------------------------------------------------------------------------
-def collateStageParams(hudson.FilePath defaultStagesPath,
-                       hudson.FilePath vendorScriptsPath) {
+def collateStageParams(String defaultStagesDir,
+                       String vendorScriptsDir,
+                       Set    vendorStemSet) {
     def slurper       = new JsonSlurper()
     def outputGroups  = []
     def allParamNames = [:]
 
-    def stems = defaultStagesPath.list('*.params.json')
-        .collect { it.name.replace('.params.json', '') }
-        .sort()
-    println "collateStageParams: discovered stems = ${stems}"
+    def stems = (binding.variables.get('PARAM_STEMS').split(',') as List)
+    println "collateStageParams: stems = ${stems}"
 
     stems.each { stem ->
         def defaultData = slurper.parseText(
-            defaultStagesPath.child("${stem}.params.json").readToString()
+            readFileFromWorkspace("${defaultStagesDir}/${stem}.params.json")
         )
 
         def vendorData = null
-        def vf = vendorScriptsPath.child("${stem}.params.json")
-        if (vf.exists()) {
-            vendorData = slurper.parseText(vf.readToString())
+        if (vendorStemSet.contains(stem)) {
+            vendorData = slurper.parseText(
+                readFileFromWorkspace("${vendorScriptsDir}/${stem}.params.json")
+            )
             println "  [${stem}] vendor override loaded"
         }
 
@@ -102,76 +104,51 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 }
 
 // ============================================================================
-// STEP 1: Resolve workspace and binding variables
+// STEP 1: Validate binding variables
 // ============================================================================
 
-def jdkVersion = binding.variables.get('JDK_VERSION')
-def platform   = binding.variables.get('PLATFORM')
+def jdkVersion     = binding.variables.get('JDK_VERSION')
+def platform       = binding.variables.get('PLATFORM')
+def paramStemsRaw  = binding.variables.get('PARAM_STEMS')  ?: ''
+def vendorStemsRaw = binding.variables.get('VENDOR_STEMS') ?: ''
 
 if (!jdkVersion) throw new IllegalArgumentException("JDK_VERSION binding variable is required")
 if (!platform)   throw new IllegalArgumentException("PLATFORM binding variable is required")
-
-// WORKSPACE is passed in via additionalParameters from Jenkinsfile.launch.
-def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
-def defaultStages = wsFilePath.child('scripts/stages')
-def configRoot    = wsFilePath.child('config-repo')
-def vendorScripts = configRoot.child('vendor-scripts')
-
-println "=" * 80
-println "openjdk_build_pipeline — workspace: ${wsFilePath.remote}"
-println "  JDK_VERSION   : ${jdkVersion}"
-println "  PLATFORM      : ${platform}"
-println "  defaultStages : ${defaultStages.remote} (exists=${defaultStages.exists()})"
-println "  configRoot    : ${configRoot.remote}    (exists=${configRoot.exists()})"
-println "  vendorScripts : ${vendorScripts.remote} (exists=${vendorScripts.exists()})"
-println "=" * 80
-
-if (!configRoot.exists()) {
+if (!paramStemsRaw?.trim()) {
     throw new RuntimeException(
-        "config-repo/ not found at ${configRoot.remote}\n" +
-        "Jenkinsfile.launch must check out the vendor config repo into config-repo/ " +
-        "before calling the jobDsl() step."
+        "PARAM_STEMS is empty — no *.params.json files found.\n" +
+        "Ensure Jenkinsfile.launch passes PARAM_STEMS via additionalParameters."
     )
 }
-if (!vendorScripts.exists()) {
-    throw new RuntimeException(
-        "config-repo/vendor-scripts/ not found at ${vendorScripts.remote}\n" +
-        "Ensure the vendor config repo contains a vendor-scripts/ directory."
-    )
-}
+
+def vendorStemSet = vendorStemsRaw ? (vendorStemsRaw.split(',') as List).toSet() : [] as Set
+
+println "=" * 80
+println "openjdk_build_pipeline"
+println "  JDK_VERSION  : ${jdkVersion}"
+println "  PLATFORM     : ${platform}"
+println "  PARAM_STEMS  : ${paramStemsRaw}"
+println "  VENDOR_STEMS : ${vendorStemsRaw ?: '(none)'}"
+println "=" * 80
 
 // ============================================================================
-// STEP 2: Load configuration from workspace
+// STEP 2: Load configuration via readFileFromWorkspace
 // ============================================================================
 
 def slurper = new JsonSlurper()
 
-def pipelineConfigFile = configRoot.child('adoptium_pipeline_config.json')
-if (!pipelineConfigFile.exists()) {
-    throw new RuntimeException("adoptium_pipeline_config.json not found at ${pipelineConfigFile.remote}")
-}
-def pipelineConfig = slurper.parseText(pipelineConfigFile.readToString())
+def pipelineConfig = slurper.parseText(readFileFromWorkspace('config-repo/adoptium_pipeline_config.json'))
 println "✓ Loaded adoptium_pipeline_config.json"
 
-def jenkinsConfigFile = configRoot.child('jenkins_job_config.json')
-if (!jenkinsConfigFile.exists()) {
-    throw new RuntimeException("jenkins_job_config.json not found at ${jenkinsConfigFile.remote}")
-}
-def jenkinsConfig = slurper.parseText(jenkinsConfigFile.readToString())
+def jenkinsConfig = slurper.parseText(readFileFromWorkspace('config-repo/jenkins_job_config.json'))
 println "✓ Loaded jenkins_job_config.json"
 
-def jdkConfigFile = configRoot.child("configurations/jdk${jdkVersion}_pipeline_config.json")
-if (!jdkConfigFile.exists()) {
-    throw new RuntimeException(
-        "configurations/jdk${jdkVersion}_pipeline_config.json not found at ${jdkConfigFile.remote}"
-    )
-}
-def jdkConfig = slurper.parseText(jdkConfigFile.readToString())
+def jdkConfig = slurper.parseText(readFileFromWorkspace("config-repo/configurations/jdk${jdkVersion}_pipeline_config.json"))
 
 def platformConfig = jdkConfig.buildConfigurations[platform]
 if (!platformConfig) {
     throw new IllegalArgumentException(
-        "Platform '${platform}' not found in configurations/jdk${jdkVersion}_pipeline_config.json"
+        "Platform '${platform}' not found in config-repo/configurations/jdk${jdkVersion}_pipeline_config.json"
     )
 }
 
@@ -180,20 +157,18 @@ def targetOs     = platformConfig.os
 def variant      = platformConfig.variant ?: pipelineConfig?.defaultVariant ?: 'temurin'
 
 if (!architecture || !targetOs) {
-    throw new IllegalArgumentException(
-        "Platform '${platform}' configuration is missing 'arch' or 'os' fields"
-    )
+    throw new IllegalArgumentException("Platform '${platform}' is missing 'arch' or 'os' fields")
 }
-println "✓ Platform config: arch=${architecture}, os=${targetOs}, variant=${variant}"
+println "✓ Platform: arch=${architecture}, os=${targetOs}, variant=${variant}"
 
-def defaultParams      = jenkinsConfig?.jobConfiguration?.defaultParameters
-def initializeLabel    = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
+def defaultParams   = jenkinsConfig?.jobConfiguration?.defaultParameters
+def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
 
 // ============================================================================
 // STEP 3: Collate stage parameters
 // ============================================================================
 
-def collatedStageParams = collateStageParams(defaultStages, vendorScripts)
+def collatedStageParams = collateStageParams('scripts/stages', 'config-repo/vendor-scripts', vendorStemSet)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s)"
 
@@ -213,7 +188,6 @@ pipelineJob(jobName) {
     displayName("Build_openjdk${jdkVersion}_${variant}_${architecture}_${targetOs}")
     description("""
         Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${architecture}/${targetOs}.
-        Job name: Build_openjdk<version>_<distro>_<arch>_<os>
     """.stripIndent().trim())
 
     quietPeriod(5)
@@ -226,7 +200,7 @@ pipelineJob(jobName) {
         stringParam('ARCHITECTURE', architecture,
             'Target CPU architecture — fixed at job-generation time')
         stringParam('GROUP_UID', '',
-            'Group identifier linking all platform builds from the same launch. Auto-generated by the launch job if empty.')
+            'Group identifier linking all platform builds from the same launch.')
         stringParam('INITIALIZE_LABEL', initializeLabel,
             'Agent label for the Initialize stage — from stageAgentLabels.Initialize in jenkins_job_config.json')
         stringParam('ACTIVE_NODE_TIMEOUT',
@@ -258,10 +232,7 @@ pipelineJob(jobName) {
             ['NIGHTLY', 'WEEKLY', 'RELEASE'],
             'Type of release build')
 
-        stringParam('STAGE_PARAM_NAMES',
-            (collatedStageParams.paramNames ?: []).join(','),
-            'Collated stage parameter names — set at job-generation time, do not edit manually')
-
+        // Collated stage parameters
         collatedStageParams.groups?.each { group ->
             group.parameters?.each { p ->
                 if (p.type == 'boolean') {
@@ -271,6 +242,12 @@ pipelineJob(jobName) {
                 }
             }
         }
+
+        // Config repo — used by PipelineHelper.initializeStage() on the build agent
+        stringParam('CONFIG_REPO_URL', '',
+            'Vendor config repo URL — forwarded by the launch job')
+        stringParam('CONFIG_REPO_BRANCH', '',
+            'Vendor config repo branch — forwarded by the launch job')
     }
 
     definition {
@@ -310,37 +287,36 @@ pipelineJob(jobName) {
     }
 
     configure { project ->
-        if (collatedStageParams.groups) {
-            def paramDefs = project / 'properties'
-                / 'hudson.model.ParametersDefinitionProperty'
-                / 'parameterDefinitions'
+        def paramDefs = project / 'properties'
+            / 'hudson.model.ParametersDefinitionProperty'
+            / 'parameterDefinitions'
 
-            collatedStageParams.groups.each { group ->
-                if (!group.parameters) return
+        // ── Parameter Separators ─────────────────────────────────────────
+        // Detach each group's param nodes first, then re-append separator + params
+        // in order. This guarantees the separator is immediately before its group.
+        collatedStageParams.groups?.each { group ->
+            if (!group.parameters) return
 
-                def sepNode = paramDefs.appendNode(
-                    'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
-                )
-                sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
-                sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
-                sepNode.appendNode('sectionHeaderStyle', '')
-                if (group.description) {
-                    sepNode.appendNode('sectionDescription', group.description)
-                }
-                sepNode.appendNode('separatorStyle', '')
+            def detached = group.parameters.collect { p ->
+                paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
+            }.findAll { it != null }
+            detached.each { paramDefs.remove(it) }
 
-                group.parameters.each { p ->
-                    def paramNode = paramDefs.'*'.find { node ->
-                        node.'name'?.text() == p.name
-                    }
-                    if (paramNode) {
-                        paramDefs.remove(paramNode)
-                        paramDefs.append(paramNode)
-                    }
-                }
+            def sepNode = paramDefs.appendNode(
+                'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+            )
+            sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
+            sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+            sepNode.appendNode('sectionHeaderStyle', '')
+            if (group.description) {
+                sepNode.appendNode('sectionDescription', group.description)
             }
+            sepNode.appendNode('separatorStyle', '')
+
+            detached.each { paramDefs.append(it) }
         }
 
+        // ── copyArtifact permission ───────────────────────────────────────
         project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
             projectNameList {
                 string('*')
