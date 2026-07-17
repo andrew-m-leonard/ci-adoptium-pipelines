@@ -56,7 +56,7 @@ def collateStageParams(String defaultStagesDir,
 
     // Stems were discovered in the caller using FilePath.list() — passed in as vendorStemSet.
     // Default stems are discovered the same way and passed via the PARAM_STEMS binding.
-    def stems = binding.variables.get('PARAM_STEMS').split(',').toList()
+    def stems = (binding.variables.get('PARAM_STEMS').split(',') as List)
     println "  Discovered param stems: ${stems}"
 
     stems.each { stem ->
@@ -167,7 +167,7 @@ if (!paramStemsRaw?.trim()) {
     )
 }
 
-def vendorStemSet = vendorStemsRaw ? vendorStemsRaw.split(',').toSet() : [] as Set
+def vendorStemSet = vendorStemsRaw ? (vendorStemsRaw.split(',') as List).toSet() : [] as Set
 
 println "=" * 80
 println "SEED JOB"
