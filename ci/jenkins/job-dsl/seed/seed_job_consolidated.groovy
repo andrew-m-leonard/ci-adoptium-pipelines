@@ -23,49 +23,57 @@
  *     pipelines/                      — ci-adoptium-pipelines checkout
  *       scripts/stages/               — default *.params.json files
  *       ci/jenkins/job-dsl/
+ *
+ * Binding variables (passed via additionalParameters from Jenkinsfile.seed):
+ *   CONFIG_REPO_URL    — vendor config repo URL (baked into generated launch jobs)
+ *   CONFIG_REPO_BRANCH — vendor config repo branch (baked into generated launch jobs)
+ *   PARAM_STEMS        — comma-separated list of default stage param stems
+ *   VENDOR_STEMS       — comma-separated list of vendor override stems (may be empty)
  */
 
 import groovy.json.JsonSlurper
 
 // ---------------------------------------------------------------------------
-// Helper: collate stage parameters using FilePath for workspace access.
+// Helper: collate stage parameters.
 //
-// java.io.File is blocked by the Job DSL sandbox, but hudson.FilePath
-// (Jenkins internal API) is permitted and works on the actual workspace.
+// Uses readFileFromWorkspace(path) — the Job DSL native method for reading
+// files from the current workspace. Much simpler than FilePath.
 //
-//   defaultStagesPath — FilePath pointing to pipelines/scripts/stages/
-//   vendorScriptsPath — FilePath pointing to vendor-scripts/
+//   defaultStagesDir  — workspace-relative path to pipelines/scripts/stages/
+//   vendorScriptsDir  — workspace-relative path to vendor-scripts/
+//   vendorStemSet     — Set of stems that have a vendor override file
 //
 // Returns a Map with keys:
 //   groups     — List of [ name, description, stageId, parameters: [...] ]
 //   paramNames — List of all parameter name strings (for STAGE_PARAM_NAMES)
 // ---------------------------------------------------------------------------
-def collateStageParams(hudson.FilePath defaultStagesPath,
-                       hudson.FilePath vendorScriptsPath) {
+def collateStageParams(String defaultStagesDir,
+                       String vendorScriptsDir,
+                       Set    vendorStemSet) {
     def slurper       = new JsonSlurper()
     def outputGroups  = []
     def allParamNames = [:]
 
-    def stems = defaultStagesPath.list('*.params.json')
-        .collect { it.name.replace('.params.json', '') }
-        .sort()
+    // Stems were discovered in the caller using FilePath.list() — passed in as vendorStemSet.
+    // Default stems are discovered the same way and passed via the PARAM_STEMS binding.
+    def stems = binding.variables.get('PARAM_STEMS').split(',').toList()
     println "  Discovered param stems: ${stems}"
 
     stems.each { stem ->
         def defaultData = slurper.parseText(
-            defaultStagesPath.child("${stem}.params.json").readToString()
+            readFileFromWorkspace("${defaultStagesDir}/${stem}.params.json")
         )
 
         def vendorData = null
-        def vf = vendorScriptsPath.child("${stem}.params.json")
-        if (vf.exists()) {
-            vendorData = slurper.parseText(vf.readToString())
+        if (vendorStemSet.contains(stem)) {
+            vendorData = slurper.parseText(
+                readFileFromWorkspace("${vendorScriptsDir}/${stem}.params.json")
+            )
             println "  [${stem}] vendor override loaded"
         } else {
             println "  [${stem}] no vendor override"
         }
 
-        // Build default group map: groupName → group
         def defaultGroups = [:]
         def paramToGroup  = [:]
         defaultData.parameterGroups?.each { grp ->
@@ -79,7 +87,6 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
         }
 
         if (vendorData) {
-            // Apply ignoreDefaultParams
             vendorData.ignoreDefaultParams?.each { name ->
                 def gname = paramToGroup[name]
                 if (gname) {
@@ -87,7 +94,6 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
                     if (!defaultGroups[gname].parameters) defaultGroups.remove(gname)
                 }
             }
-            // Merge vendor parameterGroups
             vendorData.parameterGroups?.each { vgrp ->
                 if (defaultGroups.containsKey(vgrp.name)) {
                     def existing = defaultGroups[vgrp.name].parameters.collectEntries { [it.name, it] }
@@ -123,24 +129,17 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 
     def paramNames = allParamNames.keySet().toList()
     println "  Total collated params: ${paramNames}"
-    return [
-        groups:     outputGroups,
-        paramNames: paramNames
-    ]
+    return [groups: outputGroups, paramNames: paramNames]
 }
 
 // ============================================================================
-// STEP 1: Resolve workspace FilePaths and job parameters
+// STEP 1: Validate binding variables
 // ============================================================================
 
-// WORKSPACE, CONFIG_REPO_URL and CONFIG_REPO_BRANCH are all passed in via
-// additionalParameters from Jenkinsfile.seed (see that file for the jobDsl() call).
-// hudson.FilePath wraps WORKSPACE so we can traverse the workspace without
-// java.io.File (which is sandbox-blocked in the Job DSL groovy context).
-def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
-def defaultStages = wsFilePath.child('pipelines/scripts/stages')
-def vendorScripts = wsFilePath.child('vendor-scripts')
-def configRoot    = wsFilePath   // config repo is checked out to workspace root
+// WORKSPACE, PARAM_STEMS, VENDOR_STEMS, CONFIG_REPO_URL and CONFIG_REPO_BRANCH
+// are all passed in via additionalParameters from Jenkinsfile.seed.
+// PARAM_STEMS and VENDOR_STEMS are comma-separated stem lists pre-computed by
+// Jenkinsfile.seed using shell glob, since Job DSL file-listing is awkward.
 
 def configRepoUrl    = binding.variables.get('CONFIG_REPO_URL')    ?: ''
 def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH') ?: ''
@@ -158,75 +157,49 @@ if (!configRepoBranch?.trim()) {
     )
 }
 
+def paramStemsRaw  = binding.variables.get('PARAM_STEMS')  ?: ''
+def vendorStemsRaw = binding.variables.get('VENDOR_STEMS') ?: ''
+
+if (!paramStemsRaw?.trim()) {
+    throw new RuntimeException(
+        "No *.params.json files found under pipelines/scripts/stages/\n" +
+        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed completed successfully."
+    )
+}
+
+def vendorStemSet = vendorStemsRaw ? vendorStemsRaw.split(',').toSet() : [] as Set
+
 println "=" * 80
-println "SEED JOB — workspace: ${wsFilePath.remote}"
+println "SEED JOB"
 println "  CONFIG_REPO_URL    : ${configRepoUrl}"
 println "  CONFIG_REPO_BRANCH : ${configRepoBranch}"
+println "  PARAM_STEMS        : ${paramStemsRaw}"
+println "  VENDOR_STEMS       : ${vendorStemsRaw ?: '(none)'}"
 println "=" * 80
 println ""
 
 // ============================================================================
-// STEP 2: Load Configuration from workspace
+// STEP 2: Load configuration using readFileFromWorkspace
 // ============================================================================
-
-// Note: FilePath.exists() is unreliable in the Job DSL sandbox.
-// We call readToString() directly and catch FileNotFoundException, which gives
-// a clear error if the file is missing.
 
 def slurper = new JsonSlurper()
 
-def pipelineConfigText
-try {
-    pipelineConfigText = configRoot.child('adoptium_pipeline_config.json').readToString()
-} catch (java.io.FileNotFoundException e) {
-    throw new RuntimeException(
-        "adoptium_pipeline_config.json not found in the vendor config repo workspace.\n" +
-        "Expected path: ${configRoot.remote}/adoptium_pipeline_config.json"
-    )
-}
-def pipelineConfig = slurper.parseText(pipelineConfigText)
+def pipelineConfig = slurper.parseText(readFileFromWorkspace('adoptium_pipeline_config.json'))
 println "✓ Loaded adoptium_pipeline_config.json"
 println "  Active JDK versions: ${pipelineConfig.activeJdkVersions.findAll { it.enabled }.collect { it.version }.join(', ')}"
 
-def jenkinsConfigText
-try {
-    jenkinsConfigText = configRoot.child('jenkins_job_config.json').readToString()
-} catch (java.io.FileNotFoundException e) {
-    throw new RuntimeException(
-        "jenkins_job_config.json not found in the vendor config repo workspace.\n" +
-        "Expected path: ${configRoot.remote}/jenkins_job_config.json"
-    )
-}
-def jenkinsConfig = slurper.parseText(jenkinsConfigText)
+def jenkinsConfig = slurper.parseText(readFileFromWorkspace('jenkins_job_config.json'))
 println "✓ Loaded jenkins_job_config.json\n"
 
 // ============================================================================
 // STEP 3: Collate stage parameters
 // ============================================================================
 
-// Guard: if defaultStages has no *.params.json files it means the pipelines
-// checkout didn't land correctly — fail early with a clear message.
-def paramStems = defaultStages.list('*.params.json')
-if (!paramStems) {
-    throw new RuntimeException(
-        "No *.params.json files found under ${defaultStages.remote}\n" +
-        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed completed successfully\n" +
-        "and that ci-adoptium-pipelines was checked out into pipelines/."
-    )
-}
-
-// Guard: vendor-scripts/ must exist — fail fast with actionable message.
-def vendorParamFiles = vendorScripts.list('*.params.json')
-// vendorScripts.list() returns null if the directory doesn't exist at all
-if (vendorParamFiles == null) {
-    throw new RuntimeException(
-        "vendor-scripts/ not found in workspace at ${vendorScripts.remote}\n" +
-        "The vendor config repo must contain a vendor-scripts/ directory.\n" +
-        "See ci/jenkins/job-dsl/seed/Jenkinsfile.seed and docs/JOB_DSL_AUTOMATION.md."
-    )
-}
-
-def collatedStageParams = collateStageParams(defaultStages, vendorScripts)
+def collatedStageParams = collateStageParams(
+    'pipelines/scripts/stages',
+    'vendor-scripts',
+    vendorStemSet
+)
 println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
         "across ${collatedStageParams.groups?.size() ?: 0} group(s)\n"
 
@@ -252,7 +225,6 @@ def defaultBuildArgs          = pipelineConfig.defaultBuildArgs ?: '--create-jre
 def pipelineRepoUrl           = pipelineConfig.repository?.url ?: 'https://github.com/adoptium/ci-adoptium-pipelines.git'
 def pipelineRepoBranch        = pipelineConfig.repository?.branch ?: 'main'
 def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
-
 def defaultParams             = jenkinsConfig.jobConfiguration?.defaultParameters ?: [:]
 
 println "Creating launch orchestrator jobs for active JDK versions:"
@@ -265,14 +237,13 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
     println "  → JDK ${version}${isLts ? ' [LTS]' : ''}"
 
-    // Load platform list from the per-version config file in the workspace
+    // Load platform list from the per-version config file
     def platforms = []
-    def jdkConfigFile = configRoot.child(configFile)
-    if (jdkConfigFile.exists()) {
-        def jdkConfig = slurper.parseText(jdkConfigFile.readToString())
+    try {
+        def jdkConfig = slurper.parseText(readFileFromWorkspace(configFile))
         platforms = (jdkConfig.buildConfigurations?.keySet() as List)?.sort() ?: []
         println "    Available platforms: ${platforms.join(', ')}"
-    } else {
+    } catch (Exception e) {
         println "    WARNING: ${configFile} not found — using 'all' as default platform choice"
         platforms = ['all']
     }
@@ -299,19 +270,16 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         quietPeriod(5)
 
         parameters {
-            // ── Fixed / infrastructure ────────────────────────────────────
             stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
                 'JDK version number — fixed for this launch job')
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
 
-            // ── Launch-job-only controls ──────────────────────────────────
             booleanParam('REGENERATE_JOBS', false,
                 'Force regeneration of platform-specific build jobs (use after config changes)')
             choiceParam('PLATFORMS', ['all'] + platforms,
                 'Select platform to build, or "all" for all available platforms')
 
-            // ── Pipeline gate flags ───────────────────────────────────────
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments passed to the build stage')
             choiceParam('RELEASE_TYPE',
@@ -333,7 +301,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
                 'Run reproducible build comparison against a production Adoptium binary')
 
-            // ── Collated stage parameters ─────────────────────────────────
             // Inlined (not a helper def) — Job DSL closure delegates prevent
             // top-level def methods being visible inside parameters{}.
             stringParam('STAGE_PARAM_NAMES',
@@ -349,11 +316,11 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }
             }
 
-            // ── Config repo (used by Jenkinsfile.launch to checkout config repo at runtime)
+            // Config repo — used by Jenkinsfile.launch to checkout config repo at runtime
             stringParam('CONFIG_REPO_URL', configRepoUrl,
-                'Vendor config repo URL — set at job-generation time from the seed job workspace')
+                'Vendor config repo URL — baked in at job-generation time')
             stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
-                'Vendor config repo branch — set at job-generation time from the seed job workspace')
+                'Vendor config repo branch — baked in at job-generation time')
         }
 
         definition {

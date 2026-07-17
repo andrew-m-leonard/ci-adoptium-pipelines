@@ -85,22 +85,36 @@ pipeline {
 
         stage('Generate jobs') {
             steps {
-                // Run the consolidated Job DSL script.
-                // All configuration is read from the workspace:
-                //   adoptium_pipeline_config.json, jenkins_job_config.json,
-                //   configurations/, vendor-scripts/ (config repo, workspace root)
-                //   pipelines/scripts/stages/ (default *.params.json)
-                jobDsl(
-                    targets:              'pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy',
-                    removedJobAction:     'DELETE',
-                    removedViewAction:    'DELETE',
-                    additionalClasspath:  'pipelines/ci/jenkins/job-dsl',
-                    additionalParameters: [
-                        WORKSPACE:          env.WORKSPACE,
-                        CONFIG_REPO_URL:    params.CONFIG_REPO_URL,
-                        CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH
-                    ]
-                )
+                script {
+                    // Pre-compute stem lists here using shell — readFileFromWorkspace
+                    // in the DSL script handles file reading, but directory listing
+                    // is most reliably done with a shell glob before jobDsl() runs.
+                    def paramStemsRaw = sh(
+                        script: "ls pipelines/scripts/stages/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//'",
+                        returnStdout: true
+                    ).trim()
+                    def vendorStemsRaw = sh(
+                        script: "ls vendor-scripts/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//' || true",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!paramStemsRaw) {
+                        error("No *.params.json files found under pipelines/scripts/stages/ — ensure the pipeline repo checkout succeeded.")
+                    }
+
+                    jobDsl(
+                        targets:              'pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy',
+                        removedJobAction:     'DELETE',
+                        removedViewAction:    'DELETE',
+                        additionalClasspath:  'pipelines/ci/jenkins/job-dsl',
+                        additionalParameters: [
+                            CONFIG_REPO_URL:    params.CONFIG_REPO_URL,
+                            CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH,
+                            PARAM_STEMS:        paramStemsRaw,
+                            VENDOR_STEMS:       vendorStemsRaw
+                        ]
+                    )
+                }
             }
         }
     }
