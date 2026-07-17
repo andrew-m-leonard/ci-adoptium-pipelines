@@ -87,17 +87,30 @@ def collateStageParams(String defaultStagesDir,
         }
 
         if (vendorData) {
-            vendorData.ignoreDefaultParams?.each { name ->
+            def ignored = vendorData.ignoreDefaultParams ?: []
+            if (ignored) {
+                println "  [${stem}] ignoreDefaultParams: ${ignored}"
+            }
+            ignored.each { name ->
                 def gname = paramToGroup[name]
                 if (gname) {
                     defaultGroups[gname].parameters.removeAll { it.name == name }
-                    if (!defaultGroups[gname].parameters) defaultGroups.remove(gname)
+                    println "  [${stem}]   suppressed '${name}' from group '${gname}'"
+                    if (!defaultGroups[gname].parameters) {
+                        defaultGroups.remove(gname)
+                        println "  [${stem}]   group '${gname}' removed (no params remaining)"
+                    }
+                } else {
+                    println "  [${stem}]   WARNING: ignoreDefaultParams '${name}' not found in any default group — ignored"
                 }
             }
             vendorData.parameterGroups?.each { vgrp ->
                 if (defaultGroups.containsKey(vgrp.name)) {
                     def existing = defaultGroups[vgrp.name].parameters.collectEntries { [it.name, it] }
-                    vgrp.parameters?.each { vp -> existing[vp.name] = vp }
+                    vgrp.parameters?.each { vp ->
+                        existing[vp.name] = vp
+                        println "  [${stem}]   vendor added/overrode '${vp.name}' in group '${vgrp.name}'"
+                    }
                     defaultGroups[vgrp.name].parameters = existing.values().toList()
                 } else {
                     defaultGroups[vgrp.name] = [
@@ -106,6 +119,7 @@ def collateStageParams(String defaultStagesDir,
                         stageId:     stem,
                         parameters:  new ArrayList(vgrp.parameters ?: [])
                     ]
+                    println "  [${stem}]   vendor added new group '${vgrp.name}': ${vgrp.parameters?.collect { it.name }}"
                 }
             }
         }
