@@ -23,7 +23,9 @@
  *      - Branch         : <your config repo branch, e.g. main>
  *      - Script Path    : Jenkinsfile.seed   (or wherever you placed this file)
  *
- * 4. Add two String parameters to the seed job:
+ * 4. In the Jenkins job configuration UI, click "This project is parameterized"
+ *    and add two String Parameters (do NOT declare them in this Jenkinsfile —
+ *    Jenkins overwrites Jenkinsfile defaults on every run):
  *      CONFIG_REPO_URL    — URL of this vendor config repository
  *      CONFIG_REPO_BRANCH — Branch of this vendor config repository (e.g. main)
  *
@@ -57,18 +59,10 @@ def PIPELINES_REPO_BRANCH = 'main'
 pipeline {
     agent any
 
-    parameters {
-        string(
-            name:         'CONFIG_REPO_URL',
-            defaultValue: '',
-            description:  'URL of this vendor config repository — used by generated launch jobs to check out the config repo at runtime (REQUIRED)'
-        )
-        string(
-            name:         'CONFIG_REPO_BRANCH',
-            defaultValue: 'main',
-            description:  'Branch of this vendor config repository'
-        )
-    }
+    // NOTE: Do NOT declare CONFIG_REPO_URL / CONFIG_REPO_BRANCH here.
+    // A parameters{} block in the Jenkinsfile causes Jenkins to reset parameter
+    // values to the Jenkinsfile defaults on every run, wiping the operator's values.
+    // Define these two String Parameters in the Jenkins job configuration UI instead.
 
     options {
         timestamps()

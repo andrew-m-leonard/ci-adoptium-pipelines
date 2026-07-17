@@ -82,14 +82,16 @@ For a fork or a pinned branch, change these values. Commit and push.
 
 1. In Jenkins, create a new **Pipeline** job named `openjdk-build-seed-job`
 
-2. **Add Parameters** — click *This project is parameterized* and add two String Parameters:
+2. **Add Parameters** — click *This project is parameterized* and add two String Parameters **in the Jenkins job configuration UI**:
 
    | Name | Default | Description |
    |---|---|---|
-   | `CONFIG_REPO_URL` | *(empty)* | URL of your vendor config repository — **REQUIRED** |
+   | `CONFIG_REPO_URL` | *(your config repo URL)* | URL of your vendor config repository — **REQUIRED** |
    | `CONFIG_REPO_BRANCH` | `main` | Branch of your vendor config repository |
 
-   These are baked into the generated launch jobs so `Jenkinsfile.launch` can check out the config repo at runtime on each build agent.
+   > **Important**: do not declare these in `Jenkinsfile.seed`. A `parameters {}` block in a Jenkinsfile causes Jenkins to reset values to the Jenkinsfile defaults on every run, wiping whatever the operator set.
+
+   These values are baked into every generated launch job so `Jenkinsfile.launch` can check out the config repo at runtime on each build agent.
 
 3. Under **Pipeline**:
    - **Definition**: `Pipeline script from SCM`
