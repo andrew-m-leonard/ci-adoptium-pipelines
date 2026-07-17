@@ -133,9 +133,9 @@ def collateStageParams(hudson.FilePath defaultStagesPath,
 // STEP 1: Resolve workspace FilePaths
 // ============================================================================
 
-// WORKSPACE is injected into every Job DSL execution context by Jenkins.
+// WORKSPACE is passed in via additionalParameters from Jenkinsfile.seed.
 // hudson.FilePath wraps it so we can traverse the workspace without
-// java.io.File (which is sandbox-blocked).
+// java.io.File (which is sandbox-blocked in the Job DSL groovy context).
 def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
 def defaultStages = wsFilePath.child('pipelines/scripts/stages')
 def vendorScripts = wsFilePath.child('vendor-scripts')

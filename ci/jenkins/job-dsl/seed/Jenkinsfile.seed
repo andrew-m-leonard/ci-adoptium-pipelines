@@ -84,10 +84,13 @@ pipeline {
                 //   configurations/, vendor-scripts/ (config repo, workspace root)
                 //   pipelines/scripts/stages/ (default *.params.json)
                 jobDsl(
-                    targets:             'pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy',
-                    removedJobAction:    'DELETE',
-                    removedViewAction:   'DELETE',
-                    additionalClasspath: 'pipelines/ci/jenkins/job-dsl'
+                    targets:              'pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy',
+                    removedJobAction:     'DELETE',
+                    removedViewAction:    'DELETE',
+                    additionalClasspath:  'pipelines/ci/jenkins/job-dsl',
+                    additionalParameters: [
+                        WORKSPACE: env.WORKSPACE
+                    ]
                 )
             }
         }

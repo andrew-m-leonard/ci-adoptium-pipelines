@@ -111,7 +111,7 @@ def platform   = binding.variables.get('PLATFORM')
 if (!jdkVersion) throw new IllegalArgumentException("JDK_VERSION binding variable is required")
 if (!platform)   throw new IllegalArgumentException("PLATFORM binding variable is required")
 
-// WORKSPACE is injected into every Job DSL execution context by Jenkins.
+// WORKSPACE is passed in via additionalParameters from Jenkinsfile.launch.
 def wsFilePath    = new hudson.FilePath(new File(WORKSPACE))
 def defaultStages = wsFilePath.child('scripts/stages')
 def configRoot    = wsFilePath.child('config-repo')
