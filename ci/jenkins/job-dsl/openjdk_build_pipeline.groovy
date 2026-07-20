@@ -317,7 +317,7 @@ pipelineJob(jobName) {
             detached.each { paramDefs.remove(it) }
 
             def sepNode = paramDefs.appendNode(
-                'io.jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
+                'jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
             )
             sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
             sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
