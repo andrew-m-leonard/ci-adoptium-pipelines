@@ -304,14 +304,11 @@ pipelineJob(jobName) {
     }
 
     configure { project ->
-        def paramDefs = project / 'properties'
-            / 'hudson.model.ParametersDefinitionProperty'
-            / 'parameterDefinitions'
-
-        // ── Parameter Separators ─────────────────────────────────────────
-        // Detach each group's param nodes first, then re-append separator + params
-        // in order. This guarantees the separator is immediately before its group.
-        collatedParamGroups.each { group ->
+        // Use depthFirst().find() to locate the existing <parameterDefinitions>
+        // node built by the parameters{} block. The / operator creates nodes
+        // when not found, which puts separators in the wrong place in the XML.
+        def paramDefs = project.depthFirst().find { it.name() == 'parameterDefinitions' }
+        if (paramDefs) collatedParamGroups.each { group ->
             if (!group.parameters) return
 
             def detached = group.parameters.collect { p ->

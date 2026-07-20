@@ -378,9 +378,11 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         // Strategy: detach each group's param nodes, then re-append separator +
         // params in order so separators appear immediately before their group.
         configure { project ->
-            def paramDefs = project / 'properties'
-                / 'hudson.model.ParametersDefinitionProperty'
-                / 'parameterDefinitions'
+            // Use depthFirst().find() to locate the existing <parameterDefinitions>
+            // node built by the parameters{} block. The / operator creates nodes
+            // when not found, which puts separators in the wrong place in the XML.
+            def paramDefs = project.depthFirst().find { it.name() == 'parameterDefinitions' }
+            if (!paramDefs) return
 
             collatedParamGroups.each { group ->
                 if (!group.parameters) return
