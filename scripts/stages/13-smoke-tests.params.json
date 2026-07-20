@@ -13,6 +13,18 @@
           "description": "Maximum time in minutes to allow the smoke tests to run before failing. Increase for slow platforms (e.g. s390x)."
         }
       ]
+    },
+    {
+      "name": "Personal Build",
+      "description": "Smoke test personal build description.",
+      "parameters": [
+        {
+          "name": "SMOKE_TEST_PERSONAL_BUILD_OPTIONS",
+          "type": "string",
+          "default": "",
+          "description": "Smoke test personal build options."
+        }
+      ]
     }
   ]
 }
