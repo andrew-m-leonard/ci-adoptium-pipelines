@@ -307,7 +307,7 @@ pipelineJob(jobName) {
         // Use depthFirst().find() to locate the existing <parameterDefinitions>
         // node built by the parameters{} block. The / operator creates nodes
         // when not found, which puts separators in the wrong place in the XML.
-        def paramDefs = project.depthFirst().find { it.name() == 'parameterDefinitions' }
+        def paramDefs = project.depthFirst().find { it instanceof groovy.util.Node && it.name() == 'parameterDefinitions' }
         if (paramDefs) collatedParamGroups.each { group ->
             if (!group.parameters) return
 
