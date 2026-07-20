@@ -30,9 +30,11 @@ import groovy.json.JsonSlurper
 def collateStageParams(String defaultStagesDir,
                        String vendorScriptsDir,
                        Set    vendorStemSet) {
-    def slurper       = new JsonSlurper()
-    def outputGroups  = []
-    def allParamNames = [:]
+    def slurper        = new JsonSlurper()
+    // outputGroupMap preserves insertion order and merges same-named groups across stages.
+    // Key = group name, value = [ name, description, stageIds: List, parameters: List ]
+    def outputGroupMap = [:] as LinkedHashMap
+    def allParamNames  = [:]
 
     def stems = (binding.variables.get('PARAM_STEMS').split(',') as List)
     println "collateStageParams: stems = ${stems}"
@@ -50,13 +52,13 @@ def collateStageParams(String defaultStagesDir,
             println "  [${stem}] vendor override loaded"
         }
 
+        // Build per-stem group map (name → group) before merging into outputGroupMap.
         def defaultGroups = [:]
         def paramToGroup  = [:]
         defaultData.parameterGroups?.each { grp ->
             defaultGroups[grp.name] = [
                 name:        grp.name,
                 description: grp.description ?: '',
-                stageId:     stem,
                 parameters:  new ArrayList(grp.parameters ?: [])
             ]
             grp.parameters?.each { p -> paramToGroup[p.name] = grp.name }
@@ -92,7 +94,6 @@ def collateStageParams(String defaultStagesDir,
                     defaultGroups[vgrp.name] = [
                         name:        vgrp.name,
                         description: vgrp.description ?: '',
-                        stageId:     stem,
                         parameters:  new ArrayList(vgrp.parameters ?: [])
                     ]
                     println "  [${stem}]   vendor added new group '${vgrp.name}': ${vgrp.parameters?.collect { it.name }}"
@@ -100,6 +101,9 @@ def collateStageParams(String defaultStagesDir,
             }
         }
 
+        // Merge this stem's groups into the cross-stem outputGroupMap.
+        // Same-named groups from different stems have their params merged into
+        // a single entry so they share one separator in the Jenkins UI.
         defaultGroups.values().each { grp ->
             def clean = grp.parameters.findAll { p ->
                 if (allParamNames.containsKey(p.name)) {
@@ -109,12 +113,31 @@ def collateStageParams(String defaultStagesDir,
                 allParamNames[p.name] = "${stem}/${grp.name}"
                 return true
             }
-            if (clean) outputGroups << [name: grp.name, description: grp.description,
-                                        stageId: grp.stageId, parameters: clean]
+            if (!clean) return
+
+            println "  [${stem}] group '${grp.name}': ${clean.collect { it.name }}"
+
+            if (outputGroupMap.containsKey(grp.name)) {
+                // Merge into the existing cross-stem group entry.
+                def existing = outputGroupMap[grp.name]
+                existing.stageIds << stem
+                existing.parameters.addAll(clean)
+                println "  [${stem}] merged group '${grp.name}' into existing entry (stages: ${existing.stageIds})"
+            } else {
+                outputGroupMap[grp.name] = [
+                    name:        grp.name,
+                    description: grp.description,
+                    stageIds:    [stem],
+                    parameters:  new ArrayList(clean)
+                ]
+            }
         }
     }
 
-    return [groups: outputGroups, paramNames: allParamNames.keySet().toList()]
+    def outputGroups = outputGroupMap.values().toList()
+    def paramNames   = allParamNames.keySet().toList()
+    println "  Total collated params: ${paramNames}"
+    return [groups: outputGroups, paramNames: paramNames]
 }
 
 // ============================================================================
@@ -316,11 +339,18 @@ pipelineJob(jobName) {
             }.findAll { it != null }
             detached.each { paramDefs.remove(it) }
 
+            // stageIds is a List — join for the separator name (must be a valid XML node
+            // name so use underscores) and for the human-readable section header.
+            def stageLabel  = group.stageIds.join('_')
+            def stageHeader = group.stageIds.size() == 1
+                ? "stage: ${group.stageIds[0]}"
+                : "stages: ${group.stageIds.join(', ')}"
+
             def sepNode = paramDefs.appendNode(
                 'jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
             )
-            sepNode.appendNode('name', "__sep_${group.stageId}_${group.name.replaceAll(/\W+/, '_')}")
-            sepNode.appendNode('sectionHeader', "${group.name}  [stage: ${group.stageId}]")
+            sepNode.appendNode('name', "__sep_${stageLabel}_${group.name.replaceAll(/\W+/, '_')}")
+            sepNode.appendNode('sectionHeader', "${group.name}  [${stageHeader}]")
             sepNode.appendNode('sectionHeaderStyle', '')
             if (group.description) {
                 sepNode.appendNode('sectionDescription', group.description)
