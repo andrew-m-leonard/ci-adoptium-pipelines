@@ -238,7 +238,10 @@ pipeline {
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
                                 def fwd = buildForwardedParams(orderedGroups)
-                                echo "Triggering ${jobName} with ${fwd.size()} params"
+                                // ── DEBUG ──
+                                echo "=== forwardedParams for ${platform} (${fwd.size()} entries) ==="
+                                fwd.each { p -> echo "  ${p}" }
+                                // ── END DEBUG ──
                                 def result = build(
                                     job:        jobName,
                                     parameters: fwd,
