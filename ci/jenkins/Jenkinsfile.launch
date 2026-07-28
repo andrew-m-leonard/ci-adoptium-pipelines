@@ -101,7 +101,7 @@ def buildForwardedParams(List orderedGroups) {
             ? "stage: ${grp.stageIds[0]}"
             : "stages: ${grp.stageIds.join(', ')}"
         def sepName = "__sep_${stageLabel}_${grp.name.replaceAll(/\W+/, '_')}"
-        fwd << [$class: 'jenkins.plugins.parameter__separator.ParameterSeparatorValue',
+        fwd << [$class: 'jenkins.plugins.parameter_separator.ParameterSeparatorValue',
                 name: sepName, sectionHeader: "${grp.name}  [${stageHeader}]"]
         grp.parameters.each { p ->
             def val = params[p.name]
