@@ -327,7 +327,6 @@ pipelineJob(jobName) {
     }
 
     configure { project ->
-        // ── Parameter separators ──────────────────────────────────────────────
         // Use depthFirst().find() to locate the existing <parameterDefinitions>
         // node built by the parameters{} block. The / operator creates nodes
         // when not found, which puts separators in the wrong place in the XML.
@@ -361,38 +360,7 @@ pipelineJob(jobName) {
             detached.each { paramDefs.append(it) }
         }
 
-        // ── Declarative property tracker pre-seed ────────────────────────────
-        // The Declarative pipeline engine's DeclarativeJobPropertyTrackerAction
-        // fires on every build and compares "what parameters did the last build
-        // declare?" vs "what does this Jenkinsfile declare?".  On a brand-new job
-        // (no prior build) the baseline is empty, so it clears ALL
-        // ParametersDefinitionProperty entries — wiping Job-DSL-generated params
-        // and separators on build #1 (and every rebuild after job recreation).
-        //
-        // Fix: inject a DeclarativeJobPropertyTrackerAction into the job's
-        // <actions> at DSL-generation time with an empty <parameters/> entry.
-        // The tracker then sees a prior-build baseline of "no declared params",
-        // matches it against the current Jenkinsfile (also no params{}), finds
-        // no delta, and leaves the Job-DSL ParametersDefinitionProperty intact.
-        def actions = project.depthFirst().find {
-            it instanceof groovy.util.Node && it.name() == 'actions'
-        }
-        if (actions != null) {
-            // Remove any stale tracker action first (idempotent re-generation).
-            def stale = actions.'*'.find { it instanceof groovy.util.Node &&
-                it.name() == 'org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction' }
-            if (stale) actions.remove(stale)
-
-            def tracker = actions.appendNode(
-                'org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction'
-            )
-            tracker.appendNode('jobProperties')
-            tracker.appendNode('triggers')
-            tracker.appendNode('parameters')   // empty — no params{} in Jenkinsfile
-            tracker.appendNode('options')
-        }
-
-        // ── copyArtifact permission ───────────────────────────────────────────
+        // ── copyArtifact permission ───────────────────────────────────────
         project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
             projectNameList {
                 string('*')

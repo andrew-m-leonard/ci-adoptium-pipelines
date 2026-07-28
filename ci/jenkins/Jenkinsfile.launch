@@ -210,28 +210,6 @@ pipeline {
                                     }
                                 }
 
-                                // ParameterSeparatorDefinition nodes carry no value and are never
-                                // included in an explicit params list, so the ParametersAction stored
-                                // on a programmatically-triggered build omits them — causing the
-                                // running build's sidebar to render the raw separator name as plain
-                                // text instead of the visual separator widget.
-                                //
-                                // Fix: look up the target job's ParameterDefinitions and append a
-                                // string entry for every ParameterSeparatorDefinition found.
-                                // The separator plugin recognises its own name in the ParametersAction
-                                // and renders the widget correctly.
-                                // The separator plugin class name contains double-underscores which
-                                // Groovy's static class resolver cannot handle at compile time.
-                                // Use a class-name string comparison instead of instanceof.
-                                def targetJob = Jenkins.instance.getItemByFullName(jobName.replaceAll('^/', ''))
-                                targetJob?.getProperty(hudson.model.ParametersDefinitionProperty)
-                                    ?.getParameterDefinitions()
-                                    ?.each { pd ->
-                                        if (pd.getClass().getName() == 'jenkins.plugins.parameter__separator.ParameterSeparatorDefinition') {
-                                            forwardedParams << string(name: pd.getName(), value: '')
-                                        }
-                                    }
-
                                 def buildResult = build(
                                     job: jobName,
                                     parameters: forwardedParams,
