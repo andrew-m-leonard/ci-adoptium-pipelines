@@ -258,6 +258,12 @@ pipeline {
                                     forwardedParams << string(name: sepName, value: '')
                                 }
 
+                                // ── DEBUG — remove once separator rendering is confirmed ──
+                                echo "=== SEPARATOR_NAMES: '${env.SEPARATOR_NAMES}' ==="
+                                echo "=== forwardedParams for ${platform} (${forwardedParams.size()} entries) ==="
+                                forwardedParams.each { p -> echo "  ${p}" }
+                                // ── END DEBUG ──
+
                                 def buildResult = build(
                                     job: jobName,
                                     parameters: forwardedParams,
