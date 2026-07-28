@@ -409,9 +409,11 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }.findAll { it != null }
                 detached.each { paramDefs.remove(it) }
 
-                // stageIds is a List — join for the separator name (must be a valid XML node
-                // name so use underscores) and for the human-readable section header.
-                def stageLabel  = group.stageIds.join('_')
+                // stageIds is a List — join and sanitise for the separator <name> field.
+                // Sanitise non-word characters (including hyphens from stem names like
+                // '02-build') so the name is purely [A-Za-z0-9_] — matching the formula
+                // used by openjdk_build_pipeline.groovy and Jenkinsfile.launch.
+                def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
                 def stageHeader = group.stageIds.size() == 1
                     ? "stage: ${group.stageIds[0]}"
                     : "stages: ${group.stageIds.join(', ')}"

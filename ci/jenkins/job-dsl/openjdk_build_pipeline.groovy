@@ -238,7 +238,7 @@ pipelineJob(jobName) {
 
             // stageIds is a List — join for the separator name (must be a valid XML node
             // name so use underscores) and for the human-readable section header.
-            def stageLabel  = group.stageIds.join('_')
+            def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
             def stageHeader = group.stageIds.size() == 1
                 ? "stage: ${group.stageIds[0]}"
                 : "stages: ${group.stageIds.join(', ')}"
