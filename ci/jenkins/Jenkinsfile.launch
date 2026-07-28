@@ -64,30 +64,26 @@ def collateAndMergeGroups() {
     }
 
     def orderedGroups = mergedMap.values().toList()
-    env.SEPARATOR_NAMES = orderedGroups.collect { grp ->
-        "__sep_${grp.stageIds.join('_').replaceAll(/\W+/, '_')}_${grp.name.replaceAll(/\W+/, '_')}"
-    }.join(',')
-
     echo "✓ Collated ${rawGroups.size()} group(s) → ${orderedGroups.size()} merged group(s)"
-    echo "  Separators: ${env.SEPARATOR_NAMES}"
     return orderedGroups
 }
 
 /**
- * Build the forwardedParams list for a platform build trigger in the exact
- * order the platform job defines its parameters — so separators appear
- * interleaved with their parameter groups, not bunched at the end.
+ * Build the forwardedParams list for a platform build trigger.
  *
- * Order mirrors openjdk_build_pipeline.groovy parameters{} block:
- *   1. Fixed params controlled by the launch job
- *   2. For each collated group → separator entry then each param value
- *   3. Config repo params
+ * Only string and boolean parameter values are forwarded — separator entries
+ * must NOT be included. Passing string(name:'__sep_...') stores a
+ * StringParameterValue in the triggered build's ParametersAction, which
+ * overrides the ParameterSeparatorValue the plugin creates from the job
+ * definition — causing the sidebar to render the raw name instead of the widget.
+ * Omitting separators entirely lets Jenkins create ParameterSeparatorValue
+ * entries from the job definition automatically.
  *
  * @param orderedGroups  output of collateAndMergeGroups()
  */
 def buildForwardedParams(List orderedGroups) {
     def fwd = [
-        string(name: 'JDK_VERSION',            value: env.JDK_VERSION),
+        string(name: 'JDK_VERSION',             value: env.JDK_VERSION),
         string(name: 'GROUP_UID',               value: env.GROUP_UID),
         booleanParam(name: 'RUN_TESTS',               value: params.RUN_TESTS),
         booleanParam(name: 'SIGN_ARTIFACTS',          value: params.SIGN_ARTIFACTS),
@@ -97,11 +93,8 @@ def buildForwardedParams(List orderedGroups) {
         string(name: 'RELEASE_TYPE',            value: params.RELEASE_TYPE ?: 'NIGHTLY'),
     ]
 
-    // Collated stage params in definition order: separator first, then params.
+    // Collated stage params — string/boolean values only, no separator entries.
     orderedGroups.each { grp ->
-        def stageLabel  = grp.stageIds.join('_').replaceAll(/\W+/, '_')
-        def groupSuffix = grp.name.replaceAll(/\W+/, '_')
-        fwd << string(name: "__sep_${stageLabel}_${groupSuffix}", value: '')
         grp.parameters.each { p ->
             def val = params[p.name]
             if (p.type == 'boolean') {
