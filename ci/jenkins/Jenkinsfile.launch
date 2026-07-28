@@ -10,122 +10,166 @@
 
 import groovy.json.JsonSlurper
 
+// ── Helper functions ────────────────────────────────────────────────────────
+
 /**
  * Resolve GROUP_UID: use the supplied parameter value or auto-generate a unique one.
- * Sets env.GROUP_UID and updates the build description.
  */
 def resolveGroupUid() {
     if (params.GROUP_UID?.trim()) {
         env.GROUP_UID = params.GROUP_UID.trim()
         echo "Using supplied GROUP_UID: ${env.GROUP_UID}"
     } else {
-        def timestamp = new Date().format('yyyyMMdd-HHmmss')
+        def ts     = new Date().format('yyyyMMdd-HHmmss')
         def random = UUID.randomUUID().toString().take(8)
-        env.GROUP_UID = "group-${timestamp}-${random}"
+        env.GROUP_UID = "group-${ts}-${random}"
         echo "Generated GROUP_UID: ${env.GROUP_UID}"
     }
     currentBuild.description = "GROUP_UID: ${env.GROUP_UID}"
 }
 
+/**
+ * Parse the collated-stage-params.json produced by collect-stage-params.py
+ * and apply the cross-stem group merge (same group name across stages → single
+ * entry with a stageIds list).  Returns an ordered List of group maps:
+ *   [ name, stageIds: List<String>, parameters: List<Map> ]
+ *
+ * Stores env.COLLATED_PARAMS_JSON (raw JSON) for the jobDsl step.
+ * Stores env.SEPARATOR_NAMES (comma list) for reference/debugging.
+ */
+def collateAndMergeGroups() {
+    sh(script: '''\
+        python3 scripts/lib/collect-stage-params.py \
+            --default-stages-dir scripts/stages \
+            --vendor-scripts-dir config-repo/vendor-scripts \
+            --output collated-stage-params.json
+        '''.stripIndent())
+
+    def collatedJson = readFile('collated-stage-params.json')
+    env.COLLATED_PARAMS_JSON = collatedJson
+
+    def rawGroups    = new JsonSlurper().parseText(collatedJson).groups ?: []
+    def mergedMap    = [:] as LinkedHashMap
+    rawGroups.each { grp ->
+        if (mergedMap.containsKey(grp.name)) {
+            mergedMap[grp.name].stageIds    << grp.stageId
+            mergedMap[grp.name].parameters.addAll(grp.parameters ?: [])
+        } else {
+            mergedMap[grp.name] = [
+                name:       grp.name,
+                stageIds:   [grp.stageId],
+                parameters: new ArrayList(grp.parameters ?: [])
+            ]
+        }
+    }
+
+    def orderedGroups = mergedMap.values().toList()
+    env.SEPARATOR_NAMES = orderedGroups.collect { grp ->
+        "__sep_${grp.stageIds.join('_').replaceAll(/\W+/, '_')}_${grp.name.replaceAll(/\W+/, '_')}"
+    }.join(',')
+
+    echo "✓ Collated ${rawGroups.size()} group(s) → ${orderedGroups.size()} merged group(s)"
+    echo "  Separators: ${env.SEPARATOR_NAMES}"
+    return orderedGroups
+}
+
+/**
+ * Build the forwardedParams list for a platform build trigger in the exact
+ * order the platform job defines its parameters — so separators appear
+ * interleaved with their parameter groups, not bunched at the end.
+ *
+ * Order mirrors openjdk_build_pipeline.groovy parameters{} block:
+ *   1. Fixed params controlled by the launch job
+ *   2. For each collated group → separator entry then each param value
+ *   3. Config repo params
+ *
+ * @param orderedGroups  output of collateAndMergeGroups()
+ */
+def buildForwardedParams(List orderedGroups) {
+    def fwd = [
+        string(name: 'JDK_VERSION',            value: env.JDK_VERSION),
+        string(name: 'GROUP_UID',               value: env.GROUP_UID),
+        booleanParam(name: 'RUN_TESTS',               value: params.RUN_TESTS),
+        booleanParam(name: 'SIGN_ARTIFACTS',          value: params.SIGN_ARTIFACTS),
+        booleanParam(name: 'PUBLISH_ARTIFACTS',       value: params.PUBLISH_ARTIFACTS),
+        booleanParam(name: 'ENABLE_INSTALLERS',       value: params.ENABLE_INSTALLERS),
+        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE',value: params.RUN_REPRODUCIBLE_COMPARE),
+        string(name: 'RELEASE_TYPE',            value: params.RELEASE_TYPE ?: 'NIGHTLY'),
+    ]
+
+    // Collated stage params in definition order: separator first, then params.
+    orderedGroups.each { grp ->
+        def stageLabel  = grp.stageIds.join('_').replaceAll(/\W+/, '_')
+        def groupSuffix = grp.name.replaceAll(/\W+/, '_')
+        fwd << string(name: "__sep_${stageLabel}_${groupSuffix}", value: '')
+        grp.parameters.each { p ->
+            def val = params[p.name]
+            if (p.type == 'boolean') {
+                fwd << booleanParam(name: p.name, value: val == true || val == 'true')
+            } else {
+                fwd << string(name: p.name, value: val?.toString() ?: p.default?.toString() ?: '')
+            }
+        }
+    }
+
+    fwd << string(name: 'CONFIG_REPO_URL',    value: params.CONFIG_REPO_URL    ?: '')
+    fwd << string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH ?: '')
+    return fwd
+}
+
+// ── Pipeline ────────────────────────────────────────────────────────────────
+
 pipeline {
     agent any
-    
+
     // NOTE: Parameters and build discarder are defined by the seed job via Job DSL, not here.
     // Defining them in the Jenkinsfile would override the seed job's settings.
     // See: ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy
-    
+
     options {
         timestamps()
     }
-    
+
     stages {
         stage('Initialize') {
             steps {
                 script {
-                    // Use JDK_VERSION parameter (set by seed job)
                     env.JDK_VERSION = params.JDK_VERSION
-
-                    // Resolve GROUP_UID (generates one if not supplied)
                     resolveGroupUid()
-
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Config Repo: ${params.CONFIG_REPO_URL} @ ${params.CONFIG_REPO_BRANCH}"
-                    echo "Regenerate Jobs: ${params.REGENERATE_JOBS}"
-                    echo "Platforms: ${params.PLATFORMS}"
-                    echo "GROUP_UID: ${env.GROUP_UID}"
+                    echo "Regenerate Jobs: ${params.REGENERATE_JOBS} | Platforms: ${params.PLATFORMS}"
                 }
             }
         }
-        
+
         stage('Fetch Configuration') {
             steps {
                 script {
-                    echo "Fetching configuration for JDK ${env.JDK_VERSION}..."
-
                     def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
-                    
-                    // Checkout configuration repository
                     dir('config-repo') {
                         git url: params.CONFIG_REPO_URL, branch: params.CONFIG_REPO_BRANCH
-                        
-                        // Read configuration file
                         if (!fileExists(configFile)) {
-                            error("Configuration file not found: ${configFile}\n\nEnsure the file exists in the configuration repository.")
+                            error("Configuration file not found: ${configFile}")
                         }
-                        
                         def configText = readFile(configFile)
-                        env.VERSION_CONFIG = configText
-                        def config = new JsonSlurper().parseText(configText)
-                        
-                        // Extract platform list from buildConfigurations keys
-                        def platforms = config.buildConfigurations.keySet() as List
-                        env.AVAILABLE_PLATFORMS = platforms.join(',')
-                        
-                        echo "✓ Configuration loaded successfully"
-                        echo "  Available platforms: ${env.AVAILABLE_PLATFORMS}"
+                        env.VERSION_CONFIG       = configText
+                        env.AVAILABLE_PLATFORMS  = new JsonSlurper()
+                            .parseText(configText).buildConfigurations.keySet().join(',')
+                        echo "✓ Available platforms: ${env.AVAILABLE_PLATFORMS}"
                     }
                 }
             }
         }
-        
+
         stage('Collate Stage Parameters') {
-            // Always runs — separator names must be available even when job
-            // regeneration is skipped (REGENERATE_JOBS=false, build #2+).
+            // Always runs — ordered groups and separator names must be available
+            // even when job regeneration is skipped (REGENERATE_JOBS=false, build #2+).
             steps {
                 script {
-                    echo "Collating stage parameters..."
-
-                    sh(script: '''\
-                        python3 scripts/lib/collect-stage-params.py \
-                            --default-stages-dir scripts/stages \
-                            --vendor-scripts-dir config-repo/vendor-scripts \
-                            --output collated-stage-params.json
-                        '''.stripIndent())
-
-                    def collatedJson = readFile('collated-stage-params.json')
-                    env.COLLATED_PARAMS_JSON = collatedJson
-
-                    // Merge same-named groups across stems into a single stageIds list,
-                    // matching the cross-stem merge logic in openjdk_build_pipeline.groovy.
-                    // This gives us the exact separator names the DSL will bake into jobs.
-                    def rawGroups = new groovy.json.JsonSlurper().parseText(collatedJson).groups
-                    def mergedGroupMap = [:] as LinkedHashMap
-                    rawGroups.each { grp ->
-                        if (mergedGroupMap.containsKey(grp.name)) {
-                            mergedGroupMap[grp.name].stageIds << grp.stageId
-                        } else {
-                            mergedGroupMap[grp.name] = [name: grp.name, stageIds: [grp.stageId]]
-                        }
-                    }
-
-                    // Separator name formula must be identical to the configure{} block in
-                    // openjdk_build_pipeline.groovy: join stageIds, sanitise non-word chars.
-                    def separatorNames = mergedGroupMap.values().collect { grp ->
-                        "__sep_${grp.stageIds.join('_').replaceAll(/\W+/, '_')}_${grp.name.replaceAll(/\W+/, '_')}"
-                    }
-                    env.SEPARATOR_NAMES = separatorNames.join(',')
-
-                    echo "✓ Collated ${rawGroups.size()} group(s), ${separatorNames.size()} separator(s): ${env.SEPARATOR_NAMES}"
+                    env.ORDERED_GROUPS_JSON = groovy.json.JsonOutput.toJson(
+                        collateAndMergeGroups()
+                    )
                 }
             }
         }
@@ -133,48 +177,33 @@ pipeline {
         stage('Determine Platforms') {
             steps {
                 script {
-                    def availablePlatforms = env.AVAILABLE_PLATFORMS.split(',') as List
-                    def selectedPlatforms
-                    
-                    if (params.PLATFORMS == 'all') {
-                        selectedPlatforms = availablePlatforms
-                        echo "Building all available platforms"
-                    } else {
-                        selectedPlatforms = params.PLATFORMS.split(',').collect { it.trim() }
-                        
-                        // Validate selected platforms
-                        def invalidPlatforms = selectedPlatforms.findAll { !availablePlatforms.contains(it) }
-                        if (invalidPlatforms) {
-                            error("Invalid platforms specified: ${invalidPlatforms.join(', ')}\nAvailable platforms: ${availablePlatforms.join(', ')}")
-                        }
-                        echo "Building selected platforms: ${selectedPlatforms.join(', ')}"
+                    def available = env.AVAILABLE_PLATFORMS.split(',') as List
+                    def selected  = (params.PLATFORMS == 'all')
+                        ? available
+                        : params.PLATFORMS.split(',').collect { it.trim() }
+
+                    def invalid = selected.findAll { !available.contains(it) }
+                    if (invalid) {
+                        error("Invalid platforms: ${invalid.join(', ')}\nAvailable: ${available.join(', ')}")
                     }
-                    
-                    env.SELECTED_PLATFORMS = selectedPlatforms.join(',')
-                    echo "✓ Platforms determined: ${env.SELECTED_PLATFORMS}"
+                    env.SELECTED_PLATFORMS = selected.join(',')
+                    echo "✓ Platforms: ${env.SELECTED_PLATFORMS}"
                 }
             }
         }
-        
+
         stage('Create/Update Platform Jobs') {
             when {
-                expression {
-                    return params.REGENERATE_JOBS || currentBuild.number == 1
-                }
+                expression { return params.REGENERATE_JOBS || currentBuild.number == 1 }
             }
             steps {
                 script {
-                    if (params.REGENERATE_JOBS) {
-                        echo "Force regenerating platform jobs (REGENERATE_JOBS=true)..."
-                    } else {
-                        echo "First run - creating platform jobs..."
-                    }
+                    echo params.REGENERATE_JOBS
+                        ? "Force regenerating platform jobs..."
+                        : "First run — creating platform jobs..."
 
-                    // COLLATED_PARAMS_JSON was computed in the always-running
-                    // 'Collate Stage Parameters' stage — pass it straight through.
-                    def platforms = env.SELECTED_PLATFORMS.split(',')
-                    platforms.each { platform ->
-                        echo "  → Creating/updating build job for platform: ${platform}"
+                    env.SELECTED_PLATFORMS.split(',').each { platform ->
+                        echo "  → ${platform}"
                         jobDsl(
                             targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
                             removedJobAction:    'IGNORE',
@@ -189,127 +218,58 @@ pipeline {
                             ]
                         )
                     }
-
-                    echo "✓ Platform jobs created/updated successfully"
+                    echo "✓ Platform jobs created/updated"
                 }
             }
         }
-        
+
         stage('Launch Platform Builds') {
             steps {
                 script {
-                    echo "Launching builds for selected platforms..."
-                    
-                    def platforms = env.SELECTED_PLATFORMS.split(',')
-                    def buildJobs = [:]
-                    def buildResults = [:]
-                    
-                    // Load the version config to map platform keys to arch/os/distro so we can
-                    // construct the AQA-style job name: Build_openjdk<version>_<distro>_<arch>_<os>
-                    def versionConfigText = env.VERSION_CONFIG
-                    def versionConfig = new groovy.json.JsonSlurper().parseText(versionConfigText)
+                    def versionConfig = new JsonSlurper().parseText(env.VERSION_CONFIG)
+                    def orderedGroups = new JsonSlurper().parseText(env.ORDERED_GROUPS_JSON)
+                    def buildJobs     = [:]
+                    def buildResults  = [:]
 
-                    // These params exist only on the launch job and must not be forwarded.
-                    def launchOnlyParams = [
-                        'PLATFORMS', 'REGENERATE_JOBS', 'JDK_VERSION', 'GROUP_UID'
-                    ] as Set
-
-                    // Separator names computed by 'Collate Stage Parameters' (always runs).
-                    // ParameterSeparatorDefinition carries no value so it never appears in a
-                    // programmatic build() parameters list — the running build's sidebar would
-                    // render the raw name string instead of the visual separator widget.
-                    // Forwarding each separator as an empty string causes the plugin to render
-                    // the widget correctly for launcher-triggered builds.
-                    def separatorNames = env.SEPARATOR_NAMES
-                        ? (env.SEPARATOR_NAMES.split(',') as List)
-                        : []
-
-                    platforms.each { platform ->
-                        def platformCfg = versionConfig.buildConfigurations[platform]
-                        def arch    = platformCfg?.arch    ?: platform
-                        def os      = platformCfg?.os      ?: platform
-                        def distro  = platformCfg?.variant ?: 'temurin'
-                        def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${distro}_${arch}_${os}"
+                    env.SELECTED_PLATFORMS.split(',').each { platform ->
+                        def cfg     = versionConfig.buildConfigurations[platform]
+                        def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${cfg?.variant ?: 'temurin'}_${cfg?.arch ?: platform}_${cfg?.os ?: platform}"
 
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
-                                echo "Launching build for ${platform}..."
-
-                                // Start with the fixed params that must have specific values
-                                // (not simply passed through from the launch job params).
-                                def forwardedParams = [
-                                    string(name: 'JDK_VERSION',  value: env.JDK_VERSION),
-                                    string(name: 'GROUP_UID',    value: env.GROUP_UID),
-                                ]
-
-                                // Forward every other launch job param to the platform build job,
-                                // excluding launch-only params and separators (forwarded below
-                                // using the freshly-computed sanitised names from SEPARATOR_NAMES).
-                                params.each { name, val ->
-                                    if (launchOnlyParams.contains(name)) return
-                                    if (name.startsWith('__sep_')) return
-                                    if (val instanceof Boolean) {
-                                        forwardedParams << booleanParam(name: name, value: val)
-                                    } else {
-                                        forwardedParams << string(name: name, value: val?.toString() ?: '')
-                                    }
-                                }
-
-                                // Append separator entries so the plugin renders them correctly.
-                                separatorNames.each { sepName ->
-                                    forwardedParams << string(name: sepName, value: '')
-                                }
-
-                                // ── DEBUG — remove once separator rendering is confirmed ──
-                                echo "=== SEPARATOR_NAMES: '${env.SEPARATOR_NAMES}' ==="
-                                echo "=== forwardedParams for ${platform} (${forwardedParams.size()} entries) ==="
-                                forwardedParams.each { p -> echo "  ${p}" }
-                                // ── END DEBUG ──
-
-                                def buildResult = build(
-                                    job: jobName,
-                                    parameters: forwardedParams,
-                                    wait: true,
-                                    propagate: false  // Don't fail immediately, collect all results first
+                                def fwd = buildForwardedParams(orderedGroups)
+                                echo "Triggering ${jobName} with ${fwd.size()} params"
+                                def result = build(
+                                    job:        jobName,
+                                    parameters: fwd,
+                                    wait:       true,
+                                    propagate:  false
                                 )
-                                
-                                buildResults[platform] = buildResult.result
-                                echo "✓ ${platform} build completed with result: ${buildResult.result}"
+                                buildResults[platform] = result.result
+                                echo "✓ ${platform}: ${result.result}"
                             }
                         }
                     }
-                    
-                    // Execute all platform builds in parallel
+
                     parallel buildJobs
-                    
-                    // Check if any builds failed
-                    def failedBuilds = buildResults.findAll { platform, result -> result != 'SUCCESS' }
-                    if (failedBuilds) {
-                        def failedPlatforms = failedBuilds.keySet().join(', ')
-                        error("Platform builds failed: ${failedPlatforms}")
-                    }
-                    
+
+                    def failed = buildResults.findAll { _, r -> r != 'SUCCESS' }
+                    if (failed) error("Platform builds failed: ${failed.keySet().join(', ')}")
                     echo "✓ All platform builds completed successfully"
                 }
             }
         }
     }
-    
+
     post {
         always {
             script {
                 echo "=== Launch Pipeline Summary ==="
-                echo "JDK Version: ${env.JDK_VERSION}"
-                echo "Platforms: ${env.SELECTED_PLATFORMS}"
-                echo "Build Result: ${currentBuild.result ?: 'SUCCESS'}"
+                echo "JDK: ${env.JDK_VERSION} | Platforms: ${env.SELECTED_PLATFORMS} | Result: ${currentBuild.result ?: 'SUCCESS'}"
             }
         }
-        success {
-            echo "✓ Launch pipeline completed successfully"
-        }
-        failure {
-            echo "✗ Launch pipeline failed"
-        }
+        success { echo "✓ Launch pipeline completed successfully" }
+        failure { echo "✗ Launch pipeline failed" }
     }
 }
 
