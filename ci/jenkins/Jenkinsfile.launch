@@ -243,9 +243,11 @@ pipeline {
                                 ]
 
                                 // Forward every other launch job param to the platform build job,
-                                // excluding launch-only params handled above.
+                                // excluding launch-only params and separators (forwarded below
+                                // using the freshly-computed sanitised names from SEPARATOR_NAMES).
                                 params.each { name, val ->
                                     if (launchOnlyParams.contains(name)) return
+                                    if (name.startsWith('__sep_')) return
                                     if (val instanceof Boolean) {
                                         forwardedParams << booleanParam(name: name, value: val)
                                     } else {
