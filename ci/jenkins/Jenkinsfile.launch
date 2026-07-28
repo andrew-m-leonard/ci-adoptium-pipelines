@@ -88,6 +88,48 @@ pipeline {
             }
         }
         
+        stage('Collate Stage Parameters') {
+            // Always runs — separator names must be available even when job
+            // regeneration is skipped (REGENERATE_JOBS=false, build #2+).
+            steps {
+                script {
+                    echo "Collating stage parameters..."
+
+                    sh(script: '''\
+                        python3 scripts/lib/collect-stage-params.py \
+                            --default-stages-dir scripts/stages \
+                            --vendor-scripts-dir config-repo/vendor-scripts \
+                            --output collated-stage-params.json
+                        '''.stripIndent())
+
+                    def collatedJson = readFile('collated-stage-params.json')
+                    env.COLLATED_PARAMS_JSON = collatedJson
+
+                    // Merge same-named groups across stems into a single stageIds list,
+                    // matching the cross-stem merge logic in openjdk_build_pipeline.groovy.
+                    // This gives us the exact separator names the DSL will bake into jobs.
+                    def rawGroups = new groovy.json.JsonSlurper().parseText(collatedJson).groups
+                    def mergedGroupMap = [:] as LinkedHashMap
+                    rawGroups.each { grp ->
+                        if (mergedGroupMap.containsKey(grp.name)) {
+                            mergedGroupMap[grp.name].stageIds << grp.stageId
+                        } else {
+                            mergedGroupMap[grp.name] = [name: grp.name, stageIds: [grp.stageId]]
+                        }
+                    }
+
+                    // Separator name formula must be identical to the configure{} block in
+                    // openjdk_build_pipeline.groovy: join stageIds, sanitise non-word chars.
+                    def separatorNames = mergedGroupMap.values().collect { grp ->
+                        "__sep_${grp.stageIds.join('_').replaceAll(/\W+/, '_')}_${grp.name.replaceAll(/\W+/, '_')}"
+                    }
+                    env.SEPARATOR_NAMES = separatorNames.join(',')
+
+                    echo "✓ Collated ${rawGroups.size()} group(s), ${separatorNames.size()} separator(s): ${env.SEPARATOR_NAMES}"
+                }
+            }
+        }
+
         stage('Determine Platforms') {
             steps {
                 script {
@@ -128,16 +170,8 @@ pipeline {
                         echo "First run - creating platform jobs..."
                     }
 
-                    // Pre-compute stem lists for openjdk_build_pipeline.groovy
-                    def paramStemsRaw = sh(
-                        script: "ls scripts/stages/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//'",
-                        returnStdout: true
-                    ).trim()
-                    def vendorStemsRaw = sh(
-                        script: "ls config-repo/vendor-scripts/*.params.json 2>/dev/null | xargs -n1 basename | sed 's/.params.json//' | sort | tr '\\n' ',' | sed 's/,\$//' || true",
-                        returnStdout: true
-                    ).trim()
-
+                    // COLLATED_PARAMS_JSON was computed in the always-running
+                    // 'Collate Stage Parameters' stage — pass it straight through.
                     def platforms = env.SELECTED_PLATFORMS.split(',')
                     platforms.each { platform ->
                         echo "  → Creating/updating build job for platform: ${platform}"
@@ -149,10 +183,9 @@ pipeline {
                             ignoreMissingFiles:  false,
                             lookupStrategy:      'SEED_JOB',
                             additionalParameters: [
-                                JDK_VERSION:  env.JDK_VERSION,
-                                PLATFORM:     platform,
-                                PARAM_STEMS:  paramStemsRaw,
-                                VENDOR_STEMS: vendorStemsRaw
+                                JDK_VERSION:          env.JDK_VERSION,
+                                PLATFORM:             platform,
+                                COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON
                             ]
                         )
                     }
@@ -181,6 +214,16 @@ pipeline {
                         'PLATFORMS', 'REGENERATE_JOBS', 'JDK_VERSION', 'GROUP_UID'
                     ] as Set
 
+                    // Separator names computed by 'Collate Stage Parameters' (always runs).
+                    // ParameterSeparatorDefinition carries no value so it never appears in a
+                    // programmatic build() parameters list — the running build's sidebar would
+                    // render the raw name string instead of the visual separator widget.
+                    // Forwarding each separator as an empty string causes the plugin to render
+                    // the widget correctly for launcher-triggered builds.
+                    def separatorNames = env.SEPARATOR_NAMES
+                        ? (env.SEPARATOR_NAMES.split(',') as List)
+                        : []
+
                     platforms.each { platform ->
                         def platformCfg = versionConfig.buildConfigurations[platform]
                         def arch    = platformCfg?.arch    ?: platform
@@ -208,6 +251,11 @@ pipeline {
                                     } else {
                                         forwardedParams << string(name: name, value: val?.toString() ?: '')
                                     }
+                                }
+
+                                // Append separator entries so the plugin renders them correctly.
+                                separatorNames.each { sepName ->
+                                    forwardedParams << string(name: sepName, value: '')
                                 }
 
                                 def buildResult = build(

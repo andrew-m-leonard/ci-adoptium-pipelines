@@ -6,166 +6,44 @@
  *
  * Workspace layout when called from Jenkinsfile.launch:
  *   <workspace>/
- *     scripts/stages/              — ci-adoptium-pipelines default *.params.json
+ *     collated-stage-params.json   — written by 'Collate Stage Parameters' stage
  *     config-repo/
  *       adoptium_pipeline_config.json
  *       jenkins_job_config.json
  *       configurations/jdk<N>_pipeline_config.json
- *       vendor-scripts/            — vendor override *.params.json
  *
  * Binding variables (additionalParameters from Jenkinsfile.launch):
- *   JDK_VERSION   — numeric version (e.g. "21")
- *   PLATFORM      — platform key from buildConfigurations (e.g. "x86-64_linux")
- *   PARAM_STEMS   — comma-separated default stage param stems
- *   VENDOR_STEMS  — comma-separated vendor override stems (may be empty)
+ *   JDK_VERSION          — numeric version (e.g. "21")
+ *   PLATFORM             — platform key from buildConfigurations (e.g. "x86-64_linux")
+ *   COLLATED_PARAMS_JSON — JSON string produced by collect-stage-params.py, with
+ *                          cross-stem group merge already applied by Jenkinsfile.launch
  *
  * Creates: Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>
  */
 
 import groovy.json.JsonSlurper
 
-// ---------------------------------------------------------------------------
-// Helper: collate stage parameters using readFileFromWorkspace.
-// ---------------------------------------------------------------------------
-def collateStageParams(String defaultStagesDir,
-                       String vendorScriptsDir,
-                       Set    vendorStemSet) {
-    def slurper        = new JsonSlurper()
-    // outputGroupMap preserves insertion order and merges same-named groups across stages.
-    // Key = group name, value = [ name, description, stageIds: List, parameters: List ]
-    def outputGroupMap = [:] as LinkedHashMap
-    def allParamNames  = [:]
-
-    def stems = (binding.variables.get('PARAM_STEMS').split(',') as List)
-    println "collateStageParams: stems = ${stems}"
-
-    stems.each { stem ->
-        def defaultData = slurper.parseText(
-            readFileFromWorkspace("${defaultStagesDir}/${stem}.params.json")
-        )
-
-        def vendorData = null
-        if (vendorStemSet.contains(stem)) {
-            vendorData = slurper.parseText(
-                readFileFromWorkspace("${vendorScriptsDir}/${stem}.params.json")
-            )
-            println "  [${stem}] vendor override loaded"
-        }
-
-        // Build per-stem group map (name → group) before merging into outputGroupMap.
-        def defaultGroups = [:]
-        def paramToGroup  = [:]
-        defaultData.parameterGroups?.each { grp ->
-            defaultGroups[grp.name] = [
-                name:        grp.name,
-                description: grp.description ?: '',
-                parameters:  new ArrayList(grp.parameters ?: [])
-            ]
-            grp.parameters?.each { p -> paramToGroup[p.name] = grp.name }
-        }
-
-        if (vendorData) {
-            def ignored = vendorData.ignoreDefaultParams ?: []
-            if (ignored) {
-                println "  [${stem}] ignoreDefaultParams: ${ignored}"
-            }
-            ignored.each { name ->
-                def gname = paramToGroup[name]
-                if (gname) {
-                    defaultGroups[gname].parameters.removeAll { it.name == name }
-                    println "  [${stem}]   suppressed '${name}' from group '${gname}'"
-                    if (!defaultGroups[gname].parameters) {
-                        defaultGroups.remove(gname)
-                        println "  [${stem}]   group '${gname}' removed (no params remaining)"
-                    }
-                } else {
-                    println "  [${stem}]   WARNING: ignoreDefaultParams '${name}' not found in any default group — ignored"
-                }
-            }
-            vendorData.parameterGroups?.each { vgrp ->
-                if (defaultGroups.containsKey(vgrp.name)) {
-                    def existing = defaultGroups[vgrp.name].parameters.collectEntries { [it.name, it] }
-                    vgrp.parameters?.each { vp ->
-                        existing[vp.name] = vp
-                        println "  [${stem}]   vendor added/overrode '${vp.name}' in group '${vgrp.name}'"
-                    }
-                    defaultGroups[vgrp.name].parameters = existing.values().toList()
-                } else {
-                    defaultGroups[vgrp.name] = [
-                        name:        vgrp.name,
-                        description: vgrp.description ?: '',
-                        parameters:  new ArrayList(vgrp.parameters ?: [])
-                    ]
-                    println "  [${stem}]   vendor added new group '${vgrp.name}': ${vgrp.parameters?.collect { it.name }}"
-                }
-            }
-        }
-
-        // Merge this stem's groups into the cross-stem outputGroupMap.
-        // Same-named groups from different stems have their params merged into
-        // a single entry so they share one separator in the Jenkins UI.
-        defaultGroups.values().each { grp ->
-            def clean = grp.parameters.findAll { p ->
-                if (allParamNames.containsKey(p.name)) {
-                    println "WARNING: duplicate param '${p.name}' in ${stem}/${grp.name} — skipping"
-                    return false
-                }
-                allParamNames[p.name] = "${stem}/${grp.name}"
-                return true
-            }
-            if (!clean) return
-
-            println "  [${stem}] group '${grp.name}': ${clean.collect { it.name }}"
-
-            if (outputGroupMap.containsKey(grp.name)) {
-                // Merge into the existing cross-stem group entry.
-                def existing = outputGroupMap[grp.name]
-                existing.stageIds << stem
-                existing.parameters.addAll(clean)
-                println "  [${stem}] merged group '${grp.name}' into existing entry (stages: ${existing.stageIds})"
-            } else {
-                outputGroupMap[grp.name] = [
-                    name:        grp.name,
-                    description: grp.description,
-                    stageIds:    [stem],
-                    parameters:  new ArrayList(clean)
-                ]
-            }
-        }
-    }
-
-    def outputGroups = outputGroupMap.values().toList()
-    def paramNames   = allParamNames.keySet().toList()
-    println "  Total collated params: ${paramNames}"
-    return [groups: outputGroups, paramNames: paramNames]
-}
-
 // ============================================================================
 // STEP 1: Validate binding variables
 // ============================================================================
 
-def jdkVersion     = binding.variables.get('JDK_VERSION')
-def platform       = binding.variables.get('PLATFORM')
-def paramStemsRaw  = binding.variables.get('PARAM_STEMS')  ?: ''
-def vendorStemsRaw = binding.variables.get('VENDOR_STEMS') ?: ''
+def jdkVersion          = binding.variables.get('JDK_VERSION')
+def platform            = binding.variables.get('PLATFORM')
+def collatedParamsJson  = binding.variables.get('COLLATED_PARAMS_JSON') ?: ''
 
 if (!jdkVersion) throw new IllegalArgumentException("JDK_VERSION binding variable is required")
 if (!platform)   throw new IllegalArgumentException("PLATFORM binding variable is required")
-if (!paramStemsRaw?.trim()) {
+if (!collatedParamsJson?.trim()) {
     throw new RuntimeException(
-        "PARAM_STEMS is empty — no *.params.json files found.\n" +
-        "Ensure Jenkinsfile.launch passes PARAM_STEMS via additionalParameters."
+        "COLLATED_PARAMS_JSON is empty.\n" +
+        "Ensure the 'Collate Stage Parameters' stage in Jenkinsfile.launch completed successfully."
     )
 }
 
-def vendorStemSet = vendorStemsRaw ? (vendorStemsRaw.split(',') as List).toSet() : [] as Set
-
 println "=" * 80
 println "openjdk_build_pipeline"
-println "  JDK_VERSION  : ${jdkVersion}"
-println "  PLATFORM     : ${platform}"
-println "  PARAM_STEMS  : ${paramStemsRaw}"
-println "  VENDOR_STEMS : ${vendorStemsRaw ?: '(none)'}"
+println "  JDK_VERSION : ${jdkVersion}"
+println "  PLATFORM    : ${platform}"
 println "=" * 80
 
 // ============================================================================
@@ -202,15 +80,34 @@ def defaultParams   = jenkinsConfig?.jobConfiguration?.defaultParameters
 def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
 
 // ============================================================================
-// STEP 3: Collate stage parameters
+// STEP 3: Build collated param groups from pre-computed JSON
 // ============================================================================
 
-def collatedStageParams  = collateStageParams('scripts/stages', 'config-repo/vendor-scripts', vendorStemSet)
-// Capture groups at script scope — configure{} runs with a different delegate
-// and cannot reliably access variables defined inside pipelineJob{} closures.
-def collatedParamGroups  = collatedStageParams.groups ?: []
-println "✓ Collated ${collatedStageParams.paramNames?.size() ?: 0} stage parameter(s) " +
-        "across ${collatedParamGroups.size()} group(s)"
+// COLLATED_PARAMS_JSON was produced by collect-stage-params.py and the
+// cross-stem group merge was applied in Jenkinsfile.launch's
+// 'Collate Stage Parameters' stage. Parse it and re-apply the merge here
+// to obtain the stageIds list structure that configure{} needs.
+def rawGroups = new JsonSlurper().parseText(collatedParamsJson).groups ?: []
+
+def mergedGroupMap = [:] as LinkedHashMap
+rawGroups.each { grp ->
+    def gname = grp.name
+    if (mergedGroupMap.containsKey(gname)) {
+        mergedGroupMap[gname].stageIds << grp.stageId
+        mergedGroupMap[gname].parameters.addAll(grp.parameters ?: [])
+    } else {
+        mergedGroupMap[gname] = [
+            name:        gname,
+            description: grp.description ?: '',
+            stageIds:    [grp.stageId],
+            parameters:  new ArrayList(grp.parameters ?: [])
+        ]
+    }
+}
+
+// Capture at script scope — configure{} runs with a different delegate.
+def collatedParamGroups = mergedGroupMap.values().toList()
+println "✓ Received ${rawGroups.size()} raw group(s), merged to ${collatedParamGroups.size()} group(s)"
 
 // ============================================================================
 // STEP 4: Create platform build job
