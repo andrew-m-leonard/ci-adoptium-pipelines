@@ -13,6 +13,18 @@ import groovy.json.JsonSlurper
 // ── Helper functions ────────────────────────────────────────────────────────
 
 /**
+ * Return the label for the __any__ sentinel from CONFIG_STAGE_AGENT_LABELS, or
+ * null if not set.  When null, agent { label null } is equivalent to agent any.
+ *
+ * Called in stage agent blocks — evaluated at runtime, so it is safe to read
+ * env vars that are populated by earlier stages.
+ */
+def getLaunchAgentLabel() {
+    return env.LAUNCH_AGENT_LABEL ?: null
+}
+
+
+/**
  * Resolve GROUP_UID: use the supplied parameter value or auto-generate a unique one.
  */
 def resolveGroupUid() {
@@ -161,6 +173,18 @@ pipeline {
                             .parseText(configText).buildConfigurations.keySet().join(',')
                         echo "✓ Available platforms: ${env.AVAILABLE_PLATFORMS}"
                     }
+                    // Read the __any__ sentinel from jenkins_job_config.json so that
+                    // subsequent stages requiring tooling (e.g. python3) can target
+                    // nodes with the right capabilities instead of using agent any.
+                    def jenkinsJobConfigFile = 'config-repo/jenkins_job_config.json'
+                    if (fileExists(jenkinsJobConfigFile)) {
+                        def jenkinsJobConfig = new JsonSlurper().parseText(readFile(jenkinsJobConfigFile))
+                        def anyLabel = jenkinsJobConfig?.stageAgentLabels?.'__any__'
+                        if (anyLabel?.trim()) {
+                            env.LAUNCH_AGENT_LABEL = anyLabel.trim()
+                            echo "✓ Launch agent label: ${env.LAUNCH_AGENT_LABEL}"
+                        }
+                    }
                 }
             }
         }
@@ -168,7 +192,9 @@ pipeline {
         stage('Collate Stage Parameters') {
             // Always runs — ordered groups and separator names must be available
             // even when job regeneration is skipped (REGENERATE_JOBS=false, build #2+).
-            agent any
+            agent {
+                label getLaunchAgentLabel()
+            }
             steps {
                 script {
                     env.ORDERED_GROUPS_JSON = groovy.json.JsonOutput.toJson(
@@ -179,7 +205,9 @@ pipeline {
         }
 
         stage('Determine Platforms') {
-            agent any
+            agent {
+                label getLaunchAgentLabel()
+            }
             steps {
                 script {
                     def available = env.AVAILABLE_PLATFORMS.split(',') as List
@@ -201,7 +229,9 @@ pipeline {
             when {
                 expression { return params.REGENERATE_JOBS || currentBuild.number == 1 }
             }
-            agent any
+            agent {
+                label getLaunchAgentLabel()
+            }
             steps {
                 script {
                     echo params.REGENERATE_JOBS

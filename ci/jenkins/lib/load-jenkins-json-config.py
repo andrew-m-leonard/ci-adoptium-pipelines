@@ -67,6 +67,22 @@ _OS_SUFFIX = {
 }
 
 
+# Sentinel key used in stageAgentLabels to specify a generic agent label that
+# is not tied to a specific OS or architecture.  The value is passed through
+# verbatim — no {os}/{arch} substitution is applied.  Pipelines that run on
+# shared infrastructure (e.g. the launch job) use this label instead of
+# Jenkins' built-in "agent any" so that only nodes with the required tooling
+# (e.g. python3, git) are selected.
+#
+# Example in jenkins_job_config.json:
+#   "stageAgentLabels": {
+#     "__any__": "ci.role.launcher",
+#     "Build": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+#     ...
+#   }
+_ANY_SENTINEL = '__any__'
+
+
 def _resolve_label(template, target_os, architecture):
     """Resolve {os} and {arch} placeholders in a label template.
 
@@ -74,6 +90,9 @@ def _resolve_label(template, target_os, architecture):
     so that templates like 'ci.role.build&&sw.os.{os}&&hw.arch.{arch}'
     produce 'ci.role.build&&sw.os.linux&&hw.arch.x86' — not a double-prefixed
     result like 'sw.os.sw.os.linux'.
+
+    The __any__ sentinel key is passed through verbatim — call sites must skip
+    substitution for that key (see generateJenkinsConfig).
     """
     os_suffix   = _OS_SUFFIX.get(target_os, target_os)
     arch_suffix = _ARCH_SUFFIX.get(architecture, architecture)
@@ -121,9 +140,12 @@ def generateJenkinsConfig(config_repo_path, pipeline_config_path, output_path):
     target_os    = pipeline_config['buildConfig']['TARGET_OS']
     architecture = pipeline_config['buildConfig']['ARCHITECTURE']
 
-    # Resolve {os}/{arch} placeholders to sw.os.* / hw.arch.* schema tokens
+    # Resolve {os}/{arch} placeholders to sw.os.* / hw.arch.* schema tokens.
+    # The __any__ sentinel is passed through verbatim — it represents a generic
+    # agent label with no OS/arch binding.
     resolved = {
-        stage: _resolve_label(template, target_os, architecture)
+        stage: (template if stage == _ANY_SENTINEL
+                else _resolve_label(template, target_os, architecture))
         for stage, template in stage_agent_labels.items()
     }
 
