@@ -169,8 +169,24 @@ pipelineJob(jobName) {
             ['NIGHTLY', 'WEEKLY', 'RELEASE'],
             'Type of release build')
 
-        // Collated stage parameters
+        // Collated stage parameters — separator immediately before each group's params.
+        // Using the native separator{} DSL closure (registered by the parameter-separator
+        // plugin) rather than configure{} XML injection so the plugin creates a properly
+        // typed ParameterSeparatorDefinition via its own DSL handler.
         collatedParamGroups.each { group ->
+            def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
+            def stageHeader = group.stageIds.size() == 1
+                ? "stage: ${group.stageIds[0]}"
+                : "stages: ${group.stageIds.join(', ')}"
+            separator {
+                name("__sep_${stageLabel}_${group.name.replaceAll(/\W+/, '_')}")
+                sectionHeader("${group.name}  [${stageHeader}]")
+                sectionHeaderStyle('')
+                if (group.description) {
+                    description(group.description)
+                }
+                separatorStyle('')
+            }
             group.parameters?.each { p ->
                 if (p.type == 'boolean') {
                     booleanParam(p.name, p.default == true, p.description ?: '')
@@ -224,39 +240,6 @@ pipelineJob(jobName) {
     }
 
     configure { project ->
-        // Use depthFirst().find() to locate the existing <parameterDefinitions>
-        // node built by the parameters{} block. The / operator creates nodes
-        // when not found, which puts separators in the wrong place in the XML.
-        def paramDefs = project.depthFirst().find { it instanceof groovy.util.Node && it.name() == 'parameterDefinitions' }
-        if (paramDefs) collatedParamGroups.each { group ->
-            if (!group.parameters) return
-
-            def detached = group.parameters.collect { p ->
-                paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
-            }.findAll { it != null }
-            detached.each { paramDefs.remove(it) }
-
-            // stageIds is a List — join for the separator name (must be a valid XML node
-            // name so use underscores) and for the human-readable section header.
-            def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
-            def stageHeader = group.stageIds.size() == 1
-                ? "stage: ${group.stageIds[0]}"
-                : "stages: ${group.stageIds.join(', ')}"
-
-            def sepNode = paramDefs.appendNode(
-                'jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
-            )
-            sepNode.appendNode('name', "__sep_${stageLabel}_${group.name.replaceAll(/\W+/, '_')}")
-            sepNode.appendNode('sectionHeader', "${group.name}  [${stageHeader}]")
-            sepNode.appendNode('sectionHeaderStyle', '')
-            if (group.description) {
-                sepNode.appendNode('sectionDescription', group.description)
-            }
-            sepNode.appendNode('separatorStyle', '')
-
-            detached.each { paramDefs.append(it) }
-        }
-
         // ── copyArtifact permission ───────────────────────────────────────
         project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
             projectNameList {

@@ -335,9 +335,22 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
                 'Run reproducible build comparison against a production Adoptium binary')
 
-            // Inlined (not a helper def) — Job DSL closure delegates prevent
-            // top-level def methods being visible inside parameters{}.
+            // Collated stage parameters — native separator{} DSL closure inline
+            // with each group's params so ordering is natural, no configure{} needed.
             collatedParamGroups.each { group ->
+                def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
+                def stageHeader = group.stageIds.size() == 1
+                    ? "stage: ${group.stageIds[0]}"
+                    : "stages: ${group.stageIds.join(', ')}"
+                separator {
+                    name("__sep_${stageLabel}_${group.name.replaceAll(/\W+/, '_')}")
+                    sectionHeader("${group.name}  [${stageHeader}]")
+                    sectionHeaderStyle('')
+                    if (group.description) {
+                        description(group.description)
+                    }
+                    separatorStyle('')
+                }
                 group.parameters?.each { p ->
                     if (p.type == 'boolean') {
                         booleanParam(p.name, p.default == true, p.description ?: '')
@@ -387,50 +400,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }
             }
             disableResume()
-        }
-
-        // Inject Parameter Separator nodes for each collated group.
-        // configure{} must be at the top level of the job block — wrapping it
-        // in an if() causes Job DSL to silently ignore it.
-        // Strategy: detach each group's param nodes, then re-append separator +
-        // params in order so separators appear immediately before their group.
-        configure { project ->
-            // Use depthFirst().find() to locate the existing <parameterDefinitions>
-            // node built by the parameters{} block. The / operator creates nodes
-            // when not found, which puts separators in the wrong place in the XML.
-            def paramDefs = project.depthFirst().find { it instanceof groovy.util.Node && it.name() == 'parameterDefinitions' }
-            if (!paramDefs) return
-
-            collatedParamGroups.each { group ->
-                if (!group.parameters) return
-
-                def detached = group.parameters.collect { p ->
-                    paramDefs.'*'.find { node -> node.'name'?.text() == p.name }
-                }.findAll { it != null }
-                detached.each { paramDefs.remove(it) }
-
-                // stageIds is a List — join and sanitise for the separator <name> field.
-                // Sanitise non-word characters (including hyphens from stem names like
-                // '02-build') so the name is purely [A-Za-z0-9_] — matching the formula
-                // used by openjdk_build_pipeline.groovy and Jenkinsfile.launch.
-                def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
-                def stageHeader = group.stageIds.size() == 1
-                    ? "stage: ${group.stageIds[0]}"
-                    : "stages: ${group.stageIds.join(', ')}"
-
-                def sepNode = paramDefs.appendNode(
-                    'jenkins.plugins.parameter__separator.ParameterSeparatorDefinition'
-                )
-                sepNode.appendNode('name', "__sep_${stageLabel}_${group.name.replaceAll(/\W+/, '_')}")
-                sepNode.appendNode('sectionHeader', "${group.name}  [${stageHeader}]")
-                sepNode.appendNode('sectionHeaderStyle', '')
-                if (group.description) {
-                    sepNode.appendNode('sectionDescription', group.description)
-                }
-                sepNode.appendNode('separatorStyle', '')
-
-                detached.each { paramDefs.append(it) }
-            }
         }
     }
 }
