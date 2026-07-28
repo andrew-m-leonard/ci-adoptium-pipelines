@@ -121,7 +121,7 @@ def buildForwardedParams(List orderedGroups) {
 // ── Pipeline ────────────────────────────────────────────────────────────────
 
 pipeline {
-    agent any
+    agent none
 
     // NOTE: Parameters and build discarder are defined by the seed job via Job DSL, not here.
     // Defining them in the Jenkinsfile would override the seed job's settings.
@@ -133,6 +133,7 @@ pipeline {
 
     stages {
         stage('Initialize') {
+            agent any
             steps {
                 script {
                     env.JDK_VERSION = params.JDK_VERSION
@@ -145,6 +146,7 @@ pipeline {
         }
 
         stage('Fetch Configuration') {
+            agent any
             steps {
                 script {
                     def configFile = "configurations/jdk${env.JDK_VERSION}_pipeline_config.json"
@@ -166,6 +168,7 @@ pipeline {
         stage('Collate Stage Parameters') {
             // Always runs — ordered groups and separator names must be available
             // even when job regeneration is skipped (REGENERATE_JOBS=false, build #2+).
+            agent any
             steps {
                 script {
                     env.ORDERED_GROUPS_JSON = groovy.json.JsonOutput.toJson(
@@ -176,6 +179,7 @@ pipeline {
         }
 
         stage('Determine Platforms') {
+            agent any
             steps {
                 script {
                     def available = env.AVAILABLE_PLATFORMS.split(',') as List
@@ -197,6 +201,7 @@ pipeline {
             when {
                 expression { return params.REGENERATE_JOBS || currentBuild.number == 1 }
             }
+            agent any
             steps {
                 script {
                     echo params.REGENERATE_JOBS
@@ -225,6 +230,9 @@ pipeline {
         }
 
         stage('Launch Platform Builds') {
+            // No agent needed — build() triggers run on the lightweight executor,
+            // so this stage does not hold a worker node while waiting for downstream jobs.
+            agent none
             steps {
                 script {
                     def versionConfig = new JsonSlurper().parseText(env.VERSION_CONFIG)
