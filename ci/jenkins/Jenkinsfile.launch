@@ -69,15 +69,14 @@ def collateAndMergeGroups() {
 }
 
 /**
- * Build the forwardedParams list for a platform build trigger.
+ * Build the forwardedParams list for a platform build trigger in the exact
+ * order the platform job defines its parameters, with separators interleaved.
  *
- * Only string and boolean parameter values are forwarded — separator entries
- * must NOT be included. Passing string(name:'__sep_...') stores a
- * StringParameterValue in the triggered build's ParametersAction, which
- * overrides the ParameterSeparatorValue the plugin creates from the job
- * definition — causing the sidebar to render the raw name instead of the widget.
- * Omitting separators entirely lets Jenkins create ParameterSeparatorValue
- * entries from the job definition automatically.
+ * Separators must be passed as ParameterSeparatorValue (the plugin's own type),
+ * not as StringParameterValue — the [$class:...] map syntax lets us specify the
+ * fully-qualified class name so the build() step stores the correct type in the
+ * triggered build's ParametersAction, which Jenkins uses when rendering the
+ * build sidebar.
  *
  * @param orderedGroups  output of collateAndMergeGroups()
  */
@@ -93,8 +92,17 @@ def buildForwardedParams(List orderedGroups) {
         string(name: 'RELEASE_TYPE',            value: params.RELEASE_TYPE ?: 'NIGHTLY'),
     ]
 
-    // Collated stage params — string/boolean values only, no separator entries.
+    // Collated stage params in definition order: separator first, then param values.
+    // The [$class:...] syntax passes ParameterSeparatorValue directly so Jenkins
+    // stores the correct type in ParametersAction and renders the separator widget.
     orderedGroups.each { grp ->
+        def stageLabel  = grp.stageIds.join('_').replaceAll(/\W+/, '_')
+        def stageHeader = grp.stageIds.size() == 1
+            ? "stage: ${grp.stageIds[0]}"
+            : "stages: ${grp.stageIds.join(', ')}"
+        def sepName = "__sep_${stageLabel}_${grp.name.replaceAll(/\W+/, '_')}"
+        fwd << [$class: 'jenkins.plugins.parameter__separator.ParameterSeparatorValue',
+                name: sepName, sectionHeader: "${grp.name}  [${stageHeader}]"]
         grp.parameters.each { p ->
             def val = params[p.name]
             if (p.type == 'boolean') {
