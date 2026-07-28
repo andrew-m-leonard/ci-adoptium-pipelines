@@ -68,16 +68,23 @@ def getStageLabel(String stageName) {
         def labels = new groovy.json.JsonSlurper().parseText(labelsJson)
         def label = labels[stageName]
         if (label) {
+            echo "[DEBUG] getStageLabel('${stageName}'): resolved from CONFIG_STAGE_AGENT_LABELS → '${label}'"
             return label
         }
+        echo "[DEBUG] getStageLabel('${stageName}'): CONFIG_STAGE_AGENT_LABELS present but no entry for '${stageName}'"
+    } else {
+        echo "[DEBUG] getStageLabel('${stageName}'): CONFIG_STAGE_AGENT_LABELS not set"
     }
     // CONFIG_STAGE_AGENT_LABELS is not yet set when the Initialize stage agent
     // block is evaluated (pipeline definition time, before any steps run).
     // The Job DSL bakes the Initialize label from jenkins_job_config.json into
     // the INITIALIZE_LABEL job parameter so it is available here.
     if (stageName == 'Initialize') {
-        return params.INITIALIZE_LABEL ?: 'ci.role.worker'
+        def label = params.INITIALIZE_LABEL ?: 'ci.role.worker'
+        echo "[DEBUG] getStageLabel('Initialize'): using INITIALIZE_LABEL param → '${label}' (raw param value: '${params.INITIALIZE_LABEL}')"
+        return label
     }
+    echo "[DEBUG] getStageLabel('${stageName}'): fallback → 'ci.role.worker'"
     return 'ci.role.worker'
 }
 
@@ -105,6 +112,11 @@ pipeline {
             steps {
                 script {
                     ensureLibsLoaded()
+                    echo "[DEBUG] Initialize stage running on node: '${env.NODE_NAME}' with label: '${env.NODE_LABELS}'"
+                    echo "[DEBUG] INITIALIZE_LABEL param: '${params.INITIALIZE_LABEL}'"
+                    echo "[DEBUG] ACTIVE_NODE_TIMEOUT param: '${params.ACTIVE_NODE_TIMEOUT}'"
+                    echo "[DEBUG] CONFIG_ACTIVE_NODE_TIMEOUT env: '${env.CONFIG_ACTIVE_NODE_TIMEOUT}'"
+                    echo "[DEBUG] CONFIG_STAGE_AGENT_LABELS env: '${env.CONFIG_STAGE_AGENT_LABELS}'"
                     // NOTE: CONFIG_ACTIVE_NODE_TIMEOUT is not yet set at this point — it is only
                     // populated by ConfigHelper.generateJenkinsConfig() which runs *inside* this stage.
                     // getActiveNodeTimeout() will therefore fall back to the ACTIVE_NODE_TIMEOUT job
