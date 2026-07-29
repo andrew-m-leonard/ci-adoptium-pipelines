@@ -43,6 +43,8 @@ def jdkVersion          = binding.variables.get('JDK_VERSION')
 def platform            = binding.variables.get('PLATFORM')
 def collatedParamsJson  = binding.variables.get('COLLATED_PARAMS_JSON') ?: ''
 def pipelineCommitSha   = binding.variables.get('PIPELINE_COMMIT_SHA')  ?: 'unknown'
+def configRepoUrl       = binding.variables.get('CONFIG_REPO_URL')       ?: ''
+def configRepoBranch    = binding.variables.get('CONFIG_REPO_BRANCH')    ?: ''
 
 if (!jdkVersion) throw new IllegalArgumentException("JDK_VERSION binding variable is required")
 if (!platform)   throw new IllegalArgumentException("PLATFORM binding variable is required")
@@ -58,6 +60,8 @@ println "openjdk_build_pipeline"
 println "  JDK_VERSION         : ${jdkVersion}"
 println "  PLATFORM            : ${platform}"
 println "  PIPELINE_COMMIT_SHA : ${pipelineCommitSha}"
+println "  CONFIG_REPO_URL     : ${configRepoUrl}"
+println "  CONFIG_REPO_BRANCH  : ${configRepoBranch}"
 println "=" * 80
 
 // ============================================================================
@@ -228,11 +232,13 @@ pipelineJob(jobName) {
             }
         }
 
-        // Config repo — used by PipelineHelper.initializeStage() on the build agent
-        stringParam('CONFIG_REPO_URL', '',
-            'Vendor config repo URL — forwarded by the launch job')
-        stringParam('CONFIG_REPO_BRANCH', '',
-            'Vendor config repo branch — forwarded by the launch job')
+        // Config repo — baked in at job-generation time from the launch job's params.
+        // When running "Build with parameters" on the generated job these values are
+        // already pre-populated and will not be blank.
+        stringParam('CONFIG_REPO_URL', configRepoUrl,
+            'Vendor config repo URL — baked in at job-generation time')
+        stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
+            'Vendor config repo branch — baked in at job-generation time')
     }
 
     definition {

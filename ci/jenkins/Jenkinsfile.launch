@@ -273,7 +273,9 @@ pipeline {
                                 JDK_VERSION:          env.JDK_VERSION,
                                 PLATFORM:             platform,
                                 COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON,
-                                PIPELINE_COMMIT_SHA:  env.GIT_COMMIT
+                                PIPELINE_COMMIT_SHA:  env.GIT_COMMIT,
+                                CONFIG_REPO_URL:      params.CONFIG_REPO_URL,
+                                CONFIG_REPO_BRANCH:   params.CONFIG_REPO_BRANCH
                             ]
                         )
                     }
