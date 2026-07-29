@@ -157,6 +157,7 @@ pipelineJob(jobName) {
     displayName("Build_openjdk${jdkVersion}_${variant}_${architecture}_${targetOs}")
     description("""\
         Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${architecture}/${targetOs}.
+
         pipeline-sha:${pipelineCommitSha}""".stripIndent().trim())
 
     quietPeriod(5)
