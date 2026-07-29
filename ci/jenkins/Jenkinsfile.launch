@@ -196,9 +196,7 @@ pipeline {
             }
             steps {
                 script {
-                    env.ORDERED_GROUPS_JSON = groovy.json.JsonOutput.toJson(
-                        collateAndMergeGroups()
-                    )
+                    collateAndMergeGroups()
                 }
             }
         }
@@ -263,7 +261,24 @@ pipeline {
             steps {
                 script {
                     def versionConfig = new JsonSlurper().parseText(env.VERSION_CONFIG)
-                    def orderedGroups = new JsonSlurper().parseText(env.ORDERED_GROUPS_JSON)
+                    // Re-derive the merged groups from the raw collated JSON that
+                    // collateAndMergeGroups() already stored in env.COLLATED_PARAMS_JSON —
+                    // avoids needing JsonOutput.toJson() to round-trip through an env var.
+                    def rawGroups2   = new JsonSlurper().parseText(env.COLLATED_PARAMS_JSON).groups ?: []
+                    def mergedMap2   = [:] as LinkedHashMap
+                    rawGroups2.each { grp ->
+                        if (mergedMap2.containsKey(grp.name)) {
+                            mergedMap2[grp.name].stageIds    << grp.stageId
+                            mergedMap2[grp.name].parameters.addAll(grp.parameters ?: [])
+                        } else {
+                            mergedMap2[grp.name] = [
+                                name:       grp.name,
+                                stageIds:   [grp.stageId],
+                                parameters: new ArrayList(grp.parameters ?: [])
+                            ]
+                        }
+                    }
+                    def orderedGroups = mergedMap2.values().toList()
                     def buildJobs     = [:]
                     def buildResults  = [:]
 

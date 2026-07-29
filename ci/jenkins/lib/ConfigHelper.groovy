@@ -189,9 +189,12 @@ def generateJenkinsConfig(String configRepoPath = './config-repo') {
 
     // Serialise resolvedStageAgentLabels so the Jenkinsfile can resolve per-stage
     // agent labels without re-reading the config file on every agent allocation.
-    env.CONFIG_STAGE_AGENT_LABELS = groovy.json.JsonOutput.toJson(
-        jenkinsConfig.resolvedStageAgentLabels ?: jenkinsConfig.stageAgentLabels ?: [:]
-    )
+    // Built manually to avoid groovy.json.JsonOutput (sandbox-restricted static method).
+    def labelsMap = jenkinsConfig.resolvedStageAgentLabels ?: jenkinsConfig.stageAgentLabels ?: [:]
+    def labelPairs = labelsMap.collect { k, v ->
+        "\"${k.replace('"', '\\"')}\":\"${v.replace('"', '\\"')}\""
+    }
+    env.CONFIG_STAGE_AGENT_LABELS = "{${labelPairs.join(',')}}"
 
     // Publish the active-node timeout so NodeAgentHelper and the Jenkinsfile
     // can enforce it at every node() allocation without re-reading config.
