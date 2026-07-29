@@ -137,11 +137,12 @@ Platform jobs are created automatically — no extra flag is needed.
 Each launch run performs two SHA-based staleness checks:
 
 **1. Launch job self-check (Initialize stage)**
-The seed job bakes its `ci-adoptium-pipelines` checkout SHA into each launch
-job as a parameter named `_GENERATED_PIPELINE_SHA`. At the start of every run
-the launch job compares that value against `env.GIT_COMMIT` — the SHA Jenkins
-actually checked out to execute `Jenkinsfile.launch`. If they differ the build
-fails immediately with a clear message:
+The seed job stamps its `ci-adoptium-pipelines` checkout SHA into each launch
+job's description as `pipeline-sha:<sha>`. At the start of every run the launch
+job reads that value via `currentBuild.rawBuild.parent.getDescription()` and
+compares it against `env.GIT_COMMIT` — the SHA Jenkins actually checked out to
+execute `Jenkinsfile.launch`. If they differ the build fails immediately with a
+clear message:
 
 ```
 This launch job is out of date.
@@ -304,11 +305,22 @@ Commit and push, then re-run the seed job.
 ### Launch Job Fails in Initialize — "This launch job is out of date"
 
 **Cause**: The `ci-adoptium-pipelines` SCM branch has moved to a new commit
-since the seed job last generated this launch job. The `_GENERATED_PIPELINE_SHA`
-parameter baked into the job no longer matches `GIT_COMMIT`.
+since the seed job last generated this launch job. The `pipeline-sha` stamped
+in the job's description no longer matches `GIT_COMMIT`.
 
 **Fix**: Re-run the seed job (`openjdk-build-seed-job`). It will regenerate the
 launch job with the new SHA. Then retry the launch build.
+
+### Launch Job Fails in Initialize — script approval required
+
+**Cause**: `currentBuild.rawBuild.parent.getDescription()` is blocked by the
+Jenkins Script Security sandbox on first use.
+
+**Fix**: Go to **Manage Jenkins → In-process Script Approval** and approve:
+```
+method hudson.model.AbstractItem getDescription
+```
+This is a one-time, read-only approval scoped to the current job's own metadata.
 
 ### Platform Jobs Not Created / Out of Date
 

@@ -365,8 +365,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Vendor config repo URL — baked in at job-generation time')
             stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
                 'Vendor config repo branch — baked in at job-generation time')
-            stringParam('_GENERATED_PIPELINE_SHA', pipelineCommitSha,
-                'SHA of the ci-adoptium-pipelines commit this job was generated from — baked in at job-generation time')
         }
 
         definition {

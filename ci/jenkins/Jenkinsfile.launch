@@ -155,17 +155,19 @@ pipeline {
                     echo "Pipeline SHA: ${env.GIT_COMMIT} | Platforms: ${params.PLATFORMS}"
 
                     // ── Staleness check ──────────────────────────────────────
-                    // params._GENERATED_PIPELINE_SHA is the SHA that was current
-                    // when the seed job last generated this launch job.
-                    // env.GIT_COMMIT is the SHA Jenkins checked out to run it now.
-                    // If they differ the job definition (parameters, stage config)
-                    // may be out of date and should be regenerated via the seed job
-                    // before this launch is retried.
-                    def generatedSha = params._GENERATED_PIPELINE_SHA?.trim()
+                    // Read the pipeline-sha stamped into this job's description
+                    // by the seed job at generation time, and compare it against
+                    // the SHA Jenkins actually checked out (env.GIT_COMMIT).
+                    // Using currentBuild.rawBuild.parent.getDescription() requires
+                    // a one-time in-process script approval but is safe and
+                    // read-only — it only accesses the current job's own metadata.
+                    def jobDescription = currentBuild.rawBuild.parent.getDescription() ?: ''
+                    def shaMatch       = jobDescription =~ /pipeline-sha:([0-9a-f]+)/
+                    def generatedSha   = shaMatch ? shaMatch[0][1] : null
                     if (!generatedSha) {
-                        // No SHA stored — job was generated before this feature was
-                        // introduced. Warn but continue so existing jobs keep working.
-                        echo "⚠ WARNING: _GENERATED_PIPELINE_SHA is not set on this job. " +
+                        // No SHA in description — job predates this feature.
+                        // Warn but continue so existing jobs keep working.
+                        echo "⚠ WARNING: No pipeline-sha found in this job's description. " +
                              "Re-run the seed job to stamp the current SHA."
                     } else if (generatedSha != env.GIT_COMMIT) {
                         error(
