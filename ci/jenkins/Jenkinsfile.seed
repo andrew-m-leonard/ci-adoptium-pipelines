@@ -80,6 +80,16 @@ pipeline {
                     git url:    PIPELINES_REPO_URL,
                         branch: PIPELINES_REPO_BRANCH
                 }
+                // Capture the SHA so it can be stamped into every generated job.
+                // GIT_COMMIT is set by the git step above but scoped to the dir()
+                // block; reading it here via shell is reliable across all Git plugin versions.
+                script {
+                    env.PIPELINES_COMMIT_SHA = sh(
+                        script: 'git -C pipelines rev-parse HEAD',
+                        returnStdout: true
+                    ).trim()
+                    echo "✓ Pipeline repo SHA: ${env.PIPELINES_COMMIT_SHA}"
+                }
             }
         }
 
@@ -108,10 +118,11 @@ pipeline {
                         removedViewAction:    'DELETE',
                         additionalClasspath:  'pipelines/ci/jenkins/job-dsl',
                         additionalParameters: [
-                            CONFIG_REPO_URL:    params.CONFIG_REPO_URL,
-                            CONFIG_REPO_BRANCH: params.CONFIG_REPO_BRANCH,
-                            PARAM_STEMS:        paramStemsRaw,
-                            VENDOR_STEMS:       vendorStemsRaw
+                            CONFIG_REPO_URL:      params.CONFIG_REPO_URL,
+                            CONFIG_REPO_BRANCH:   params.CONFIG_REPO_BRANCH,
+                            PARAM_STEMS:          paramStemsRaw,
+                            VENDOR_STEMS:         vendorStemsRaw,
+                            PIPELINE_COMMIT_SHA:  env.PIPELINES_COMMIT_SHA
                         ]
                     )
                 }

@@ -8,7 +8,7 @@ All Jenkins pipeline jobs are defined as code using Job DSL scripts. A seed **Pi
 
 **Key points**:
 - The seed job is a Jenkins **Pipeline** job using "Pipeline from SCM" — it points at a `Jenkinsfile.seed` that the vendor places in their config repo.
-- A template `Jenkinsfile.seed` is provided at [`ci/jenkins/job-dsl/seed/Jenkinsfile.seed`](../ci/jenkins/job-dsl/seed/Jenkinsfile.seed) — copy it into your config repo and adjust as needed.
+- A template `Jenkinsfile.seed` is provided at [`ci/jenkins/Jenkinsfile.seed`](../ci/jenkins/Jenkinsfile.seed) — copy it into your config repo and adjust as needed.
 - Credentials for both repositories are managed entirely by the Jenkins Credentials store — nothing is placed on agents manually.
 - The seed job does **not** regenerate itself. It is a permanent, manually configured Pipeline job.
 
@@ -45,6 +45,9 @@ openjdk-build-seed-job  (Pipeline job — Pipeline from SCM → config repo Jenk
          creates Build_openjdk/ folder + Jenkins views
 
 Build_openjdk_launchers/Build_openjdk21_launch  (Pipeline — Jenkinsfile.launch)
+  stage('Initialize'):
+    compares params._GENERATED_PIPELINE_SHA (baked in by seed) vs env.GIT_COMMIT
+    → fails immediately with instructions if they differ (job is stale — re-run seed)
   reads configurations/jdk21_pipeline_config.json  (available platforms)
   stage('Create/Update Platform Jobs') — runs on every launch:
     jobDsl → openjdk_build_pipeline.groovy  (per platform)
@@ -58,7 +61,7 @@ Build_openjdk_launchers/Build_openjdk21_launch  (Pipeline — Jenkinsfile.launch
 
 ### Step 1: Copy the Jenkinsfile.seed template into your config repo
 
-Copy [`ci/jenkins/job-dsl/seed/Jenkinsfile.seed`](../ci/jenkins/job-dsl/seed/Jenkinsfile.seed)
+Copy [`ci/jenkins/Jenkinsfile.seed`](../ci/jenkins/Jenkinsfile.seed)
 from this repo into the **root of your vendor config repository** (or any path you prefer):
 
 ```
@@ -131,6 +134,25 @@ The job will:
 Simply run a launch job (e.g. `Build_openjdk_launchers/Build_openjdk21_launch`).
 Platform jobs are created automatically — no extra flag is needed.
 
+Each launch run performs two SHA-based staleness checks:
+
+**1. Launch job self-check (Initialize stage)**
+The seed job bakes its `ci-adoptium-pipelines` checkout SHA into each launch
+job as a parameter named `_GENERATED_PIPELINE_SHA`. At the start of every run
+the launch job compares that value against `env.GIT_COMMIT` — the SHA Jenkins
+actually checked out to execute `Jenkinsfile.launch`. If they differ the build
+fails immediately with a clear message:
+
+```
+This launch job is out of date.
+  Job generated from : <old-sha>
+  Current SCM SHA    : <new-sha>
+
+The ci-adoptium-pipelines commit has changed since this job was last generated.
+Re-run the seed job (openjdk-build-seed-job) to regenerate it, then retry this build.
+```
+
+**2. Platform job check (Create/Update Platform Jobs stage)**
 On every launch run the `'Create/Update Platform Jobs'` stage compares the
 `pipeline-sha` stored in each platform job's description against the SHA of the
 `ci-adoptium-pipelines` commit that the launch job checked out (`GIT_COMMIT`).
@@ -228,6 +250,10 @@ launch job detects that the `pipeline-sha` stored in each job's description no
 longer matches the current `ci-adoptium-pipelines` checkout and recreates it.
 No manual flag is required.
 
+> **Note**: if `ci-adoptium-pipelines` has changed the launch job itself will
+> fail in the `Initialize` stage before reaching `'Create/Update Platform Jobs'`.
+> Re-run the seed job first, then re-run the launch job.
+
 ### Updating Pipeline Code
 
 Changes to `Jenkinsfile` files or stage scripts in `ci-adoptium-pipelines` take effect on the next platform build run — no seed job run needed.
@@ -275,6 +301,15 @@ Commit and push, then re-run the seed job.
 
 **Fix**: Re-run the seed job.
 
+### Launch Job Fails in Initialize — "This launch job is out of date"
+
+**Cause**: The `ci-adoptium-pipelines` SCM branch has moved to a new commit
+since the seed job last generated this launch job. The `_GENERATED_PIPELINE_SHA`
+parameter baked into the job no longer matches `GIT_COMMIT`.
+
+**Fix**: Re-run the seed job (`openjdk-build-seed-job`). It will regenerate the
+launch job with the new SHA. Then retry the launch build.
+
 ### Platform Jobs Not Created / Out of Date
 
 **Cause**: The platform job does not yet exist, or it was generated from a
@@ -288,7 +323,7 @@ out of date.
 
 ## Related Documentation
 
-- [`ci/jenkins/job-dsl/seed/Jenkinsfile.seed`](../ci/jenkins/job-dsl/seed/Jenkinsfile.seed) — template seed Jenkinsfile to copy into your config repo
+- [`ci/jenkins/Jenkinsfile.seed`](../ci/jenkins/Jenkinsfile.seed) — template seed Jenkinsfile to copy into your config repo
 - [BUILD_JOB_NAMING_CONVENTION.md](./BUILD_JOB_NAMING_CONVENTION.md) — Job naming schema and folder layout
 - [BUILD_UID Integration](BUILD_UID_INTEGRATION.md) — Pipeline restart safety
 - [ci/jenkins/README.md](../ci/jenkins/README.md) — Jenkins integration overview

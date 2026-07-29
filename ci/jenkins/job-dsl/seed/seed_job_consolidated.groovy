@@ -1,7 +1,7 @@
 /**
  * Consolidated Seed Job DSL Script
  *
- * Run by Jenkinsfile.seed (in this directory) via the jobDsl() step.
+ * Run by Jenkinsfile.seed (ci/jenkins/Jenkinsfile.seed) via the jobDsl() step.
  * Do not run this directly as a Freestyle Job DSL step.
  *
  * What this script does:
@@ -14,7 +14,7 @@
  *      JDK version, each carrying the full collated stage parameter set.
  *   4. Creates Build_openjdk/ folder and Jenkins views.
  *
- * Workspace layout (set up by Jenkinsfile.seed):
+ * Workspace layout (set up by ci/jenkins/Jenkinsfile.seed):
  *   <workspace>/
  *     adoptium_pipeline_config.json   — vendor config repo root (SCM checkout)
  *     jenkins_job_config.json         — vendor config repo root
@@ -24,7 +24,7 @@
  *       scripts/stages/               — default *.params.json files
  *       ci/jenkins/job-dsl/
  *
- * Binding variables (passed via additionalParameters from Jenkinsfile.seed):
+ * Binding variables (passed via additionalParameters from ci/jenkins/Jenkinsfile.seed):
  *   CONFIG_REPO_URL    — vendor config repo URL (baked into generated launch jobs)
  *   CONFIG_REPO_BRANCH — vendor config repo branch (baked into generated launch jobs)
  *   PARAM_STEMS        — comma-separated list of default stage param stems
@@ -56,7 +56,7 @@ def collateStageParams(String defaultStagesDir,
     def outputGroupMap = [:] as LinkedHashMap
     def allParamNames  = [:]
 
-    // Default stems are pre-computed by Jenkinsfile.seed and passed via the PARAM_STEMS binding.
+    // Default stems are pre-computed by ci/jenkins/Jenkinsfile.seed and passed via the PARAM_STEMS binding.
     def stems = (binding.variables.get('PARAM_STEMS').split(',') as List)
     println "  Discovered param stems: ${stems}"
 
@@ -168,12 +168,13 @@ def collateStageParams(String defaultStagesDir,
 // ============================================================================
 
 // WORKSPACE, PARAM_STEMS, VENDOR_STEMS, CONFIG_REPO_URL and CONFIG_REPO_BRANCH
-// are all passed in via additionalParameters from Jenkinsfile.seed.
+// are all passed in via additionalParameters from ci/jenkins/Jenkinsfile.seed.
 // PARAM_STEMS and VENDOR_STEMS are comma-separated stem lists pre-computed by
-// Jenkinsfile.seed using shell glob, since Job DSL file-listing is awkward.
+// ci/jenkins/Jenkinsfile.seed using shell glob, since Job DSL file-listing is awkward.
 
-def configRepoUrl    = binding.variables.get('CONFIG_REPO_URL')    ?: ''
-def configRepoBranch = binding.variables.get('CONFIG_REPO_BRANCH') ?: ''
+def configRepoUrl       = binding.variables.get('CONFIG_REPO_URL')        ?: ''
+def configRepoBranch    = binding.variables.get('CONFIG_REPO_BRANCH')     ?: ''
+def pipelineCommitSha   = binding.variables.get('PIPELINE_COMMIT_SHA')    ?: 'unknown'
 
 if (!configRepoUrl?.trim()) {
     throw new RuntimeException(
@@ -194,7 +195,7 @@ def vendorStemsRaw = binding.variables.get('VENDOR_STEMS') ?: ''
 if (!paramStemsRaw?.trim()) {
     throw new RuntimeException(
         "No *.params.json files found under pipelines/scripts/stages/\n" +
-        "Ensure the 'Checkout pipeline repo' stage in Jenkinsfile.seed completed successfully."
+        "Ensure the 'Checkout pipeline repo' stage in ci/jenkins/Jenkinsfile.seed completed successfully."
     )
 }
 
@@ -206,6 +207,7 @@ println "  CONFIG_REPO_URL    : ${configRepoUrl}"
 println "  CONFIG_REPO_BRANCH : ${configRepoBranch}"
 println "  PARAM_STEMS        : ${paramStemsRaw}"
 println "  VENDOR_STEMS       : ${vendorStemsRaw ?: '(none)'}"
+println "  PIPELINE_COMMIT_SHA: ${pipelineCommitSha}"
 println "=" * 80
 println ""
 
@@ -286,26 +288,28 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
 
     pipelineJob(jobName) {
         displayName("Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch${isLts ? ' (LTS)' : ''}")
-        description("""
+        description("""\
             Launch orchestrator for JDK ${version} builds.
             ${isLts ? 'This is a Long Term Support (LTS) version.' : ''}
 
             This job:
             1. Reads platform configuration from: ${configFile}
-            2. Optionally creates/updates platform-specific build jobs
+            2. Creates/updates platform-specific build jobs when the pipeline SHA changes
             3. Launches builds for selected platforms in parallel
             4. Aggregates and reports results
 
             Stage parameters are collated from scripts/stages/*.params.json and any
             vendor-scripts/*.params.json overrides in the config repo. All collated
             params are forwarded automatically to every platform build job launched.
-        """.stripIndent().trim())
+            <br>pipeline-sha:${pipelineCommitSha}""".stripIndent().trim())
 
         quietPeriod(5)
 
         parameters {
             stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
                 'JDK version number — fixed for this launch job')
+            stringParam('_GENERATED_PIPELINE_SHA', pipelineCommitSha,
+                'SHA of the ci-adoptium-pipelines commit this job was generated from. Set by the seed job — do not edit manually.')
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
 

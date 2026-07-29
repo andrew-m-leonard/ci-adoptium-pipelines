@@ -153,6 +153,31 @@ pipeline {
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Config Repo: ${params.CONFIG_REPO_URL} @ ${params.CONFIG_REPO_BRANCH}"
                     echo "Pipeline SHA: ${env.GIT_COMMIT} | Platforms: ${params.PLATFORMS}"
+
+                    // ── Staleness check ──────────────────────────────────────
+                    // params._GENERATED_PIPELINE_SHA is the SHA that was current
+                    // when the seed job last generated this launch job.
+                    // env.GIT_COMMIT is the SHA Jenkins checked out to run it now.
+                    // If they differ the job definition (parameters, stage config)
+                    // may be out of date and should be regenerated via the seed job
+                    // before this launch is retried.
+                    def generatedSha = params._GENERATED_PIPELINE_SHA?.trim()
+                    if (!generatedSha) {
+                        // No SHA stored — job was generated before this feature was
+                        // introduced. Warn but continue so existing jobs keep working.
+                        echo "⚠ WARNING: _GENERATED_PIPELINE_SHA is not set on this job. " +
+                             "Re-run the seed job to stamp the current SHA."
+                    } else if (generatedSha != env.GIT_COMMIT) {
+                        error(
+                            "This launch job is out of date.\n" +
+                            "  Job generated from : ${generatedSha}\n" +
+                            "  Current SCM SHA    : ${env.GIT_COMMIT}\n\n" +
+                            "The ci-adoptium-pipelines commit has changed since this job was last generated.\n" +
+                            "Re-run the seed job (openjdk-build-seed-job) to regenerate it, then retry this build."
+                        )
+                    } else {
+                        echo "✓ Launch job is up-to-date (pipeline-sha: ${generatedSha})"
+                    }
                 }
             }
         }
