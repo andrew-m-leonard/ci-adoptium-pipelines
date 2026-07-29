@@ -15,7 +15,9 @@ Merge strategy per stage stem:
           new vendor groups are appended
   3. Also load optional vendor_stage_params.json (cross-stage extras,
      for params not tied to a specific script override)
-  4. Deduplicate by param name across all stages — last definition wins (warned)
+  4. Cross-stage duplicate param names: both definitions MUST share the same
+     Group name (error if not). The param is emitted once; descriptions are
+     merged — kept as-is if identical, concatenated with " / " if different.
 
 Output JSON (written to --output):
   {
@@ -303,9 +305,10 @@ def collect(default_stages_dir: Path,
                 stems_seen.append(stem)
                 stems_set.add(stem)
 
-    # Track all param names for cross-stage deduplication warnings
-    all_param_names: dict[str, str] = {}   # name → "stageId/groupName/paramName" source label
-    output_groups:   list[dict]     = []
+    # Track all param names for cross-stage deduplication.
+    # Maps param name → (source_label, group_name, index into output_groups, index in parameters)
+    all_param_names: dict[str, tuple[str, str, int, int]] = {}
+    output_groups:   list[dict] = []
 
     for stem in stems_seen:
         default_data = _load_json_local(default_stages_dir / f"{stem}.params.json")
@@ -321,13 +324,25 @@ def collect(default_stages_dir: Path,
             for p in grp['parameters']:
                 source_label = f"{stem}/{grp['name']}/{p['name']}"
                 if p['name'] in all_param_names:
-                    print(
-                        f"WARNING: Parameter '{p['name']}' defined in both "
-                        f"'{all_param_names[p['name']]}' and '{source_label}' — "
-                        f"latter definition wins.",
-                        file=sys.stderr
-                    )
-                all_param_names[p['name']] = source_label
+                    prev_label, prev_group, grp_idx, param_idx = all_param_names[p['name']]
+                    # Both definitions must belong to the same Group name
+                    if grp['name'] != prev_group:
+                        raise ValueError(
+                            f"Parameter '{p['name']}' is defined in two different groups: "
+                            f"'{prev_group}' (at '{prev_label}') and "
+                            f"'{grp['name']}' (at '{source_label}'). "
+                            f"Duplicate parameters across stages must share the same Group name."
+                        )
+                    # Merge descriptions on the already-emitted param
+                    existing_param = output_groups[grp_idx]['parameters'][param_idx]
+                    prev_desc = existing_param.get('description', '')
+                    new_desc  = p.get('description', '')
+                    if prev_desc != new_desc:
+                        merged_desc = f"{prev_desc} / {new_desc}" if prev_desc and new_desc else (prev_desc or new_desc)
+                        existing_param['description'] = merged_desc
+                    # Skip — do not re-emit this param
+                    continue
+                all_param_names[p['name']] = (source_label, grp['name'], len(output_groups), len(clean_params))
                 clean_params.append(p)
             if clean_params:
                 output_groups.append({
@@ -398,13 +413,14 @@ def collect(default_stages_dir: Path,
             existing_map = _params_list_to_map(target_group['parameters'])
             for p in extra_params:
                 if p['name'] in all_param_names:
+                    prev_label = all_param_names[p['name']][0]
                     print(
                         f"WARNING: Parameter '{p['name']}' from vendor_stage_params.json "
-                        f"already defined at '{all_param_names[p['name']]}' — "
+                        f"already defined at '{prev_label}' — "
                         f"vendor_stage_params.json definition wins.",
                         file=sys.stderr
                     )
-                all_param_names[p['name']] = f"{source_label}/{p['name']}"
+                all_param_names[p['name']] = (f"{source_label}/{p['name']}", 'Vendor Options', -1, -1)
                 existing_map[p['name']] = p
             target_group['parameters'] = list(existing_map.values())
 
