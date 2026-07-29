@@ -166,6 +166,14 @@ pipelineJob(jobName) {
     quietPeriod(5)
 
     parameters {
+        // ── Build Configuration ───────────────────────────────────────────────
+        separator {
+            name('__sep_build_configuration')
+            sectionHeader('Build Configuration')
+            sectionHeaderStyle('')
+            description('Fixed platform coordinates and runtime controls for this build job.')
+            separatorStyle('')
+        }
         stringParam('JDK_VERSION', jdkVersion,
             'JDK version number — fixed at job-generation time')
         stringParam('TARGET_OS', targetOs,
@@ -179,7 +187,9 @@ pipelineJob(jobName) {
         stringParam('ACTIVE_NODE_TIMEOUT',
             (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
             'Minutes to wait for an active agent before failing.')
-
+        choiceParam('RELEASE_TYPE',
+            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
+            'Type of release build')
         booleanParam('RUN_TESTS',
             defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
             'Run test stages (smoke tests, AQA, TCK)')
@@ -201,14 +211,10 @@ pipelineJob(jobName) {
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
-        choiceParam('RELEASE_TYPE',
-            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-            'Type of release build')
 
-        // Collated stage parameters — separator immediately before each group's params.
-        // Using the native separator{} DSL closure (registered by the parameter-separator
-        // plugin) rather than configure{} XML injection so the plugin creates a properly
-        // typed ParameterSeparatorDefinition via its own DSL handler.
+        // ── Collated stage parameters ─────────────────────────────────────────
+        // Separator immediately before each group's params — native separator{}
+        // DSL closure registered by the parameter-separator plugin.
         collatedParamGroups.each { group ->
             def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
             def stageHeader = group.stageIds.size() == 1
@@ -232,9 +238,14 @@ pipelineJob(jobName) {
             }
         }
 
-        // Config repo — baked in at job-generation time from the launch job's params.
-        // When running "Build with parameters" on the generated job these values are
-        // already pre-populated and will not be blank.
+        // ── Config Repository ─────────────────────────────────────────────────
+        separator {
+            name('__sep_config_repo')
+            sectionHeader('Config Repository')
+            sectionHeaderStyle('')
+            description('Vendor config repo coordinates — baked in at job-generation time. Do not edit manually.')
+            separatorStyle('')
+        }
         stringParam('CONFIG_REPO_URL', configRepoUrl,
             'Vendor config repo URL — baked in at job-generation time')
         stringParam('CONFIG_REPO_BRANCH', configRepoBranch,

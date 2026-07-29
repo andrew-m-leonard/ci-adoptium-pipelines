@@ -92,20 +92,32 @@ def collateAndMergeGroups() {
  * @param orderedGroups  output of collateAndMergeGroups()
  */
 def buildForwardedParams(List orderedGroups) {
+    // Order must exactly match the parameter declaration order in
+    // openjdk_build_pipeline.groovy so that the triggered build's sidebar
+    // renders parameters in the correct grouped sequence.
+
+    // ── Build Configuration separator ────────────────────────────────────────
     def fwd = [
-        string(name: 'JDK_VERSION',             value: env.JDK_VERSION),
-        string(name: 'GROUP_UID',               value: env.GROUP_UID),
+        [$class: 'jenkins.plugins.parameter_separator.ParameterSeparatorValue',
+         name: '__sep_build_configuration', sectionHeader: 'Build Configuration'],
+        string(name: 'JDK_VERSION',        value: env.JDK_VERSION),
+        string(name: 'TARGET_OS',          value: params.TARGET_OS          ?: ''),
+        string(name: 'ARCHITECTURE',       value: params.ARCHITECTURE       ?: ''),
+        string(name: 'GROUP_UID',          value: env.GROUP_UID),
+        string(name: 'INITIALIZE_LABEL',   value: params.INITIALIZE_LABEL   ?: ''),
+        string(name: 'ACTIVE_NODE_TIMEOUT',value: params.ACTIVE_NODE_TIMEOUT ?: ''),
+        string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
         booleanParam(name: 'RUN_TESTS',               value: params.RUN_TESTS),
         booleanParam(name: 'SIGN_ARTIFACTS',          value: params.SIGN_ARTIFACTS),
         booleanParam(name: 'PUBLISH_ARTIFACTS',       value: params.PUBLISH_ARTIFACTS),
         booleanParam(name: 'ENABLE_INSTALLERS',       value: params.ENABLE_INSTALLERS),
+        booleanParam(name: 'ENABLE_TCK',              value: params.ENABLE_TCK ?: false),
         booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE',value: params.RUN_REPRODUCIBLE_COMPARE),
-        string(name: 'RELEASE_TYPE',            value: params.RELEASE_TYPE ?: 'NIGHTLY'),
+        booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE ?: true),
     ]
 
-    // Collated stage params in definition order: separator first, then param values.
-    // The [$class:...] syntax passes ParameterSeparatorValue directly so Jenkins
-    // stores the correct type in ParametersAction and renders the separator widget.
+    // ── Collated stage params ─────────────────────────────────────────────────
+    // Separator first, then param values — matches declaration order in the build job.
     orderedGroups.each { grp ->
         def stageLabel  = grp.stageIds.join('_').replaceAll(/\W+/, '_')
         def stageHeader = grp.stageIds.size() == 1
@@ -124,6 +136,9 @@ def buildForwardedParams(List orderedGroups) {
         }
     }
 
+    // ── Config Repository separator ───────────────────────────────────────────
+    fwd << [$class: 'jenkins.plugins.parameter_separator.ParameterSeparatorValue',
+            name: '__sep_config_repo', sectionHeader: 'Config Repository']
     fwd << string(name: 'CONFIG_REPO_URL',    value: params.CONFIG_REPO_URL    ?: '')
     fwd << string(name: 'CONFIG_REPO_BRANCH', value: params.CONFIG_REPO_BRANCH ?: '')
     return fwd
