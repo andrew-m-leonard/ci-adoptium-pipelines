@@ -309,8 +309,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
 
-            booleanParam('REGENERATE_JOBS', false,
-                'Force regeneration of platform-specific build jobs (use after config changes)')
             choiceParam('PLATFORMS', ['all'] + platforms,
                 'Select platform to build, or "all" for all available platforms')
 

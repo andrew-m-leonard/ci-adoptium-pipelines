@@ -152,7 +152,7 @@ pipeline {
                     resolveGroupUid()
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Config Repo: ${params.CONFIG_REPO_URL} @ ${params.CONFIG_REPO_BRANCH}"
-                    echo "Regenerate Jobs: ${params.REGENERATE_JOBS} | Platforms: ${params.PLATFORMS}"
+                    echo "Pipeline SHA: ${env.GIT_COMMIT} | Platforms: ${params.PLATFORMS}"
                 }
             }
         }
@@ -191,7 +191,7 @@ pipeline {
 
         stage('Collate Stage Parameters') {
             // Always runs — ordered groups and separator names must be available
-            // even when job regeneration is skipped (REGENERATE_JOBS=false, build #2+).
+            // for the 'Create/Update Platform Jobs' stage on every run.
             agent {
                 label getLaunchAgentLabel()
             }
@@ -226,17 +226,12 @@ pipeline {
         }
 
         stage('Create/Update Platform Jobs') {
-            when {
-                expression { return params.REGENERATE_JOBS || currentBuild.number == 1 }
-            }
             agent {
                 label getLaunchAgentLabel()
             }
             steps {
                 script {
-                    echo params.REGENERATE_JOBS
-                        ? "Force regenerating platform jobs..."
-                        : "First run — creating platform jobs..."
+                    echo "Checking platform jobs against pipeline SHA: ${env.GIT_COMMIT}"
 
                     env.SELECTED_PLATFORMS.split(',').each { platform ->
                         echo "  → ${platform}"
@@ -250,7 +245,8 @@ pipeline {
                             additionalParameters: [
                                 JDK_VERSION:          env.JDK_VERSION,
                                 PLATFORM:             platform,
-                                COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON
+                                COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON,
+                                PIPELINE_COMMIT_SHA:  env.GIT_COMMIT
                             ]
                         )
                     }

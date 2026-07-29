@@ -13,15 +13,27 @@
  *       configurations/jdk<N>_pipeline_config.json
  *
  * Binding variables (additionalParameters from Jenkinsfile.launch):
- *   JDK_VERSION          — numeric version (e.g. "21")
- *   PLATFORM             — platform key from buildConfigurations (e.g. "x86-64_linux")
- *   COLLATED_PARAMS_JSON — JSON string produced by collect-stage-params.py, with
- *                          cross-stem group merge already applied by Jenkinsfile.launch
+ *   JDK_VERSION           — numeric version (e.g. "21")
+ *   PLATFORM              — platform key from buildConfigurations (e.g. "x86-64_linux")
+ *   COLLATED_PARAMS_JSON  — JSON string produced by collect-stage-params.py, with
+ *                           cross-stem group merge already applied by Jenkinsfile.launch
+ *   PIPELINE_COMMIT_SHA   — git SHA of the ci-adoptium-pipelines checkout in the
+ *                           launch job workspace (env.GIT_COMMIT from Jenkinsfile.launch).
+ *                           Used to detect when the build job was generated from a
+ *                           different commit and must be regenerated.
  *
  * Creates: Build_openjdk/Build_openjdk<version>_<distro>_<arch>_<os>
+ *
+ * Regeneration logic (automatic — no manual parameter needed):
+ *   The generated job's description embeds the SHA it was created from as
+ *   "pipeline-sha:<sha>".  On each run this script compares that stored SHA
+ *   against PIPELINE_COMMIT_SHA.  The job is (re-)created only when:
+ *     • the job does not yet exist, OR
+ *     • the stored SHA differs from the current checkout SHA
  */
 
 import groovy.json.JsonSlurper
+import jenkins.model.Jenkins
 
 // ============================================================================
 // STEP 1: Validate binding variables
@@ -30,6 +42,7 @@ import groovy.json.JsonSlurper
 def jdkVersion          = binding.variables.get('JDK_VERSION')
 def platform            = binding.variables.get('PLATFORM')
 def collatedParamsJson  = binding.variables.get('COLLATED_PARAMS_JSON') ?: ''
+def pipelineCommitSha   = binding.variables.get('PIPELINE_COMMIT_SHA')  ?: 'unknown'
 
 if (!jdkVersion) throw new IllegalArgumentException("JDK_VERSION binding variable is required")
 if (!platform)   throw new IllegalArgumentException("PLATFORM binding variable is required")
@@ -42,8 +55,9 @@ if (!collatedParamsJson?.trim()) {
 
 println "=" * 80
 println "openjdk_build_pipeline"
-println "  JDK_VERSION : ${jdkVersion}"
-println "  PLATFORM    : ${platform}"
+println "  JDK_VERSION         : ${jdkVersion}"
+println "  PLATFORM            : ${platform}"
+println "  PIPELINE_COMMIT_SHA : ${pipelineCommitSha}"
 println "=" * 80
 
 // ============================================================================
@@ -110,7 +124,26 @@ def collatedParamGroups = mergedGroupMap.values().toList()
 println "✓ Received ${rawGroups.size()} raw group(s), merged to ${collatedParamGroups.size()} group(s)"
 
 // ============================================================================
-// STEP 4: Create platform build job
+// STEP 4: Determine whether the platform build job needs to be (re-)created
+// ============================================================================
+
+// Job DSL scripts run on the Jenkins controller in a trusted (non-sandboxed)
+// context, so Jenkins.instance is available without script approval.
+def jobName     = "/Build_openjdk/Build_openjdk${jdkVersion}_${variant}_${architecture}_${targetOs}"
+def existingJob = Jenkins.instance.getItemByFullName(jobName)
+def storedSha   = (existingJob?.description ?: '') =~ /pipeline-sha:([0-9a-f]+)/
+
+if (existingJob == null) {
+    println "  → Job does not exist yet — will create"
+} else if (!storedSha || storedSha[0][1] != pipelineCommitSha) {
+    println "  → Stored pipeline-sha (${storedSha ? storedSha[0][1] : 'none'}) differs from current (${pipelineCommitSha}) — will regenerate"
+} else {
+    println "  → Job is up-to-date (pipeline-sha: ${storedSha[0][1]}) — skipping regeneration"
+    return
+}
+
+// ============================================================================
+// STEP 5: Create / update platform build job
 // ============================================================================
 
 folder('/Build_openjdk') {
@@ -118,14 +151,13 @@ folder('/Build_openjdk') {
     description('OpenJDK platform build pipeline jobs, AQA-style naming: Build_openjdk<version>_<distro>_<arch>_<os>')
 }
 
-def jobName = "/Build_openjdk/Build_openjdk${jdkVersion}_${variant}_${architecture}_${targetOs}"
 println "Creating platform build job: ${jobName}"
 
 pipelineJob(jobName) {
     displayName("Build_openjdk${jdkVersion}_${variant}_${architecture}_${targetOs}")
-    description("""
+    description("""\
         Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${architecture}/${targetOs}.
-    """.stripIndent().trim())
+        pipeline-sha:${pipelineCommitSha}""".stripIndent().trim())
 
     quietPeriod(5)
 
@@ -249,4 +281,4 @@ pipelineJob(jobName) {
     }
 }
 
-println "✓ Platform build job created: ${jobName}"
+println "✓ Platform build job created/updated: ${jobName}"
