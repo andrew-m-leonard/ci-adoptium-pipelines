@@ -360,6 +360,13 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
             }
 
             // Values baked in at generation time by the seed job — do not edit manually.
+            separator {
+                name('__sep_config_repo')
+                sectionHeader('Config Repository')
+                sectionHeaderStyle('')
+                description('Vendor config repo coordinates — baked in at job-generation time. Do not edit manually.')
+                separatorStyle('')
+            }
             stringParam('CONFIG_REPO_URL', configRepoUrl,
                 'Vendor config repo URL — baked in at job-generation time')
             stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
