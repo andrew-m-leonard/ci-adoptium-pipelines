@@ -1,0 +1,18 @@
+{
+  "stageId": "02-build",
+  "description": "Parameters consumed by the build stage script. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/02-build.params.json in the config repo.",
+  "parameterGroups": [
+    {
+      "name": "AQAVit Test Options",
+      "description": "Parameters for AQAVit testing.",
+      "parameters": [
+        {
+          "name": "AQA_REF",
+          "type": "string",
+          "default": "",
+          "description": "Git branch or tag for the aqa-tests repository. Empty = default defined in adoptium_pipeline_config.json."
+        }
+      ]
+    }
+  ]
+}
