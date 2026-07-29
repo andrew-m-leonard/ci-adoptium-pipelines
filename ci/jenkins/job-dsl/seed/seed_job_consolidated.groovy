@@ -308,8 +308,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
         parameters {
             stringParam('JDK_VERSION', version.replaceAll(/[^\d]/, ''),
                 'JDK version number — fixed for this launch job')
-            stringParam('_GENERATED_PIPELINE_SHA', pipelineCommitSha,
-                'SHA of the ci-adoptium-pipelines commit this job was generated from. Set by the seed job — do not edit manually.')
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
 
@@ -362,11 +360,13 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }
             }
 
-            // Config repo — used by Jenkinsfile.launch to checkout config repo at runtime
+            // Values baked in at generation time by the seed job — do not edit manually.
             stringParam('CONFIG_REPO_URL', configRepoUrl,
                 'Vendor config repo URL — baked in at job-generation time')
             stringParam('CONFIG_REPO_BRANCH', configRepoBranch,
                 'Vendor config repo branch — baked in at job-generation time')
+            stringParam('_GENERATED_PIPELINE_SHA', pipelineCommitSha,
+                'SHA of the ci-adoptium-pipelines commit this job was generated from — baked in at job-generation time')
         }
 
         definition {
