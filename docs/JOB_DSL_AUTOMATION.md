@@ -46,9 +46,11 @@ openjdk-build-seed-job  (Pipeline job — Pipeline from SCM → config repo Jenk
 
 Build_openjdk_launchers/Build_openjdk21_launch  (Pipeline — Jenkinsfile.launch)
   reads configurations/jdk21_pipeline_config.json  (available platforms)
-  if REGENERATE_JOBS=true (or build #1):
-    jobDsl → openjdk_build_pipeline.groovy
-      creates Build_openjdk/Build_openjdk21_temurin_x86-64_linux  etc.
+  stage('Create/Update Platform Jobs') — runs on every launch:
+    jobDsl → openjdk_build_pipeline.groovy  (per platform)
+      checks Jenkins.instance for existing job + stored pipeline-sha
+      skips if job exists and pipeline-sha matches current GIT_COMMIT
+      otherwise creates/updates Build_openjdk/Build_openjdk21_temurin_x86-64_linux  etc.
   triggers all selected platform builds in parallel
 ```
 
@@ -126,12 +128,18 @@ The job will:
 
 ### Step 4: Create Platform Build Jobs
 
-Run a launch job (e.g. `Build_openjdk_launchers/Build_openjdk21_launch`) with `REGENERATE_JOBS=true`.
-It will create platform jobs like:
+Simply run a launch job (e.g. `Build_openjdk_launchers/Build_openjdk21_launch`).
+Platform jobs are created automatically — no extra flag is needed.
+
+On every launch run the `'Create/Update Platform Jobs'` stage compares the
+`pipeline-sha` stored in each platform job's description against the SHA of the
+`ci-adoptium-pipelines` commit that the launch job checked out (`GIT_COMMIT`).
+If they differ, or the job does not yet exist, the job is regenerated. If they
+match the job is left untouched and the stage moves on immediately.
+
+Platform jobs created this way will look like:
 - `Build_openjdk/Build_openjdk21_temurin_x86-64_linux`
 - `Build_openjdk/Build_openjdk21_temurin_aarch64_mac`
-
-Platform jobs are also automatically created on the first run of each launch job (build #1).
 
 ## Configuration
 
@@ -213,7 +221,12 @@ The config repo is re-checked out by the Pipeline SCM step; `pipelines/` (ci-ado
 
 1. Edit `jenkins_job_config.json` in the config repo or the Job DSL scripts
 2. Commit and push
-3. Re-run the seed job, then run each launch job with `REGENERATE_JOBS=true`
+3. Re-run the seed job
+
+Platform build jobs are automatically regenerated on the next launch run — the
+launch job detects that the `pipeline-sha` stored in each job's description no
+longer matches the current `ci-adoptium-pipelines` checkout and recreates it.
+No manual flag is required.
 
 ### Updating Pipeline Code
 
@@ -264,9 +277,14 @@ Commit and push, then re-run the seed job.
 
 ### Platform Jobs Not Created / Out of Date
 
-**Cause**: `REGENERATE_JOBS` was not set, or this is not build #1.
+**Cause**: The platform job does not yet exist, or it was generated from a
+different `ci-adoptium-pipelines` commit than the one the launch job has
+checked out.
 
-**Fix**: Run the launch job with `REGENERATE_JOBS=true`.
+**Fix**: Simply run (or re-run) the launch job. The `'Create/Update Platform
+Jobs'` stage automatically detects the mismatch via the `pipeline-sha` tag
+embedded in each job's description and regenerates any job that is missing or
+out of date.
 
 ## Related Documentation
 
