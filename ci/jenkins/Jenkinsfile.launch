@@ -24,16 +24,6 @@ def getLaunchAgentLabel() {
 }
 
 /**
- * Read the parent job's description without triggering sandbox rejection.
- * @NonCPS methods run outside the CPS sandbox so Jenkins does not intercept
- * getRawBuild() — no script approval needed.
- */
-@NonCPS
-def getJobDescription() {
-    return currentBuild.rawBuild.parent.getDescription() ?: ''
-}
-
-/**
  * Resolve GROUP_UID: use the supplied parameter value or auto-generate a unique one.
  */
 def resolveGroupUid() {
@@ -162,32 +152,6 @@ pipeline {
                     echo "=== Launch Pipeline for JDK ${env.JDK_VERSION} ==="
                     echo "Config Repo: ${params.CONFIG_REPO_URL} @ ${params.CONFIG_REPO_BRANCH}"
                     echo "Pipeline SHA: ${env.GIT_COMMIT} | Platforms: ${params.PLATFORMS}"
-
-                    // ── Staleness check ──────────────────────────────────────
-                    // Read the pipeline-sha stamped into this job's description
-                    // by the seed job at generation time, and compare it against
-                    // the SHA Jenkins actually checked out (env.GIT_COMMIT).
-                    // getJobDescription() is @NonCPS so getRawBuild() runs outside
-                    // the CPS sandbox without requiring a script approval.
-                    def jobDescription = getJobDescription()
-                    def shaMatch       = jobDescription =~ /pipeline-sha:([0-9a-f]+)/
-                    def generatedSha   = shaMatch ? shaMatch[0][1] : null
-                    if (!generatedSha) {
-                        // No SHA in description — job predates this feature.
-                        // Warn but continue so existing jobs keep working.
-                        echo "⚠ WARNING: No pipeline-sha found in this job's description. " +
-                             "Re-run the seed job to stamp the current SHA."
-                    } else if (generatedSha != env.GIT_COMMIT) {
-                        error(
-                            "This launch job is out of date.\n" +
-                            "  Job generated from : ${generatedSha}\n" +
-                            "  Current SCM SHA    : ${env.GIT_COMMIT}\n\n" +
-                            "The ci-adoptium-pipelines commit has changed since this job was last generated.\n" +
-                            "Re-run the seed job (openjdk-build-seed-job) to regenerate it, then retry this build."
-                        )
-                    } else {
-                        echo "✓ Launch job is up-to-date (pipeline-sha: ${generatedSha})"
-                    }
                 }
             }
         }

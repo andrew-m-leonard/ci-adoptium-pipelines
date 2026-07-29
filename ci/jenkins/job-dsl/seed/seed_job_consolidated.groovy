@@ -289,19 +289,18 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
     pipelineJob(jobName) {
         displayName("Build_openjdk${version.replaceAll(/[^\d]/, '')}_launch${isLts ? ' (LTS)' : ''}")
         description("""\
-            Launch orchestrator for JDK ${version} builds.
-            ${isLts ? 'This is a Long Term Support (LTS) version.' : ''}
-
-            This job:
-            1. Reads platform configuration from: ${configFile}
-            2. Creates/updates platform-specific build jobs when the pipeline SHA changes
-            3. Launches builds for selected platforms in parallel
-            4. Aggregates and reports results
-
-            Stage parameters are collated from scripts/stages/*.params.json and any
-            vendor-scripts/*.params.json overrides in the config repo. All collated
-            params are forwarded automatically to every platform build job launched.
-            <br>pipeline-sha:${pipelineCommitSha}""".stripIndent().trim())
+            <p>Launch orchestrator for JDK <strong>${version}</strong> builds.${isLts ? ' <span style="color:#b8860b">&#9733; Long Term Support (LTS)</span>' : ''}</p>
+            <p>This job:</p>
+            <ol>
+              <li>Reads platform configuration from: <code>${configFile}</code></li>
+              <li>Creates/updates platform-specific build jobs when the pipeline SHA changes</li>
+              <li>Launches builds for selected platforms in parallel</li>
+              <li>Aggregates and reports results</li>
+            </ol>
+            <p>Stage parameters are collated from <code>scripts/stages/*.params.json</code> and any
+            <code>vendor-scripts/*.params.json</code> overrides in the config repo.
+            All collated parameters are forwarded automatically to every platform build job launched.</p>
+            <p style="color:#6a6a6a;font-size:0.85em">pipeline-sha:${pipelineCommitSha}</p>""".stripIndent().trim())
 
         quietPeriod(5)
 
