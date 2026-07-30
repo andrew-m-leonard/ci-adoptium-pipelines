@@ -270,7 +270,11 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                     }
                 }
             }
-            disableResume()
+            // disableResume() is intentionally omitted: the launch job uses
+            // build(wait:true) to track downstream platform builds across
+            // potential controller restarts.  PERFORMANCE_OPTIMIZED durability
+            // (set by disableResume) interferes with the downstream build's
+            // PlaceholderTask lifecycle and causes it to be stopped immediately.
         }
     }
 }
