@@ -272,9 +272,9 @@ pipelineJob(jobName) {
     }
 
     // Allow any downstream job to copy artifacts from this build.
-    // copyArtifactPermission() is a top-level pipelineJob method, not a
-    // properties{} child — it maps to CopyArtifactPermissionProperty.
-    copyArtifactPermission('*')
+    copyArtifactPermission {
+        projectNames('*')
+    }
 }
 
 println "✓ Platform build job created/updated: ${jobName}"
