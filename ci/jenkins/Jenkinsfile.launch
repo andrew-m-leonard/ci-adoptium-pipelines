@@ -244,26 +244,48 @@ pipeline {
                 script {
                     echo "Checking platform jobs against pipeline SHA: ${env.GIT_COMMIT}"
 
-                    env.SELECTED_PLATFORMS.split(',').each { platform ->
-                        echo "  → ${platform}"
-                        jobDsl(
-                            targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
-                            removedJobAction:    'IGNORE',
-                            removedViewAction:   'IGNORE',
-                            ignoreExisting:      false,
-                            ignoreMissingFiles:  false,
-                            lookupStrategy:      'SEED_JOB',
-                            additionalParameters: [
-                                JDK_VERSION:          env.JDK_VERSION,
-                                PLATFORM:             platform,
-                                COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON,
-                                PIPELINE_COMMIT_SHA:  env.GIT_COMMIT,
-                                CONFIG_REPO_URL:      params.CONFIG_REPO_URL,
-                                CONFIG_REPO_BRANCH:   params.CONFIG_REPO_BRANCH
-                            ]
-                        )
+                    // Wrap in try/catch so that a RejectedAccessException (script
+                    // approval pending) causes a clean NOT_BUILT result rather than
+                    // an abrupt FAILURE.  An abrupt FAILURE here leaves a stale
+                    // PlaceholderTask entry in ExecutorStepExecution.RunningTasks
+                    // which causes the *next* run's node allocation to block with
+                    // "blocked: Stopping part of #<N>".  By catching the rejection
+                    // and setting NOT_BUILT we give Jenkins a chance to tear down
+                    // the node step cleanly before the build exits.
+                    try {
+                        env.SELECTED_PLATFORMS.split(',').each { platform ->
+                            echo "  → ${platform}"
+                            jobDsl(
+                                targets:             'ci/jenkins/job-dsl/openjdk_build_pipeline.groovy',
+                                removedJobAction:    'IGNORE',
+                                removedViewAction:   'IGNORE',
+                                ignoreExisting:      false,
+                                ignoreMissingFiles:  false,
+                                lookupStrategy:      'SEED_JOB',
+                                additionalParameters: [
+                                    JDK_VERSION:          env.JDK_VERSION,
+                                    PLATFORM:             platform,
+                                    COLLATED_PARAMS_JSON: env.COLLATED_PARAMS_JSON,
+                                    PIPELINE_COMMIT_SHA:  env.GIT_COMMIT,
+                                    CONFIG_REPO_URL:      params.CONFIG_REPO_URL,
+                                    CONFIG_REPO_BRANCH:   params.CONFIG_REPO_BRANCH
+                                ]
+                            )
+                        }
+                        echo "✓ Platform jobs created/updated"
+                    } catch (org.jenkinsci.plugins.scriptsecurity.sandbox.RejectedAccessException rae) {
+                        // Script approval is required before the DSL can run.
+                        // Mark the build NOT_BUILT so Jenkins does not treat this
+                        // as a failure-in-progress, which would leave a stale
+                        // PlaceholderTask and block the next run's node step.
+                        currentBuild.result = 'NOT_BUILT'
+                        error("""\
+                            ✋ Job DSL script approval required.
+                            Approve the pending script signatures at:
+                              <Jenkins-URL>/manage/scriptApproval/
+                            Then re-run this launch job.
+                            Rejected: ${rae.message}""".stripIndent())
                     }
-                    echo "✓ Platform jobs created/updated"
                 }
             }
         }
