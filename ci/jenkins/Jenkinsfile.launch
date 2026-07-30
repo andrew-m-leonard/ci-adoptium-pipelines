@@ -13,41 +13,31 @@ import groovy.json.JsonSlurper
 // ── Helper functions ────────────────────────────────────────────────────────
 
 /**
- * Clear any stale ExecutorStepExecution.RunningTasks entries for the given
- * job full name.
+ * Cancel any queue items for the given job that are blocked with
+ * "Stopping part of ..." — these are stale PlaceholderTasks left by a
+ * previous aborted build whose RunningTasks entry was not cleaned up.
  *
- * When a pipeline build is aborted while a node step is queued (PlaceholderTask),
- * the entry in RunningTasks may remain with stopping=true.  If the same job is
- * deleted and recreated, the new build #1 reuses the same CpsStepContext key
- * (job name + build number + step counter) and the new PlaceholderTask inherits
- * stopping=true immediately, blocking it as a Queue$BlockedItem forever.
- *
- * This method removes all RunningTasks entries whose key contains the given
- * job name substring, clearing the stale state before build() is called.
+ * Uses only whitelisted pipeline steps (no reflection, no script approval).
+ * Safe to call even when no stale items exist — it is a no-op in that case.
  *
  * Must be called from a controller-side context (not inside a node block).
  */
-@NonCPS
-def clearStaleRunningTasks(String jobNameSubstring) {
-    // Access RunningTasks via its fully-qualified inner-class name to avoid
-    // getDeclaredClasses() which is not on the sandbox whitelist.
-    def rtClass = Class.forName(
-        'org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution$RunningTasks')
-    def instances = jenkins.model.Jenkins.instance.getExtensionList(rtClass)
-    if (!instances) {
-        echo "⚠ No RunningTasks instance found — skipping stale task cleanup"
-        return
+def cancelStaleBlockedTasks(String jobFullName) {
+    def q = Jenkins.instance.queue
+    def blocked = q.items.findAll { item ->
+        item instanceof hudson.model.Queue.BlockedItem &&
+        item.task.toString().contains(jobFullName) &&
+        item.getCauseOfBlockage()?.toString()?.startsWith('Stopping part of')
     }
-    def f = rtClass.getDeclaredField('runningTasks')
-    f.setAccessible(true)
-    def map = f.get(instances[0])
-    def stale = map.keySet().findAll { it.toString().contains(jobNameSubstring) }
-    if (stale) {
-        stale.each { k ->
-            echo "  Removing stale RunningTask: ${k}"
-            map.remove(k)
-        }
-        echo "✓ Cleared ${stale.size()} stale RunningTask(s) for '${jobNameSubstring}'"
+    blocked.each { item ->
+        echo "  Cancelling stale blocked task: ${item.task}"
+        q.cancel(item.task)
+    }
+    if (blocked) {
+        echo "✓ Cancelled ${blocked.size()} stale blocked task(s) for '${jobFullName}'"
+        // Brief pause to allow the queue to process the cancellation before
+        // build() schedules a new item for the same job.
+        sleep(time: 3, unit: 'SECONDS')
     }
 }
 
@@ -347,11 +337,11 @@ pipeline {
                         def jobNameForCleanup = jobName  // capture for closure
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
-                                // Clear any stale RunningTasks entries left by
+                                // Cancel any stale PlaceholderTasks left by
                                 // previous aborted builds of this job.  This
                                 // prevents the new PlaceholderTask from inheriting
                                 // stopping=true and blocking as a Queue$BlockedItem.
-                                clearStaleRunningTasks(jobNameForCleanup)
+                                cancelStaleBlockedTasks(jobNameForCleanup)
                                 def fwd = buildForwardedParams(orderedGroups)
                                 def result = build(
                                     job:        jobName,
