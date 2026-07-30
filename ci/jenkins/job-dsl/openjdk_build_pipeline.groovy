@@ -269,9 +269,12 @@ pipelineJob(jobName) {
             }
         }
         disableConcurrentBuilds()
-        // Allow any downstream job to copy artifacts from this build.
-        copyArtifactPermission('*')
     }
+
+    // Allow any downstream job to copy artifacts from this build.
+    // copyArtifactPermission() is a top-level pipelineJob method, not a
+    // properties{} child — it maps to CopyArtifactPermissionProperty.
+    copyArtifactPermission('*')
 }
 
 println "✓ Platform build job created/updated: ${jobName}"
