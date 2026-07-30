@@ -13,6 +13,48 @@ import groovy.json.JsonSlurper
 // ── Helper functions ────────────────────────────────────────────────────────
 
 /**
+ * Clear any stale ExecutorStepExecution.RunningTasks entries for the given
+ * job full name.
+ *
+ * When a pipeline build is aborted while a node step is queued (PlaceholderTask),
+ * the entry in RunningTasks may remain with stopping=true.  If the same job is
+ * deleted and recreated, the new build #1 reuses the same CpsStepContext key
+ * (job name + build number + step counter) and the new PlaceholderTask inherits
+ * stopping=true immediately, blocking it as a Queue$BlockedItem forever.
+ *
+ * This method removes all RunningTasks entries whose key contains the given
+ * job name substring, clearing the stale state before build() is called.
+ *
+ * Must be called from a controller-side context (not inside a node block).
+ */
+@NonCPS
+def clearStaleRunningTasks(String jobNameSubstring) {
+    def rtClass = org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution.class
+        .getDeclaredClasses().find { it.simpleName == 'RunningTasks' }
+    if (!rtClass) {
+        echo "⚠ RunningTasks inner class not found — skipping stale task cleanup"
+        return
+    }
+    def instances = jenkins.model.Jenkins.instance.getExtensionList(rtClass)
+    if (!instances) {
+        echo "⚠ No RunningTasks instance found — skipping stale task cleanup"
+        return
+    }
+    def f = rtClass.getDeclaredField('runningTasks')
+    f.setAccessible(true)
+    def map = f.get(instances[0])
+    def stale = map.keySet().findAll { it.toString().contains(jobNameSubstring) }
+    if (stale) {
+        stale.each { k ->
+            echo "  Removing stale RunningTask: ${k}"
+            map.remove(k)
+        }
+        echo "✓ Cleared ${stale.size()} stale RunningTask(s) for '${jobNameSubstring}'"
+    }
+}
+
+
+/**
  * Return the label for the __any__ sentinel from CONFIG_STAGE_AGENT_LABELS, or
  * null if not set.  When null, agent { label null } is equivalent to agent any.
  *
@@ -304,8 +346,14 @@ pipeline {
                         def cfg     = versionConfig.buildConfigurations[platform]
                         def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${cfg?.variant ?: 'temurin'}_${cfg?.arch ?: platform}_${cfg?.os ?: platform}"
 
+                        def jobNameForCleanup = jobName  // capture for closure
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
+                                // Clear any stale RunningTasks entries left by
+                                // previous aborted builds of this job.  This
+                                // prevents the new PlaceholderTask from inheriting
+                                // stopping=true and blocking as a Queue$BlockedItem.
+                                clearStaleRunningTasks(jobNameForCleanup)
                                 def fwd = buildForwardedParams(orderedGroups)
                                 def result = build(
                                     job:        jobName,
