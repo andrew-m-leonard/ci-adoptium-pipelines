@@ -163,8 +163,6 @@ pipelineJob(jobName) {
         Platform-specific build pipeline for OpenJDK ${jdkVersion} (${variant}) on ${architecture}/${targetOs}.
         <br>pipeline-sha:${pipelineCommitSha}""".stripIndent().trim())
 
-    quietPeriod(5)
-
     parameters {
         // ── Build Configuration ───────────────────────────────────────────────
         separator {
@@ -268,7 +266,6 @@ pipelineJob(jobName) {
                 }
             }
         }
-        disableConcurrentBuilds()
     }
 
     configure { project ->
