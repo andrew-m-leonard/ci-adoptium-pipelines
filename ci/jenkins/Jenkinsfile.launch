@@ -29,12 +29,10 @@ import groovy.json.JsonSlurper
  */
 @NonCPS
 def clearStaleRunningTasks(String jobNameSubstring) {
-    def rtClass = org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution.class
-        .getDeclaredClasses().find { it.simpleName == 'RunningTasks' }
-    if (!rtClass) {
-        echo "⚠ RunningTasks inner class not found — skipping stale task cleanup"
-        return
-    }
+    // Access RunningTasks via its fully-qualified inner-class name to avoid
+    // getDeclaredClasses() which is not on the sandbox whitelist.
+    def rtClass = Class.forName(
+        'org.jenkinsci.plugins.workflow.support.steps.ExecutorStepExecution$RunningTasks')
     def instances = jenkins.model.Jenkins.instance.getExtensionList(rtClass)
     if (!instances) {
         echo "⚠ No RunningTasks instance found — skipping stale task cleanup"
