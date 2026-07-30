@@ -12,34 +12,6 @@ import groovy.json.JsonSlurper
 
 // ── Helper functions ────────────────────────────────────────────────────────
 
-/**
- * Cancel any queue items for the given job that are blocked with
- * "Stopping part of ..." — these are stale PlaceholderTasks left by a
- * previous aborted build whose RunningTasks entry was not cleaned up.
- *
- * Uses only whitelisted pipeline steps (no reflection, no script approval).
- * Safe to call even when no stale items exist — it is a no-op in that case.
- *
- * Must be called from a controller-side context (not inside a node block).
- */
-def cancelStaleBlockedTasks(String jobFullName) {
-    def q = Jenkins.instance.queue
-    def blocked = q.items.findAll { item ->
-        item instanceof hudson.model.Queue.BlockedItem &&
-        item.task.toString().contains(jobFullName) &&
-        item.getCauseOfBlockage()?.toString()?.startsWith('Stopping part of')
-    }
-    blocked.each { item ->
-        echo "  Cancelling stale blocked task: ${item.task}"
-        q.cancel(item.task)
-    }
-    if (blocked) {
-        echo "✓ Cancelled ${blocked.size()} stale blocked task(s) for '${jobFullName}'"
-        // Brief pause to allow the queue to process the cancellation before
-        // build() schedules a new item for the same job.
-        sleep(time: 3, unit: 'SECONDS')
-    }
-}
 
 
 /**
@@ -334,14 +306,8 @@ pipeline {
                         def cfg     = versionConfig.buildConfigurations[platform]
                         def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${cfg?.variant ?: 'temurin'}_${cfg?.arch ?: platform}_${cfg?.os ?: platform}"
 
-                        def jobNameForCleanup = jobName  // capture for closure
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
-                                // Cancel any stale PlaceholderTasks left by
-                                // previous aborted builds of this job.  This
-                                // prevents the new PlaceholderTask from inheriting
-                                // stopping=true and blocking as a Queue$BlockedItem.
-                                cancelStaleBlockedTasks(jobNameForCleanup)
                                 def fwd = buildForwardedParams(orderedGroups)
                                 def result = build(
                                     job:        jobName,
