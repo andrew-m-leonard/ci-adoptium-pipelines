@@ -98,7 +98,7 @@ def defaultParams   = jenkinsConfig?.jobConfiguration?.defaultParameters
 def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
 
 // ============================================================================
-// STEP 3: Build collated param groups from pre-computed JSON
+// STEP 3: Build collated param groups from pre-computed JSON. 
 // ============================================================================
 
 // COLLATED_PARAMS_JSON was produced by collect-stage-params.py and the
