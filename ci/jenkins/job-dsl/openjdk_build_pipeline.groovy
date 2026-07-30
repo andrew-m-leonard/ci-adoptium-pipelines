@@ -269,11 +269,10 @@ pipelineJob(jobName) {
             }
         }
         disableConcurrentBuilds()
-    }
-
-    // Allow any downstream job to copy artifacts from this build.
-    copyArtifactPermission {
-        projectNames('*')
+        // Allow any downstream job to copy artifacts from this build.
+        copyArtifactPermissionProperty {
+            projectNames('*')
+        }
     }
 }
 
