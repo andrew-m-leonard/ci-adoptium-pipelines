@@ -269,15 +269,8 @@ pipelineJob(jobName) {
             }
         }
         disableConcurrentBuilds()
-    }
-
-    configure { project ->
-        // ── copyArtifact permission ───────────────────────────────────────
-        project / 'properties' / 'hudson.plugins.copyartifact.CopyArtifactPermissionProperty' {
-            projectNameList {
-                string('*')
-            }
-        }
+        // Allow any downstream job to copy artifacts from this build.
+        copyArtifactPermission('*')
     }
 }
 

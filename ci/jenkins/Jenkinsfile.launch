@@ -277,15 +277,6 @@ pipeline {
             agent none
             steps {
                 script {
-                    // Allow Jenkins to fully commit and index any newly-created jobs
-                    // before scheduling builds against them.  When a pipelineJob is
-                    // created by jobDsl() and build() is called within ~1 second, the
-                    // job's WorkflowJob internal state (RunnerStack, BulkChange commit)
-                    // may not be fully ready, causing the first PlaceholderTask to be
-                    // stopped immediately with "Stopping part of #1".  A short pause
-                    // gives the controller time to complete all post-creation listeners.
-                    sleep(time: 10, unit: 'SECONDS')
-
                     def versionConfig = new JsonSlurper().parseText(env.VERSION_CONFIG)
                     // Re-derive the merged groups from the raw collated JSON that
                     // collateAndMergeGroups() already stored in env.COLLATED_PARAMS_JSON —
