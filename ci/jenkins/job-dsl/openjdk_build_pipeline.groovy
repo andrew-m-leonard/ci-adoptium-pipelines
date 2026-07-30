@@ -253,7 +253,7 @@ pipelineJob(jobName) {
                 }
             }
             scriptPath(jenkinsConfig.jenkinsfilePath)
-            lightweight(false)
+            lightweight(true)
         }
     }
 
@@ -268,7 +268,6 @@ pipelineJob(jobName) {
                 }
             }
         }
-        disableResume()
         disableConcurrentBuilds()
     }
 
