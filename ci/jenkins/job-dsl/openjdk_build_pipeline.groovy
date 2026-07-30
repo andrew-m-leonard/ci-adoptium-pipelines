@@ -253,7 +253,7 @@ pipelineJob(jobName) {
                 }
             }
             scriptPath(jenkinsConfig.jenkinsfilePath)
-            lightweight(true)
+            lightweight(false)
         }
     }
 
