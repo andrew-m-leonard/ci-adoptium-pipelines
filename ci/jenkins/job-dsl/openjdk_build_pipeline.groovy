@@ -268,7 +268,12 @@ pipelineJob(jobName) {
                 }
             }
         }
-        disableConcurrentBuilds()
+        // disableConcurrentBuilds() is intentionally omitted.
+        // On affected Jenkins versions, disableConcurrentBuilds() incorrectly
+        // treats the pipeline's own internal PlaceholderTask (queued by the
+        // agent{} block inside a running build) as a concurrent build of the
+        // same job, blocking the task as a Queue$BlockedItem forever.
+        // See: https://issues.jenkins.io/browse/JENKINS-44654
         // Allow any downstream job to copy artifacts from this build.
         copyArtifactPermissionProperty {
             projectNames('*')
