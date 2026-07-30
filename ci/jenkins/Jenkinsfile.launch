@@ -286,9 +286,10 @@ pipeline {
                             mergedMap2[grp.name].parameters.addAll(grp.parameters ?: [])
                         } else {
                             mergedMap2[grp.name] = [
-                                name:       grp.name,
-                                stageIds:   [grp.stageId],
-                                parameters: new ArrayList(grp.parameters ?: [])
+                                name:          grp.name,
+                                stageIds:      [grp.stageId],
+                                stageDisabled: grp.stageDisabled ?: false,
+                                parameters:    new ArrayList(grp.parameters ?: [])
                             ]
                         }
                     }

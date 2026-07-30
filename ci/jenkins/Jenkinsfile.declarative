@@ -449,6 +449,7 @@ pipeline {
                 label getStageLabel('Validate SBOM')
             }
             when {
+                beforeAgent true
                 expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
             }
             steps {
