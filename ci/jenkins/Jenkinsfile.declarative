@@ -30,6 +30,57 @@ import groovy.transform.Field
 @Field def nodeAgentHelper
 
 /**
+ * Read collated-stage-params.json (written by collect-stage-params.py during the
+ * Collate Stage Parameters stage in Jenkinsfile.launch, then carried into each
+ * platform build job's workspace by initializeStage) and store a compact
+ * stageId → stageCondition[] map as env.COLLATED_STAGE_CONDITIONS (JSON string).
+ *
+ * Called once inside the Initialize stage steps so the inline script block stays
+ * small.  stageConditionMet() reads the stored JSON on every when{} evaluation.
+ */
+def loadStageConditions() {
+    if (!fileExists('collated-stage-params.json')) {
+        echo "ℹ️  collated-stage-params.json not found — stageConditions will not be evaluated"
+        return
+    }
+    def collated = new groovy.json.JsonSlurper()
+        .parseText(readFile('collated-stage-params.json'))
+    def condMap = [:]
+    (collated.groups ?: []).each { grp ->
+        def conds = grp.stageCondition ?: []
+        if (conds) {
+            // Multiple groups may share a stageId — merge, dedup by param name
+            def existing = condMap[grp.stageId] ?: []
+            condMap[grp.stageId] = (existing + conds).unique { it.param }
+        }
+    }
+    env.COLLATED_STAGE_CONDITIONS = groovy.json.JsonOutput.toJson(condMap)
+    echo "✓ Loaded stage conditions for ${condMap.size()} stage(s)"
+}
+
+/**
+ * Evaluate the stageCondition list for a given stage stem.
+ *
+ * Reads env.COLLATED_STAGE_CONDITIONS (populated by loadStageConditions() in
+ * Initialize).  Returns true when all conditions pass, or when no conditions are
+ * defined for the stage (unconditional).  Value comparison is string-based to
+ * handle the coercion that occurs when booleans travel through Jenkins env vars.
+ *
+ * Called from within when{} expression{} blocks — must be CPS-safe.
+ */
+def stageConditionMet(String stageId) {
+    def condJson = env.COLLATED_STAGE_CONDITIONS
+    if (!condJson) return true
+    def conditions = new groovy.json.JsonSlurper().parseText(condJson)[stageId]
+    if (!conditions) return true
+    return conditions.every { cond ->
+        // Check job params first (explicit user override), then env
+        def actual = params[cond.param]?.toString() ?: env[cond.param] ?: ''
+        return actual == cond.value.toString()
+    }
+}
+
+/**
  * Ensure all helper libraries are loaded. Called once per agent allocation.
  */
 def ensureLibsLoaded() {
@@ -123,6 +174,7 @@ pipeline {
 
                         configHelper.summarizePipelineConfig(pipelineConfig, jenkinsConfig)
                         pipelineHelper.ensureBuildDescriptionSet(pipelineConfig)
+                        loadStageConditions()
                         pipelineHelper.finalizeStage('Initialize')
                     }
                 }
@@ -168,6 +220,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     expression {
                         return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
@@ -198,6 +251,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     expression {
                         return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
@@ -226,7 +280,11 @@ pipeline {
                 label getStageLabel('Post-Build Code Sign')
             }
             when {
-                expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                beforeAgent true
+                allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
+                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                }
             }
             steps {
                 script {
@@ -249,7 +307,8 @@ pipeline {
                 label getStageLabel('Build Installers')
             }
             when {
-                expression { env.CONFIG_ENABLE_INSTALLERS == 'true' }
+                beforeAgent true
+                expression { stageConditionMet('07-installer') }
             }
             steps {
                 script {
@@ -272,8 +331,9 @@ pipeline {
                 label getStageLabel('Code Sign Installer')
             }
             when {
+                beforeAgent true
                 allOf {
-                    expression { env.CONFIG_ENABLE_INSTALLERS == 'true' }
+                    expression { stageConditionMet('08-code-sign-installer') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                 }
             }
@@ -298,9 +358,11 @@ pipeline {
                 label getStageLabel('SBOM Sign')
             }
             when {
+                beforeAgent true
                 allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
-                    expression { config.buildConfig.BUILD_ARGS?.contains('--create-sbom') }
+                    expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
                     }
@@ -327,7 +389,9 @@ pipeline {
                 label getStageLabel('Digital Artifact Sign')
             }
             when {
+                beforeAgent true
                 allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
@@ -355,7 +419,9 @@ pipeline {
                 label getStageLabel('Verify Signing')
             }
             when {
+                beforeAgent true
                 allOf {
+                    expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
@@ -408,8 +474,9 @@ pipeline {
                 label getStageLabel('Smoke Tests')
             }
             when {
+                beforeAgent true
                 allOf {
-                    expression { env.CONFIG_RUN_TESTS == 'true' }
+                    expression { stageConditionMet('14-aqa-tests') }
                     expression {
                         currentBuild.result == null || currentBuild.result == 'SUCCESS'
                     }
@@ -444,8 +511,9 @@ pipeline {
                 label getStageLabel('Reproducible Compare Build')
             }
             when {
+                beforeAgent true
                 allOf {
-                    expression { params.REPRODUCIBLE_COMPARE_BUILD == true }
+                    expression { stageConditionMet('20-reproducible-compare') }
                     expression { params.SCM_REF != null && params.SCM_REF != '' }
                     expression {
                         currentBuild.result == null || currentBuild.result == 'SUCCESS'
@@ -487,8 +555,9 @@ pipeline {
                 label getStageLabel('AQA Tests')
             }
             when {
+                beforeAgent true
                 allOf {
-                    expression { env.CONFIG_RUN_TESTS == 'true' }
+                    expression { stageConditionMet('14-aqa-tests') }
                     expression { env.SMOKE_TESTS_PASSED == 'true' }
                 }
             }
@@ -513,9 +582,10 @@ pipeline {
                 label getStageLabel('TCK Tests')
             }
             when {
+                beforeAgent true
                 allOf {
+                    expression { stageConditionMet('15-tck-tests') }
                     expression { env.CONFIG_VARIANT == 'temurin' }
-                    expression { env.CONFIG_ENABLE_TCK == 'true' }
                     expression { env.SMOKE_TESTS_PASSED == 'true' }
                     not {
                         allOf {
@@ -547,7 +617,8 @@ pipeline {
                 label getStageLabel('Publish Artifacts')
             }
             when {
-                expression { env.CONFIG_PUBLISH_ARTIFACTS == 'true' }
+                beforeAgent true
+                expression { stageConditionMet('16-publish') }
             }
             steps {
                 script {

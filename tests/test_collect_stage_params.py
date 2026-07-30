@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
 """
-Tests for collect-stage-params.py — cross-stage duplicate parameter handling.
+Tests for collect-stage-params.py
 
 Covers:
-  - Same param name, same group → emitted once with description merged
-  - Same param name, same group, identical descriptions → single description kept
-  - Same param name, same group, different descriptions → descriptions concatenated
-  - Same param name, different groups → ValueError raised
+  Existing behaviour:
+    - Same param name, same group → emitted once with description merged
+    - Same param name, same group, identical descriptions → single description kept
+    - Same param name, same group, different descriptions → descriptions concatenated
+    - Same param name, different groups → ValueError raised
+    - Duplicate across three stages → all descriptions merged
+
+  New behaviour (stageDisabled / stageCondition / Stage Selections):
+    - stageDisabled=true: stem is skipped, no params emitted
+    - stageDisabled vendor override: vendor can disable a core stage
+    - stageDisabled vendor re-enable: vendor can re-enable an opt-in stage
+    - stageCondition: propagated to group output
+    - stageCondition validation: dangling param reference → ValueError
+    - stageCondition validation: gate-only file (no parameterGroups) with valid refs → OK
+    - stageCondition validation: gate-only file with bad refs → ValueError
+    - Stage Selections priority group: appears first in output, params from all stages merged
+    - Stage Selections with stageDisabled=true stage: disabled stage's params not merged in
+    - PRIORITY_GROUPS ordering: non-priority groups follow in discovery order
 """
 
 import json
@@ -26,42 +40,60 @@ collect = collect_mod.collect
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _write_params_json(directory: Path, stem: str, groups: list) -> None:
-    """Write a minimal *.params.json file for a given stage stem."""
-    data = {'parameterGroups': groups}
+def _write_params_json(directory: Path, stem: str, groups: list,
+                       stage_disabled: bool = False,
+                       stage_condition: list | None = None) -> None:
+    """Write a *.params.json file for a given stage stem."""
+    data: dict = {
+        'stageId': stem,
+        'stageDisabled': stage_disabled,
+        'stageCondition': stage_condition or [],
+    }
+    if groups:
+        data['parameterGroups'] = groups
     (directory / f'{stem}.params.json').write_text(json.dumps(data))
+
+
+def _write_gate_only_json(directory: Path, stem: str,
+                           stage_condition: list,
+                           stage_disabled: bool = False) -> None:
+    """Write a gate-only params.json (no parameterGroups)."""
+    data = {
+        'stageId': stem,
+        'stageDisabled': stage_disabled,
+        'stageCondition': stage_condition,
+    }
+    (directory / f'{stem}.params.json').write_text(json.dumps(data))
+
+
+def _make_bool_param(name: str, default: bool = False, description: str = '') -> dict:
+    return {'name': name, 'type': 'boolean', 'default': default, 'description': description}
 
 
 def _make_param(name: str, description: str = '') -> dict:
     return {'name': name, 'type': 'string', 'default': '', 'description': description}
 
 
-def _make_group(name: str, params: list) -> dict:
-    return {'name': name, 'description': '', 'parameters': params}
+def _make_group(name: str, params: list, description: str = '') -> dict:
+    return {'name': name, 'description': description, 'parameters': params}
+
+
+def _collect(stage_dir: Path, vendor_dir: Path | None = None) -> dict:
+    return collect(
+        default_stages_dir=stage_dir,
+        vendor_scripts_dir=vendor_dir,
+        vendor_raw_base_url=None,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Existing cross-stage duplicate param tests
 # ---------------------------------------------------------------------------
 
 class TestCrossStageDuplicateParams(unittest.TestCase):
 
-    def _collect(self, stage_dir: Path) -> dict:
-        return collect(
-            default_stages_dir=stage_dir,
-            vendor_scripts_dir=None,
-            vendor_raw_base_url=None,
-        )
-
-    # ------------------------------------------------------------------
-    # Identical descriptions → keep single description
-    # ------------------------------------------------------------------
     def test_duplicate_same_group_identical_description(self):
-        """
-        TEMURIN_BUILD_REPO appears in two stages under the same group name
-        with the same description text. The collated output must contain it
-        exactly once with the original description unchanged.
-        """
+        """Same param, same group, identical description → emitted once, unchanged."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             shared_desc = 'Git repo for the Temurin build scripts.'
@@ -71,29 +103,16 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '02-build', [
                 _make_group('Source Control', [_make_param('TEMURIN_BUILD_REPO', shared_desc)])
             ])
+            result = _collect(d)
 
-            result = self._collect(d)
-
-        # Exactly one parameter named TEMURIN_BUILD_REPO in the output
         all_params = [p for g in result['groups'] for p in g['parameters']]
         matching = [p for p in all_params if p['name'] == 'TEMURIN_BUILD_REPO']
-        self.assertEqual(len(matching), 1, 'Expected exactly one TEMURIN_BUILD_REPO param')
-
-        # Description must be unchanged (not doubled)
+        self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]['description'], shared_desc)
-
-        # paramNames must list it once
         self.assertEqual(result['paramNames'].count('TEMURIN_BUILD_REPO'), 1)
 
-    # ------------------------------------------------------------------
-    # Different descriptions → concatenate with " / "
-    # ------------------------------------------------------------------
     def test_duplicate_same_group_different_descriptions(self):
-        """
-        TEMURIN_BUILD_REPO appears in two stages under the same group name
-        but with different description texts. The collated output must contain
-        it once and the description must be 'desc_a / desc_b'.
-        """
+        """Same param, same group, different descriptions → concatenated with ' / '."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             _write_params_json(d, '01-init', [
@@ -102,22 +121,15 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '02-build', [
                 _make_group('Source Control', [_make_param('TEMURIN_BUILD_REPO', 'Used during build.')])
             ])
-
-            result = self._collect(d)
+            result = _collect(d)
 
         all_params = [p for g in result['groups'] for p in g['parameters']]
         matching = [p for p in all_params if p['name'] == 'TEMURIN_BUILD_REPO']
-        self.assertEqual(len(matching), 1, 'Expected exactly one TEMURIN_BUILD_REPO param')
+        self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]['description'], 'Used during init. / Used during build.')
 
-    # ------------------------------------------------------------------
-    # Different groups → hard error
-    # ------------------------------------------------------------------
     def test_duplicate_different_groups_raises(self):
-        """
-        TEMURIN_BUILD_REPO appears in two stages under different group names.
-        collect() must raise a ValueError explaining the conflict.
-        """
+        """Same param under different groups → ValueError."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             _write_params_json(d, '01-init', [
@@ -126,22 +138,15 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '02-build', [
                 _make_group('Build Options', [_make_param('TEMURIN_BUILD_REPO', 'desc')])
             ])
-
             with self.assertRaises(ValueError) as ctx:
-                self._collect(d)
+                _collect(d)
 
         self.assertIn('TEMURIN_BUILD_REPO', str(ctx.exception))
         self.assertIn('Source Control', str(ctx.exception))
         self.assertIn('Build Options', str(ctx.exception))
 
-    # ------------------------------------------------------------------
-    # Duplicate with one empty description → use the non-empty one
-    # ------------------------------------------------------------------
     def test_duplicate_one_empty_description(self):
-        """
-        When one definition has an empty description and the other has text,
-        the merged description should be the non-empty text (no stray ' / ').
-        """
+        """One empty description → merged result is the non-empty text."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             _write_params_json(d, '01-init', [
@@ -150,22 +155,15 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '02-build', [
                 _make_group('Source Control', [_make_param('TEMURIN_BUILD_REPO', 'Non-empty description.')])
             ])
-
-            result = self._collect(d)
+            result = _collect(d)
 
         all_params = [p for g in result['groups'] for p in g['parameters']]
         matching = [p for p in all_params if p['name'] == 'TEMURIN_BUILD_REPO']
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]['description'], 'Non-empty description.')
 
-    # ------------------------------------------------------------------
-    # No duplicate → normal path unaffected
-    # ------------------------------------------------------------------
     def test_no_duplicate_unaffected(self):
-        """
-        Two stages with entirely distinct parameter names are not affected
-        by the duplicate-handling logic.
-        """
+        """Two stages with distinct param names are unaffected."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             _write_params_json(d, '01-init', [
@@ -174,22 +172,15 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '02-build', [
                 _make_group('Build Options', [_make_param('EXTRA_MAKE_OPTIONS', 'Extra make flags.')])
             ])
-
-            result = self._collect(d)
+            result = _collect(d)
 
         names = result['paramNames']
         self.assertIn('SCM_REF', names)
         self.assertIn('EXTRA_MAKE_OPTIONS', names)
         self.assertEqual(len(names), 2)
 
-    # ------------------------------------------------------------------
-    # Duplicate across more than two stages → all descriptions merged
-    # ------------------------------------------------------------------
     def test_duplicate_three_stages_different_descriptions(self):
-        """
-        Same param in three stages under the same group; descriptions
-        should accumulate: 'A / B / C'.
-        """
+        """Same param in three stages → descriptions accumulate as 'A / B / C'."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
             _write_params_json(d, '01-init', [
@@ -201,13 +192,316 @@ class TestCrossStageDuplicateParams(unittest.TestCase):
             _write_params_json(d, '03-test', [
                 _make_group('Source Control', [_make_param('TEMURIN_BUILD_REPO', 'C')])
             ])
-
-            result = self._collect(d)
+            result = _collect(d)
 
         all_params = [p for g in result['groups'] for p in g['parameters']]
         matching = [p for p in all_params if p['name'] == 'TEMURIN_BUILD_REPO']
         self.assertEqual(len(matching), 1)
         self.assertEqual(matching[0]['description'], 'A / B / C')
+
+
+# ---------------------------------------------------------------------------
+# stageDisabled tests
+# ---------------------------------------------------------------------------
+
+class TestStageDisabled(unittest.TestCase):
+
+    def test_disabled_stem_excluded(self):
+        """stageDisabled=true: no params or groups emitted for that stem."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '02-build', [
+                _make_group('Build Options', [_make_param('EXTRA_MAKE_OPTIONS', 'desc')])
+            ])
+            _write_params_json(d, '14-aqa-tests', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_TESTS', True, 'desc')])
+            ], stage_disabled=True)
+            result = _collect(d)
+
+        names = result['paramNames']
+        self.assertIn('EXTRA_MAKE_OPTIONS', names)
+        self.assertNotIn('RUN_TESTS', names, 'disabled stage param should not be emitted')
+        stage_ids = [g['stageId'] for g in result['groups']]
+        self.assertNotIn('14-aqa-tests', stage_ids)
+
+    def test_enabled_stem_included(self):
+        """stageDisabled=false (explicit): params are emitted normally."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '07-installer', [
+                _make_group('Stage Selections', [_make_bool_param('ENABLE_INSTALLERS', True, 'desc')])
+            ], stage_disabled=False)
+            result = _collect(d)
+
+        self.assertIn('ENABLE_INSTALLERS', result['paramNames'])
+
+    def test_vendor_can_disable_core_stage(self):
+        """Vendor override with stageDisabled=true suppresses a core stage's params."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            vendor = d / 'vendor'
+            vendor.mkdir()
+            # Core stage has params
+            _write_params_json(d, '16-publish', [
+                _make_group('Stage Selections', [_make_bool_param('PUBLISH_ARTIFACTS', False, 'desc')])
+            ])
+            # Vendor disables it
+            _write_params_json(vendor, '16-publish', [], stage_disabled=True)
+            result = _collect(d, vendor_dir=vendor)
+
+        self.assertNotIn('PUBLISH_ARTIFACTS', result['paramNames'])
+
+    def test_vendor_can_reenable_disabled_stage(self):
+        """Vendor override with stageDisabled=false re-enables a core opt-in stage."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            vendor = d / 'vendor'
+            vendor.mkdir()
+            # Core stage is disabled by default
+            _write_params_json(d, '20-reproducible-compare', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_REPRODUCIBLE_COMPARE', False, 'desc')])
+            ], stage_disabled=True)
+            # Vendor enables it
+            _write_params_json(vendor, '20-reproducible-compare', [], stage_disabled=False)
+            result = _collect(d, vendor_dir=vendor)
+
+        self.assertIn('RUN_REPRODUCIBLE_COMPARE', result['paramNames'])
+
+    def test_vendor_empty_parametergroups_does_not_wipe_defaults(self):
+        """
+        A vendor params.json with an empty parameterGroups list must NOT remove
+        the default stage's parameters.  The empty list means "nothing to add or
+        change" — all default groups and parameters pass through intact.
+
+        This mirrors the real-world Temurin pattern where vendor files like
+        20-reproducible-compare.params.json carry only metadata fields (stageId,
+        stageDisabled, stageCondition, description) and an empty parameterGroups,
+        because the stage needs no extra job parameters beyond the defaults.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            vendor = d / 'vendor'
+            vendor.mkdir()
+
+            # Core stage defines two params across two groups
+            _write_params_json(d, '20-reproducible-compare', [
+                _make_group('Stage Selections', [
+                    _make_bool_param('RUN_REPRODUCIBLE_COMPARE', False, 'Run repro compare.')
+                ]),
+                _make_group('Repro Options', [
+                    _make_param('REPRO_EXTRA_ARGS', 'Extra args for repro compare.')
+                ]),
+            ])
+
+            # Vendor override: metadata only, empty parameterGroups
+            _write_params_json(vendor, '20-reproducible-compare', [],
+                               stage_disabled=False, stage_condition=[])
+
+            result = _collect(d, vendor_dir=vendor)
+
+        # Both default params must survive unchanged
+        self.assertIn('RUN_REPRODUCIBLE_COMPARE', result['paramNames'],
+                      'default boolean param must not be wiped by empty vendor parameterGroups')
+        self.assertIn('REPRO_EXTRA_ARGS', result['paramNames'],
+                      'default string param must not be wiped by empty vendor parameterGroups')
+
+        # Both default groups must survive
+        group_names = [g['name'] for g in result['groups']]
+        self.assertIn('Stage Selections', group_names)
+        self.assertIn('Repro Options', group_names)
+
+        # The param values must be the defaults, not accidentally altered
+        all_params = {p['name']: p for g in result['groups'] for p in g['parameters']}
+        self.assertEqual(all_params['RUN_REPRODUCIBLE_COMPARE']['default'], False)
+        self.assertEqual(all_params['REPRO_EXTRA_ARGS']['default'], '')
+
+
+# ---------------------------------------------------------------------------
+# stageCondition tests
+# ---------------------------------------------------------------------------
+
+class TestStageCondition(unittest.TestCase):
+
+    def test_stage_condition_propagated_to_group(self):
+        """stageCondition is propagated to the emitted group."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # Owner of the referenced param
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'desc')])
+            ])
+            # Stage with a condition referencing SIGN_ARTIFACTS
+            _write_params_json(d, '06-post-sign', [
+                _make_group('Post Sign Options', [_make_param('POST_SIGN_KEY', 'desc')])
+            ], stage_condition=[{'param': 'SIGN_ARTIFACTS', 'value': True}])
+            result = _collect(d)
+
+        post_sign_groups = [g for g in result['groups'] if g['stageId'] == '06-post-sign']
+        self.assertTrue(len(post_sign_groups) > 0)
+        cond = post_sign_groups[0]['stageCondition']
+        self.assertEqual(len(cond), 1)
+        self.assertEqual(cond[0]['param'], 'SIGN_ARTIFACTS')
+        self.assertEqual(cond[0]['value'], True)
+
+    def test_dangling_stage_condition_raises(self):
+        """stageCondition referencing an unknown param → ValueError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '06-post-sign', [
+                _make_group('Options', [_make_param('POST_SIGN_KEY', 'desc')])
+            ], stage_condition=[{'param': 'NONEXISTENT_PARAM', 'value': True}])
+            with self.assertRaises(ValueError) as ctx:
+                _collect(d)
+
+        self.assertIn('NONEXISTENT_PARAM', str(ctx.exception))
+
+    def test_gate_only_file_valid_refs_ok(self):
+        """Gate-only params.json with valid stageCondition refs passes validation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # Define both referenced params
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'desc')])
+            ])
+            _write_params_json(d, '07-installer', [
+                _make_group('Stage Selections', [_make_bool_param('ENABLE_INSTALLERS', True, 'desc')])
+            ])
+            # Gate-only file for 08
+            _write_gate_only_json(d, '08-sign-installer', [
+                {'param': 'ENABLE_INSTALLERS', 'value': True},
+                {'param': 'SIGN_ARTIFACTS', 'value': True},
+            ])
+            result = _collect(d)  # should not raise
+
+        # Gate-only file emits no params, just ensures the conditions are tracked
+        self.assertIn('SIGN_ARTIFACTS', result['paramNames'])
+        self.assertIn('ENABLE_INSTALLERS', result['paramNames'])
+
+    def test_gate_only_file_bad_ref_raises(self):
+        """Gate-only file with a dangling stageCondition reference → ValueError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'desc')])
+            ])
+            _write_gate_only_json(d, '08-sign-installer', [
+                {'param': 'SIGN_ARTIFACTS', 'value': True},
+                {'param': 'MISSING_PARAM', 'value': True},
+            ])
+            with self.assertRaises(ValueError) as ctx:
+                _collect(d)
+
+        self.assertIn('MISSING_PARAM', str(ctx.exception))
+
+
+# ---------------------------------------------------------------------------
+# Stage Selections priority group tests
+# ---------------------------------------------------------------------------
+
+class TestStageSelectionsGroup(unittest.TestCase):
+
+    def test_stage_selections_first(self):
+        """Stage Selections group is placed first in the output regardless of stem order."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            # 02-build comes alphabetically before any stage-gate file
+            _write_params_json(d, '02-build', [
+                _make_group('Build Options', [_make_param('EXTRA_MAKE_OPTIONS', 'desc')])
+            ])
+            _write_params_json(d, '14-aqa-tests', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_TESTS', True, 'desc')])
+            ])
+            result = _collect(d)
+
+        self.assertEqual(result['groups'][0]['name'], 'Stage Selections')
+
+    def test_stage_selections_merged_from_multiple_stems(self):
+        """Stage Selections params from multiple stems are merged into one group."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'sign desc')])
+            ])
+            _write_params_json(d, '07-installer', [
+                _make_group('Stage Selections', [_make_bool_param('ENABLE_INSTALLERS', True, 'inst desc')])
+            ])
+            _write_params_json(d, '14-aqa-tests', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_TESTS', True, 'test desc')])
+            ])
+            result = _collect(d)
+
+        sel_groups = [g for g in result['groups'] if g['name'] == 'Stage Selections']
+        self.assertEqual(len(sel_groups), 1, 'All Stage Selections should be merged into one group')
+        param_names = [p['name'] for p in sel_groups[0]['parameters']]
+        self.assertIn('SIGN_ARTIFACTS', param_names)
+        self.assertIn('ENABLE_INSTALLERS', param_names)
+        self.assertIn('RUN_TESTS', param_names)
+
+    def test_disabled_stage_params_not_in_stage_selections(self):
+        """Params from a disabled stage are NOT merged into Stage Selections."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'desc')])
+            ])
+            _write_params_json(d, '16-publish', [
+                _make_group('Stage Selections', [_make_bool_param('PUBLISH_ARTIFACTS', False, 'desc')])
+            ], stage_disabled=True)
+            result = _collect(d)
+
+        sel = [g for g in result['groups'] if g['name'] == 'Stage Selections']
+        param_names = [p['name'] for p in sel[0]['parameters']] if sel else []
+        self.assertIn('SIGN_ARTIFACTS', param_names)
+        self.assertNotIn('PUBLISH_ARTIFACTS', param_names)
+
+    def test_non_priority_groups_follow_in_discovery_order(self):
+        """Non-priority groups appear after Stage Selections in discovery order."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '02-build', [
+                _make_group('Build Options', [_make_param('EXTRA_MAKE_OPTIONS', 'desc')])
+            ])
+            _write_params_json(d, '14-aqa-tests', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_TESTS', True, 'desc')]),
+                _make_group('AQA Options', [_make_param('AQA_REF', 'desc')]),
+            ])
+            result = _collect(d)
+
+        group_names = [g['name'] for g in result['groups']]
+        self.assertEqual(group_names[0], 'Stage Selections')
+        self.assertIn('Build Options', group_names)
+        self.assertIn('AQA Options', group_names)
+        # Stage Selections must come before everything else
+        idx_sel = group_names.index('Stage Selections')
+        for name in ['Build Options', 'AQA Options']:
+            self.assertLess(idx_sel, group_names.index(name))
+
+    def test_real_core_stages_collate_correctly(self):
+        """Integration test: real scripts/stages directory produces expected output."""
+        stages_dir = Path(__file__).parent.parent / 'scripts' / 'stages'
+        if not stages_dir.is_dir():
+            self.skipTest('scripts/stages not found')
+
+        result = collect(
+            default_stages_dir=stages_dir,
+            vendor_scripts_dir=None,
+            vendor_raw_base_url=None,
+        )
+
+        # All six gate booleans must be present
+        for param in ('SIGN_ARTIFACTS', 'ENABLE_INSTALLERS', 'RUN_TESTS',
+                      'ENABLE_TCK', 'PUBLISH_ARTIFACTS', 'RUN_REPRODUCIBLE_COMPARE'):
+            self.assertIn(param, result['paramNames'], f'{param} missing from paramNames')
+
+        # Stage Selections must be the first group
+        self.assertTrue(len(result['groups']) > 0)
+        self.assertEqual(result['groups'][0]['name'], 'Stage Selections')
+
+        # All six gate booleans must be in the Stage Selections group
+        sel_params = {p['name'] for p in result['groups'][0]['parameters']}
+        for param in ('SIGN_ARTIFACTS', 'ENABLE_INSTALLERS', 'RUN_TESTS',
+                      'ENABLE_TCK', 'PUBLISH_ARTIFACTS', 'RUN_REPRODUCIBLE_COMPARE'):
+            self.assertIn(param, sel_params, f'{param} not in Stage Selections group')
 
 
 if __name__ == '__main__':

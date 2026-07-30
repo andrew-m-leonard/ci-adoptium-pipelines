@@ -309,34 +309,20 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'JDK version number — fixed for this launch job')
             stringParam('GROUP_UID', '',
                 'Group identifier for this launch run. Auto-generated if empty.')
-
             choiceParam('PLATFORMS', ['all'] + platforms,
                 'Select platform to build, or "all" for all available platforms')
-
             stringParam('BUILD_ARGS', defaultBuildArgs,
                 'Additional build arguments passed to the build stage')
             choiceParam('RELEASE_TYPE',
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY = default nightly, WEEKLY = EA beta, RELEASE = official)')
-            booleanParam('RUN_TESTS',
-                defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : false,
-                'Run test stages (smoke tests, AQA, TCK)')
-            booleanParam('ENABLE_INSTALLERS',
-                defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
-                'Build platform-specific installers')
-            booleanParam('SIGN_ARTIFACTS',
-                defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
-                'Sign artifacts and installers')
-            booleanParam('PUBLISH_ARTIFACTS',
-                defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
-                'Publish artifacts to release repository')
-            booleanParam('RUN_REPRODUCIBLE_COMPARE',
-                defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
-                'Run reproducible build comparison against a production Adoptium binary')
 
-            // Collated stage parameters — native separator{} DSL closure inline
-            // with each group's params so ordering is natural, no configure{} needed.
+            // ── Collated stage parameters ─────────────────────────────────────────
+            // Stage-gate booleans (RUN_TESTS, SIGN_ARTIFACTS, etc.) and all other
+            // stage-specific params are emitted here from the collated params JSON.
+            // Groups where stageDisabled=true are skipped — no parameters generated.
             collatedParamGroups.each { group ->
+                if (group.stageDisabled == true) return
                 def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
                 def stageHeader = group.stageIds.size() == 1
                     ? "stage: ${group.stageIds[0]}"

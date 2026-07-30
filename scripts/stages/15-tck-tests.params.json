@@ -1,0 +1,20 @@
+{
+  "stageId": "15-tck-tests",
+  "stageDisabled": false,
+  "stageCondition": [],
+  "description": "Parameters consumed by the TCK test stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/15-tck-tests.params.json in the config repo.",
+  "parameterGroups": [
+    {
+      "name": "Stage Selections",
+      "description": "Boolean flags that control which pipeline stages are enabled. All stage-gate parameters are collected here so operators can see and adjust the full execution plan in one place.",
+      "parameters": [
+        {
+          "name": "ENABLE_TCK",
+          "type": "boolean",
+          "default": false,
+          "description": "Run TCK tests. Only applies to Temurin variant builds on release or weekly release types. Disabled by default — enable for official certification runs."
+        }
+      ]
+    }
+  ]
+}

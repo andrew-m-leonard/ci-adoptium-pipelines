@@ -97,28 +97,27 @@ def buildForwardedParams(List orderedGroups) {
     // renders parameters in the correct grouped sequence.
 
     // ── Build Configuration separator ────────────────────────────────────────
+    // Only the seven true global params belong here. Stage-gate booleans
+    // (RUN_TESTS, SIGN_ARTIFACTS, etc.) are forwarded below via the collated
+    // stage params loop — they are now defined in their stage params.json files.
     def fwd = [
         [$class: 'jenkins.plugins.parameter_separator.ParameterSeparatorValue',
          name: '__sep_build_configuration', sectionHeader: 'Build Configuration'],
         string(name: 'JDK_VERSION',        value: env.JDK_VERSION),
         string(name: 'TARGET_OS',          value: params.TARGET_OS          ?: ''),
         string(name: 'ARCHITECTURE',       value: params.ARCHITECTURE       ?: ''),
+        string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
         string(name: 'GROUP_UID',          value: env.GROUP_UID),
         string(name: 'INITIALIZE_LABEL',   value: params.INITIALIZE_LABEL   ?: ''),
         string(name: 'ACTIVE_NODE_TIMEOUT',value: params.ACTIVE_NODE_TIMEOUT ?: ''),
-        string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
-        booleanParam(name: 'RUN_TESTS',               value: params.RUN_TESTS),
-        booleanParam(name: 'SIGN_ARTIFACTS',          value: params.SIGN_ARTIFACTS),
-        booleanParam(name: 'PUBLISH_ARTIFACTS',       value: params.PUBLISH_ARTIFACTS),
-        booleanParam(name: 'ENABLE_INSTALLERS',       value: params.ENABLE_INSTALLERS),
-        booleanParam(name: 'ENABLE_TCK',              value: params.ENABLE_TCK ?: false),
-        booleanParam(name: 'RUN_REPRODUCIBLE_COMPARE',value: params.RUN_REPRODUCIBLE_COMPARE),
         booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE ?: true),
     ]
 
     // ── Collated stage params ─────────────────────────────────────────────────
     // Separator first, then param values — matches declaration order in the build job.
+    // Groups where stageDisabled=true are skipped (no params forwarded for them).
     orderedGroups.each { grp ->
+        if (grp.stageDisabled == true) return
         def stageLabel  = grp.stageIds.join('_').replaceAll(/\W+/, '_')
         def stageHeader = grp.stageIds.size() == 1
             ? "stage: ${grp.stageIds[0]}"

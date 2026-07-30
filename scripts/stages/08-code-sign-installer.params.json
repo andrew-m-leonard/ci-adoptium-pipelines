@@ -1,0 +1,9 @@
+{
+  "stageId": "08-code-sign-installer",
+  "stageDisabled": false,
+  "stageCondition": [
+    { "param": "ENABLE_INSTALLERS", "value": true },
+    { "param": "SIGN_ARTIFACTS",    "value": true }
+  ],
+  "description": "Gate-only params.json for the code-sign-installer stage. This stage has no parameters of its own — it runs only when both ENABLE_INSTALLERS and SIGN_ARTIFACTS are true. Both parameters are defined in their respective owning stages (07-installer and 03-internal-code-sign) and collected here via stageCondition."
+}

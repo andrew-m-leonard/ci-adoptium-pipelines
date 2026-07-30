@@ -128,24 +128,29 @@ For each stage stem (e.g. `02-build`), `StageScriptRunner` searches in order:
 
 ## Pipeline Stages
 
-| # | Stage | Script | Condition |
-|---|---|---|---|
-| — | Initialize | _(ConfigHelper)_ | Always |
-| 02 | Build | `02-build.sh` | Always |
-| 03 | Internal Code Sign | `03-internal-code-sign.sh` | macOS/Windows + JDK ≥ 11, signing enabled |
-| 04 | Assemble Images | `04-assemble-images.sh` | macOS/Windows + JDK ≥ 11, signing enabled |
-| 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | Signing enabled |
-| 07 | Build Installer | `07-installer.sh` | Installers enabled |
-| 08 | Code Sign Installer | `08-code-sign-installer.sh` | Installers + signing enabled |
-| 09 | SBOM Sign | `09-sbom-sign.sh` | `--create-sbom` in build args, signing enabled |
-| 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | Signing enabled, non-PR |
-| 11 | Verify Signing | `11-verify-signing.sh` | Signing enabled, non-PR |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | `--create-sbom` in build args (vendor impl required) |
-| 13 | Smoke Tests | `13-smoke-tests.sh` | Tests enabled |
-| 14 | AQA Tests | `14-aqa-tests.sh` | Tests enabled, smoke tests passed |
-| 15 | TCK Tests | `15-tck-tests.sh` | Temurin, TCK enabled, smoke tests passed |
-| 16 | Publish Artifacts | `16-publish.sh` | Publish enabled |
-| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `REPRODUCIBLE_COMPARE_BUILD=true` + `SCM_REF` set (vendor impl required) |
+Stage execution is controlled by two mechanisms:
+
+- **`stageDisabled`** (in `scripts/stages/NN-stem.params.json`): when `true`, the stage is entirely skipped and its parameters are excluded from the Jenkins job UI. Vendors can override this per stage in their config repo. See [`docs/STAGE_DEFINITION_REFERENCE.md`](docs/STAGE_DEFINITION_REFERENCE.md).
+- **`stageCondition`**: a list of `{ param, value }` pairs that must all be satisfied at runtime for the stage to execute. Evaluated by `stageConditionMet()` in `Jenkinsfile.declarative` and `_stage_condition_met()` in `run-pipeline.py`.
+
+| # | Stage | Script | Owns parameter | stageCondition gates on | stageDisabled default |
+|---|---|---|---|---|---|
+| — | Initialize | _(ConfigHelper)_ | — | always | — |
+| 02 | Build | `02-build.sh` | — | always | false |
+| 03 | Internal Code Sign | `03-internal-code-sign.sh` | `SIGN_ARTIFACTS` | `SIGN_ARTIFACTS=true`, macOS/Win, JDK≥11 | false |
+| 04 | Assemble Images | `04-assemble-images.sh` | — | `SIGN_ARTIFACTS=true`, macOS/Win, JDK≥11 | false |
+| 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | — | `SIGN_ARTIFACTS=true` | false |
+| 07 | Build Installer | `07-installer.sh` | `ENABLE_INSTALLERS` | `ENABLE_INSTALLERS=true` | false |
+| 08 | Code Sign Installer | `08-code-sign-installer.sh` | — | `ENABLE_INSTALLERS=true`, `SIGN_ARTIFACTS=true` | false |
+| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `--create-sbom` in build args | false |
+| 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | false |
+| 11 | Verify Signing | `11-verify-signing.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | false |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `--create-sbom` in build args (vendor impl required) | false |
+| 13 | Smoke Tests | `13-smoke-tests.sh` | — | `RUN_TESTS=true`, build succeeded | false |
+| 14 | AQA Tests | `14-aqa-tests.sh` | `RUN_TESTS` | `RUN_TESTS=true`, smoke tests passed | false |
+| 15 | TCK Tests | `15-tck-tests.sh` | `ENABLE_TCK` | `ENABLE_TCK=true`, Temurin, smoke tests passed | false |
+| 16 | Publish Artifacts | `16-publish.sh` | `PUBLISH_ARTIFACTS` | `PUBLISH_ARTIFACTS=true` | false |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `RUN_REPRODUCIBLE_COMPARE` | `RUN_REPRODUCIBLE_COMPARE=true`, `SCM_REF` set | false |
 
 Each stage calls `initializeStage()` which: cleans the workspace, checks out this repo, clones the config repo (sparse), initialises/reuses `BUILD_UID`, validates prerequisites, and copies required artifacts from the current build.
 

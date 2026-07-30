@@ -141,26 +141,26 @@ The local runner (`run-pipeline.py`) mirrors this: artifacts are copied into the
 
 ### Per-Stage Summary
 
-| # | Stage | Script | Prerequisites | Key Outputs |
-|---|---|---|---|---|
-| 01 | Initialize | *(ConfigHelper.groovy + load-json-config.py + load-jenkins-json-config.py)* | — | `pipeline-config.json`, `jenkins-config.json` |
-| 02 | Build | `02-build.sh` | Initialize | JDK tarballs/zips, metadata, SBOMs |
-| 03 | Internal Code Sign | `03-internal-code-sign.sh` | Build | Signed JMODs (macOS/Windows, JDK ≥ 11) |
-| 04 | Assemble Images | `04-assemble-images.sh` | Internal Code Sign | Assembled JDK image |
-| 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | Assemble Images or Build | Code-signed executables |
-| 07 | Build Installer | `07-installer.sh` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
-| 08 | Code Sign Installer | `08-code-sign-installer.sh` | Build Installer | Signed + notarized installer packages |
-| 09 | SBOM Sign | `09-sbom-sign.sh` | Post-Build Code Sign | JSF-signed SBOM |
-| 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | SBOM Sign | `.sig` / `.asc` GPG signatures |
-| 11 | Verify Signing | `11-verify-signing.sh` | Digital Artifact Sign | Verification report |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | Build | SBOM validation report (vendor impl required) |
-| 13 | Smoke Tests | `13-smoke-tests.sh` | Build | Test results (UNSTABLE on failure) |
-| 14 | AQA Tests | `14-aqa-tests.sh` | Smoke Tests | AQA test results |
-| 15 | TCK Tests | `15-tck-tests.sh` | Smoke Tests | TCK test results |
-| 16 | Publish Artifacts | `16-publish.sh` | Build | Publication confirmation |
-| 20 | Reproducible Compare | `20-reproducible-compare.sh` | Build | `comparison-report.txt`, `reprotest.diff` (vendor impl required) |
+Stage execution is controlled by `stageCondition` entries in each stage's `params.json` sidecar and evaluated at runtime by `stageConditionMet()`. See [`STAGE_DEFINITION_REFERENCE.md`](./STAGE_DEFINITION_REFERENCE.md) for the full schema.
 
-Conditional stages only run when their guard condition is met (e.g. `PUBLISH_ARTIFACTS=true`, signing enabled, `REPRODUCIBLE_COMPARE_BUILD=true`). See [`CODE_CONFIG_SEPARATION.md`](./CODE_CONFIG_SEPARATION.md) for the full config schema.
+| # | Stage | Script | Owns parameter | stageCondition gates on | Prerequisites | Key Outputs |
+|---|---|---|---|---|---|---|
+| 01 | Initialize | *(ConfigHelper + load-json-config.py)* | — | always | — | `pipeline-config.json`, `jenkins-config.json` |
+| 02 | Build | `02-build.sh` | — | always | Initialize | JDK tarballs/zips, metadata, SBOMs |
+| 03 | Internal Code Sign | `03-internal-code-sign.sh` | `SIGN_ARTIFACTS` | `SIGN_ARTIFACTS=true`, macOS/Win, JDK≥11 | Build | Signed JMODs |
+| 04 | Assemble Images | `04-assemble-images.sh` | — | `SIGN_ARTIFACTS=true`, macOS/Win, JDK≥11 | Internal Code Sign | Assembled JDK image |
+| 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | — | `SIGN_ARTIFACTS=true` | Assemble Images or Build | Code-signed executables |
+| 07 | Build Installer | `07-installer.sh` | `ENABLE_INSTALLERS` | `ENABLE_INSTALLERS=true` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
+| 08 | Code Sign Installer | `08-code-sign-installer.sh` | — | `ENABLE_INSTALLERS=true`, `SIGN_ARTIFACTS=true` | Build Installer | Signed + notarized installers |
+| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `--create-sbom` | Post-Build Code Sign | JSF-signed SBOM |
+| 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | SBOM Sign | `.sig` / `.asc` GPG signatures |
+| 11 | Verify Signing | `11-verify-signing.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | Digital Artifact Sign | Verification report |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `--create-sbom` in build args | Build | SBOM validation report |
+| 13 | Smoke Tests | `13-smoke-tests.sh` | — | `RUN_TESTS=true`, build succeeded | Build | Test results |
+| 14 | AQA Tests | `14-aqa-tests.sh` | `RUN_TESTS` | `RUN_TESTS=true`, smoke tests passed | Smoke Tests | AQA test results |
+| 15 | TCK Tests | `15-tck-tests.sh` | `ENABLE_TCK` | `ENABLE_TCK=true`, Temurin variant, smoke tests passed | Smoke Tests | TCK test results |
+| 16 | Publish Artifacts | `16-publish.sh` | `PUBLISH_ARTIFACTS` | `PUBLISH_ARTIFACTS=true` | Build | Publication confirmation |
+| 20 | Reproducible Compare | `20-reproducible-compare.sh` | `RUN_REPRODUCIBLE_COMPARE` | `RUN_REPRODUCIBLE_COMPARE=true`, `SCM_REF` set | Build | `comparison-report.txt`, `reprotest.diff` |
 
 ## Example: Build Stage
 

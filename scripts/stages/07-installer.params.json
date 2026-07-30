@@ -1,0 +1,20 @@
+{
+  "stageId": "07-installer",
+  "stageDisabled": false,
+  "stageCondition": [],
+  "description": "Parameters consumed by the installer build stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/07-installer.params.json in the config repo.",
+  "parameterGroups": [
+    {
+      "name": "Stage Selections",
+      "description": "Boolean flags that control which pipeline stages are enabled. All stage-gate parameters are collected here so operators can see and adjust the full execution plan in one place.",
+      "parameters": [
+        {
+          "name": "ENABLE_INSTALLERS",
+          "type": "boolean",
+          "default": true,
+          "description": "Build platform-specific installer packages (.msi on Windows, .pkg on macOS, .deb/.rpm on Linux). Enabled by default. Set to false for archive-only builds that do not require installer packages."
+        }
+      ]
+    }
+  ]
+}

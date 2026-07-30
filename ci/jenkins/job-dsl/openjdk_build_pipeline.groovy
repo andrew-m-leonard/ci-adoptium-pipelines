@@ -180,6 +180,9 @@ pipelineJob(jobName) {
             'Target operating system — fixed at job-generation time')
         stringParam('ARCHITECTURE', architecture,
             'Target CPU architecture — fixed at job-generation time')
+        choiceParam('RELEASE_TYPE',
+            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
+            'Type of release build')
         stringParam('GROUP_UID', '',
             'Group identifier linking all platform builds from the same launch.')
         stringParam('INITIALIZE_LABEL', initializeLabel,
@@ -187,35 +190,16 @@ pipelineJob(jobName) {
         stringParam('ACTIVE_NODE_TIMEOUT',
             (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
             'Minutes to wait for an active agent before failing.')
-        choiceParam('RELEASE_TYPE',
-            ['NIGHTLY', 'WEEKLY', 'RELEASE'],
-            'Type of release build')
-        booleanParam('RUN_TESTS',
-            defaultParams?.RUN_TESTS != null ? defaultParams.RUN_TESTS : true,
-            'Run test stages (smoke tests, AQA, TCK)')
-        booleanParam('SIGN_ARTIFACTS',
-            defaultParams?.SIGN_ARTIFACTS != null ? defaultParams.SIGN_ARTIFACTS : false,
-            'Sign artifacts and installers')
-        booleanParam('PUBLISH_ARTIFACTS',
-            defaultParams?.PUBLISH_ARTIFACTS != null ? defaultParams.PUBLISH_ARTIFACTS : false,
-            'Publish artifacts to release repository')
-        booleanParam('ENABLE_INSTALLERS',
-            defaultParams?.ENABLE_INSTALLERS != null ? defaultParams.ENABLE_INSTALLERS : true,
-            'Build platform-specific installers')
-        booleanParam('ENABLE_TCK',
-            false,
-            'Run TCK tests (Temurin only, release/weekly builds)')
-        booleanParam('RUN_REPRODUCIBLE_COMPARE',
-            defaultParams?.RUN_REPRODUCIBLE_COMPARE != null ? defaultParams.RUN_REPRODUCIBLE_COMPARE : false,
-            'Run reproducible build comparison against a production Adoptium binary')
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
 
         // ── Collated stage parameters ─────────────────────────────────────────
-        // Separator immediately before each group's params — native separator{}
-        // DSL closure registered by the parameter-separator plugin.
+        // Stage-gate booleans (RUN_TESTS, SIGN_ARTIFACTS, etc.) and all other
+        // stage-specific params are emitted here from the collated params JSON.
+        // Groups where stageDisabled=true are skipped — no parameters generated.
         collatedParamGroups.each { group ->
+            if (group.stageDisabled == true) return
             def stageLabel  = group.stageIds.join('_').replaceAll(/\W+/, '_')
             def stageHeader = group.stageIds.size() == 1
                 ? "stage: ${group.stageIds[0]}"

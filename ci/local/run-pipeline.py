@@ -139,7 +139,8 @@ class PipelineRunner:
     # Define stage order
     STAGES = ['initialize', 'build', 'validate-sbom', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
 
-    def __init__(self, args, stage_params: dict | None = None):
+    def __init__(self, args, stage_params: dict | None = None,
+                 collated: dict | None = None):
         self.args = args
         self.script_dir = Path(__file__).parent.parent.parent.resolve()  # ci-adoptium-pipelines root
 
@@ -147,6 +148,19 @@ class PipelineRunner:
         # scripts/stages/*.params.json + vendor-scripts/*.params.json.
         # Injected into every stage environment via _stage_env().
         self._stage_param_values: dict[str, str] = stage_params or {}
+
+        # Stage metadata maps derived from the collated output.
+        # _stage_disabled:    stageId → bool   (stageDisabled field)
+        # _stage_conditions:  stageId → list of { param, value } dicts
+        self._stage_disabled:    dict[str, bool]        = {}
+        self._stage_conditions:  dict[str, list[dict]]  = {}
+        if collated:
+            self._load_stage_metadata(collated)
+
+        # StageResolver is initialised lazily after stage_initialize() has
+        # cloned the config repo.  _make_resolver() is called at the start
+        # of each _run_stage() call to ensure it is always up-to-date.
+        self._resolver: StageResolver | None = None
 
         # Initialize workspace manager
         pipeline_workspace = Path(args.workspace).expanduser().resolve()
@@ -160,11 +174,6 @@ class PipelineRunner:
         self.workspace = self.pipeline_workspace
         self.config_file = self.workspace_mgr.config_file
         self.build_number = args.build_number or f"local-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
-        # StageResolver is initialised lazily after stage_initialize() has
-        # cloned the config repo.  _make_resolver() is called at the start
-        # of each _run_stage() call to ensure it is always up-to-date.
-        self._resolver: StageResolver | None = None
 
         # Validate reproducible compare parameters
         if args.compare_build and not args.scm_ref:
@@ -184,6 +193,47 @@ class PipelineRunner:
             print(f"   Will run: {', '.join(self.stages_to_run)}")
         else:
             self.stages_to_run = self.STAGES.copy()
+
+    def _load_stage_metadata(self, collated: dict) -> None:
+        """Extract stageDisabled and stageCondition maps from the collated output."""
+        for grp in collated.get('groups', []):
+            stage_id = grp.get('stageId', '')
+            if not stage_id:
+                continue
+            # stageDisabled — first group seen per stageId wins
+            if stage_id not in self._stage_disabled:
+                self._stage_disabled[stage_id] = bool(grp.get('stageDisabled', False))
+            # stageCondition — merge across groups sharing the same stageId
+            conds = grp.get('stageCondition', [])
+            if conds:
+                existing = self._stage_conditions.get(stage_id, [])
+                seen_params = {c['param'] for c in existing}
+                merged = existing + [c for c in conds if c['param'] not in seen_params]
+                self._stage_conditions[stage_id] = merged
+
+    def _stage_condition_met(self, stage_id: str) -> bool:
+        """
+        Return True if all stageCondition entries for stage_id are satisfied,
+        or if no conditions are defined (unconditional stage).
+
+        Checks _stage_param_values (explicit CLI overrides) first, then the
+        process environment.  Value comparison is string-based to match the
+        Jenkins behaviour where booleans travel as 'true'/'false' strings.
+        """
+        if self._stage_disabled.get(stage_id, False):
+            print(f"  ↳ [{stage_id}] stageDisabled=true — skipping")
+            return False
+        conditions = self._stage_conditions.get(stage_id, [])
+        for cond in conditions:
+            param_name = cond['param']
+            expected   = str(cond['value']).lower()
+            actual     = str(
+                self._stage_param_values.get(param_name, os.environ.get(param_name, ''))
+            ).lower()
+            if actual != expected:
+                print(f"  ↳ [{stage_id}] skipped: {param_name}={actual!r} (need {expected!r})")
+                return False
+        return True
 
     def _make_resolver(self) -> StageResolver:
         """
@@ -368,20 +418,20 @@ class PipelineRunner:
                 self._run_stage('Validate SBOM', '12-validate-sbom', 'pipeline-config.json,*sbom*.json',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')})
 
-            if 'sign' in self.stages_to_run:
+            if 'sign' in self.stages_to_run and self._stage_condition_met('03-internal-code-sign'):
                 self._run_stage('Post-Build Code Sign', '06-post-build-code-sign',
                                 'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            if 'installer' in self.stages_to_run:
+            if 'installer' in self.stages_to_run and self._stage_condition_met('07-installer'):
                 self._run_stage('Build Installer', '07-installer',
                                 'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            if 'smoke-tests' in self.stages_to_run:
+            if 'smoke-tests' in self.stages_to_run and self._stage_condition_met('14-aqa-tests'):
                 self._run_stage('Smoke Tests', '13-smoke-tests',
                                 'pipeline-config.json,*.tar.gz,*.zip',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')})
 
-            if 'reproducible-compare' in self.stages_to_run:
+            if 'reproducible-compare' in self.stages_to_run and self._stage_condition_met('20-reproducible-compare'):
                 release_type = (self.args.release_type or 'NIGHTLY').upper()
                 self._run_stage('Reproducible Compare', '20-reproducible-compare',
                                 'pipeline-config.json,*.tar.gz,*.zip',
@@ -655,8 +705,8 @@ Examples:
     # -----------------------------------------------------------------------
 
     # Create a minimal runner just to drive the Initialize stage.
-    # stage_params is empty at this point — extra_tokens are not yet injected.
-    runner = PipelineRunner(args, stage_params={})
+    # stage_params and collated are empty at this point — extra_tokens are not yet injected.
+    runner = PipelineRunner(args, stage_params={}, collated=None)
 
     # Run Initialize if it is in scope (i.e. not skipping past it)
     if not args.start_from_stage or args.start_from_stage == 'initialize':
@@ -669,6 +719,9 @@ Examples:
     # Collate stage params now that vendor-scripts is available
     vendor_dir = runner.workspace / 'config-repo' / 'vendor-scripts'
     collated   = _collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None)
+
+    # Load stage metadata (disabled flags, conditions) from the collated output
+    runner._load_stage_metadata(collated)
 
     # -----------------------------------------------------------------------
     # Phase 3: validate the extra tokens against the collated stage params.
@@ -690,6 +743,17 @@ Examples:
         for name, value in stage_params.items():
             print(f"  {name} = {value!r}")
         print()
+
+    # Map the legacy --no-tests / --no-installers / --no-signer flags into
+    # stage_params so they route through the unified stageCondition path.
+    # setdefault preserves any explicit --run-tests / --enable-installers value
+    # the user may have passed as a collated stage param token.
+    if not args.enable_tests:
+        stage_params.setdefault('RUN_TESTS', 'false')
+    if not args.enable_installers:
+        stage_params.setdefault('ENABLE_INSTALLERS', 'false')
+    if not args.enable_signer:
+        stage_params.setdefault('SIGN_ARTIFACTS', 'false')
 
     # Also map the fixed git-ref args into stage_params under their canonical
     # UPPER_SNAKE_CASE names so stage scripts receive them consistently.
