@@ -92,22 +92,23 @@ def collateAndMergeGroups() {
  * build sidebar.
  *
  * @param orderedGroups  output of collateAndMergeGroups()
+ * @param platformCfg    the platform entry from buildConfigurations (provides arch and os)
  */
-def buildForwardedParams(List orderedGroups) {
+def buildForwardedParams(List orderedGroups, Map platformCfg) {
     // Order must exactly match the parameter declaration order in
     // openjdk_build_pipeline.groovy so that the triggered build's sidebar
     // renders parameters in the correct grouped sequence.
 
     // ── Build Configuration separator ────────────────────────────────────────
-    // Only the seven true global params belong here. Stage-gate booleans
-    // (RUN_TESTS, SIGN_ARTIFACTS, etc.) are forwarded below via the collated
-    // stage params loop — they are now defined in their stage params.json files.
+    // TARGET_OS and ARCHITECTURE are resolved from the platform config entry —
+    // they are not parameters on the launch job and must never be read from
+    // params (which would produce an empty string and break ConfigHelper).
     def fwd = [
         [$class: 'jenkins.plugins.parameter_separator.ParameterSeparatorValue',
          name: '__sep_build_configuration', sectionHeader: 'Build Configuration'],
         string(name: 'JDK_VERSION',        value: env.JDK_VERSION),
-        string(name: 'TARGET_OS',          value: params.TARGET_OS          ?: ''),
-        string(name: 'ARCHITECTURE',       value: params.ARCHITECTURE       ?: ''),
+        string(name: 'TARGET_OS',          value: platformCfg.os),
+        string(name: 'ARCHITECTURE',       value: platformCfg.arch),
         string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
         string(name: 'GROUP_UID',          value: env.GROUP_UID),
         string(name: 'INITIALIZE_LABEL',   value: params.INITIALIZE_LABEL   ?: ''),
@@ -306,9 +307,12 @@ pipeline {
                         def cfg     = versionConfig.buildConfigurations[platform]
                         def jobName = "/Build_openjdk/Build_openjdk${env.JDK_VERSION}_${cfg?.variant ?: 'temurin'}_${cfg?.arch ?: platform}_${cfg?.os ?: platform}"
 
+                        // Capture cfg in a local variable so the closure does not
+                        // capture the loop variable (Groovy late-binding gotcha).
+                        def platformCfg = cfg
                         buildJobs[platform] = {
                             stage("Build ${platform}") {
-                                def fwd = buildForwardedParams(orderedGroups)
+                                def fwd = buildForwardedParams(orderedGroups, platformCfg)
                                 def result = build(
                                     job:        jobName,
                                     parameters: fwd,
