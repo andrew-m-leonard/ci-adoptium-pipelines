@@ -109,14 +109,17 @@ def rawGroups = new JsonSlurper().parseText(collatedParamsJson).groups ?: []
 def mergedGroupMap = [:] as LinkedHashMap
 rawGroups.each { grp ->
     def gname = grp.name
+    // stageIds list is already present on merged priority groups (e.g. "Stage Selections");
+    // non-priority groups carry a scalar stageId — normalise to a list in both cases.
+    def incomingIds = grp.stageIds instanceof List ? grp.stageIds : [grp.stageId]
     if (mergedGroupMap.containsKey(gname)) {
-        mergedGroupMap[gname].stageIds << grp.stageId
+        incomingIds.each { id -> if (id && !mergedGroupMap[gname].stageIds.contains(id)) mergedGroupMap[gname].stageIds << id }
         mergedGroupMap[gname].parameters.addAll(grp.parameters ?: [])
     } else {
         mergedGroupMap[gname] = [
             name:        gname,
             description: grp.description ?: '',
-            stageIds:    [grp.stageId],
+            stageIds:    new ArrayList(incomingIds),
             parameters:  new ArrayList(grp.parameters ?: [])
         ]
     }

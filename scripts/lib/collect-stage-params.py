@@ -39,7 +39,8 @@ Output JSON (written to --output):
       {
         "name":           "Stage Selections",
         "description":    "...",
-        "stageId":        "14-aqa-tests",
+        "stageId":        "03-internal-code-sign",
+        "stageIds":       ["03-internal-code-sign", "07-installer", "14-aqa-tests", ...],
         "stageDisabled":  false,
         "stageCondition": [],
         "parameters": [
@@ -51,6 +52,11 @@ Output JSON (written to --output):
     ],
     "paramNames": ["RUN_TESTS", "AQA_REF", ...]
   }
+
+  Note: Priority groups (e.g. "Stage Selections") are merged from all contributing
+  stage stems and carry a "stageIds" list with every contributing stage ID.
+  Non-priority groups carry only "stageId" (the single owning stage).
+  Groovy consumers should prefer "stageIds" and fall back to ["stageId"].
 
 Priority group ordering:
   Groups whose names appear in PRIORITY_GROUPS are moved to the front of the
@@ -358,17 +364,25 @@ def _reorder_by_priority(groups: list[dict]) -> list[dict]:
         name = grp['name']
         if name in priority_set:
             if name not in priority_map:
-                # First occurrence — seed the merged group
+                # First occurrence — seed the merged group.
+                # Keep 'stageId' (the first stem) for backward compatibility with any
+                # consumer that reads the singular field; also emit 'stageIds' (a list
+                # of all contributing stems) so Groovy can build the full label.
+                first_id = grp.get('stageId', '')
                 priority_map[name] = {
                     'name':           name,
                     'description':    grp.get('description', ''),
-                    'stageId':        grp.get('stageId', ''),
+                    'stageId':        first_id,
+                    'stageIds':       [first_id] if first_id else [],
                     'stageDisabled':  grp.get('stageDisabled', False),
                     'stageCondition': list(grp.get('stageCondition', [])),
                     'parameters':     list(grp.get('parameters', [])),
                 }
             else:
-                # Subsequent occurrence — merge parameters, dedup by name
+                # Subsequent occurrence — accumulate stageId and merge parameters
+                sid = grp.get('stageId', '')
+                if sid and sid not in priority_map[name]['stageIds']:
+                    priority_map[name]['stageIds'].append(sid)
                 existing_names = {p['name'] for p in priority_map[name]['parameters']}
                 for p in grp.get('parameters', []):
                     if p['name'] not in existing_names:
@@ -640,10 +654,21 @@ def collect(default_stages_dir: Path,
 
     # Build a synthetic groups list that includes gate-only stems (no parameterGroups)
     # so their stageCondition references are also validated.
+    # After _reorder_by_priority, priority groups carry 'stageIds' (list) instead of 'stageId';
+    # check both when deciding whether a stem already has a real group in the output.
+    def _stem_in_output(stage_id: str) -> bool:
+        for grp in output_groups:
+            if 'stageIds' in grp:
+                if stage_id in grp['stageIds']:
+                    return True
+            elif grp.get('stageId') == stage_id:
+                return True
+        return False
+
     gate_only_groups = [
         {'stageId': stage_id, 'stageCondition': conds, 'parameters': []}
         for stage_id, conds in all_stage_conditions.items()
-        if not any(grp['stageId'] == stage_id for grp in output_groups)
+        if not _stem_in_output(stage_id)
     ]
     _validate_stage_conditions(output_groups + gate_only_groups, all_collated_param_names)
 

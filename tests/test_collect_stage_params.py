@@ -476,6 +476,30 @@ class TestStageSelectionsGroup(unittest.TestCase):
         for name in ['Build Options', 'AQA Options']:
             self.assertLess(idx_sel, group_names.index(name))
 
+    def test_stage_selections_group_has_stageids_list(self):
+        """Merged Stage Selections group must carry a stageIds list with all contributing stems."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            _write_params_json(d, '03-sign', [
+                _make_group('Stage Selections', [_make_bool_param('SIGN_ARTIFACTS', False, 'desc')])
+            ])
+            _write_params_json(d, '07-installer', [
+                _make_group('Stage Selections', [_make_bool_param('ENABLE_INSTALLERS', True, 'desc')])
+            ])
+            _write_params_json(d, '14-aqa-tests', [
+                _make_group('Stage Selections', [_make_bool_param('RUN_TESTS', True, 'desc')])
+            ])
+            result = _collect(d)
+
+        sel = next(g for g in result['groups'] if g['name'] == 'Stage Selections')
+        self.assertIn('stageIds', sel, 'merged Stage Selections must carry stageIds list')
+        stage_ids = sel['stageIds']
+        self.assertIsInstance(stage_ids, list)
+        self.assertIn('03-sign', stage_ids)
+        self.assertIn('07-installer', stage_ids)
+        self.assertIn('14-aqa-tests', stage_ids)
+        self.assertEqual(len(stage_ids), 3, 'all three contributing stems must be listed')
+
     def test_real_core_stages_collate_correctly(self):
         """Integration test: real scripts/stages directory produces expected output."""
         stages_dir = Path(__file__).parent.parent / 'scripts' / 'stages'
@@ -502,6 +526,13 @@ class TestStageSelectionsGroup(unittest.TestCase):
         for param in ('SIGN_ARTIFACTS', 'ENABLE_INSTALLERS', 'RUN_TESTS',
                       'ENABLE_TCK', 'PUBLISH_ARTIFACTS', 'RUN_REPRODUCIBLE_COMPARE'):
             self.assertIn(param, sel_params, f'{param} not in Stage Selections group')
+
+        # Merged Stage Selections group must list all six contributing stems
+        sel_group = result['groups'][0]
+        self.assertIn('stageIds', sel_group, 'Stage Selections group must carry stageIds list')
+        expected_stems = {'03-internal-code-sign', '07-installer', '14-aqa-tests',
+                          '15-tck-tests', '16-publish', '20-reproducible-compare'}
+        self.assertEqual(set(sel_group['stageIds']), expected_stems)
 
 
 if __name__ == '__main__':
