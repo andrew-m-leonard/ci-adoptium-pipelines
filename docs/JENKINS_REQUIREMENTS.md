@@ -14,6 +14,7 @@ running the seed job or executing any build.
 | **Pipeline** | Executes `Jenkinsfile.launch` and `Jenkinsfile.declarative` |
 | **Git** | Clones `ci-adoptium-pipelines` and the vendor config repo |
 | **Workspace Cleanup** (`ws-cleanup`) | `cleanWs()` calls in the pipeline |
+| **Build Timeout** (`build-timeout`) | Enforces the `pipelineTimeoutHours` wall-clock limit on platform build jobs |
 | **Credentials / Git credentials** | Authenticated repository access |
 
 Script Security must be configured to allow the Job DSL scripts to run.  See

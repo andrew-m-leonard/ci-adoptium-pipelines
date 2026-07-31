@@ -23,9 +23,10 @@ In summary, your Jenkins instance must have:
 2. **Pipeline Plugin** installed
 3. **Git Plugin** installed
 4. **Workspace Cleanup Plugin** (`ws-cleanup`) installed
-5. **Script Security** configured to allow Job DSL scripts
-6. At least one agent labelled **`ci.role.worker`** online
-7. Access to:
+5. **Build Timeout Plugin** (`build-timeout`) installed
+6. **Script Security** configured to allow Job DSL scripts
+7. At least one agent labelled **`ci.role.worker`** online
+8. Access to:
    - `https://github.com/adoptium/ci-adoptium-pipelines.git` (pipeline code)
    - Your vendor-specific configuration repository
 

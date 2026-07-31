@@ -109,7 +109,7 @@ Jenkins-specific configuration. Contains two groups: **job-creation settings** (
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `jenkinsfilePath` | string | ✅ | Relative path within the pipeline repo to the Jenkinsfile |
-| `pipelineTimeoutHours` | integer | ✅ | Maximum wall-clock hours a pipeline run is allowed before Jenkins aborts it |
+| `pipelineTimeoutHours` | integer | ☑️ default `8` | Maximum wall-clock hours a platform build pipeline run is allowed before Jenkins aborts it. Applied as a job-level `buildTimeoutWrapper` (Build Timeout plugin) by the Job DSL when the platform build job is created or regenerated. |
 | `activeNodeTimeoutMinutes` | integer | ☑️ default `10` | Minutes to wait for **at least one online agent** matching a stage label before failing. Jenkins queuing (all agents busy) is unaffected — this only fires when **zero** agents matching the label are online. Supports cloud provisioners that take time to spin up a new agent. Exposed as the `CONFIG_ACTIVE_NODE_TIMEOUT` env var at runtime. |
 | `stageAgentLabels` | object | ✅ | Map of stage name → label template. `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. Read by `ConfigHelper.generateJenkinsConfig()` to produce `jenkins-config.json` |
 | `jobConfiguration` | object | ✅ | Jenkins job settings (seed job only) |
