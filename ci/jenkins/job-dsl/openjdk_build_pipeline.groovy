@@ -167,6 +167,10 @@ pipelineJob(jobName) {
 
     quietPeriod(5)
 
+    environmentVariables {
+        env('PIPELINE_TIMEOUT_HOURS', (jenkinsConfig.pipelineTimeoutHours ?: 8).toString())
+    }
+
     parameters {
         // ── Build Configuration ───────────────────────────────────────────────
         separator {
@@ -277,12 +281,6 @@ pipelineJob(jobName) {
         }
     }
 
-    wrappers {
-        timeout {
-            absolute((jenkinsConfig.pipelineTimeoutHours ?: 8) * 60)
-            abortBuild()
-        }
-    }
 }
 
 println "✓ Platform build job created/updated: ${jobName}"

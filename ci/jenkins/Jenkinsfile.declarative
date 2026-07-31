@@ -141,6 +141,7 @@ pipeline {
 
     options {
         timestamps()
+        timeout(time: env.PIPELINE_TIMEOUT_HOURS ? env.PIPELINE_TIMEOUT_HOURS.toInteger() : 8, unit: 'HOURS')
     }
 
     stages {
