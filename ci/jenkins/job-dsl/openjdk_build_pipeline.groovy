@@ -271,16 +271,6 @@ pipelineJob(jobName) {
                 }
             }
         }
-        buildTimeoutWrapper {
-            strategy {
-                absoluteTimeOutStrategy {
-                    timeoutMinutes((jenkinsConfig.pipelineTimeoutHours ?: 8) * 60)
-                }
-            }
-            operationList {
-                abortOperation()
-            }
-        }
         // disableConcurrentBuilds() is intentionally omitted.
         // On affected Jenkins versions, disableConcurrentBuilds() incorrectly
         // treats the pipeline's own internal PlaceholderTask (queued by the
@@ -291,6 +281,14 @@ pipelineJob(jobName) {
         copyArtifactPermissionProperty {
             projectNames('*')
         }
+    }
+
+    // Build timeout — uses the Job DSL timeout{} top-level block (since 1.24),
+    // not buildTimeoutWrapper inside properties{} which requires a separate
+    // plugin-provided PropertiesContext extension and is not universally available.
+    timeout {
+        absolute((jenkinsConfig.pipelineTimeoutHours ?: 8) * 60)
+        abortBuild()
     }
 }
 
