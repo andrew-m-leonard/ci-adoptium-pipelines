@@ -14,13 +14,18 @@ All Jenkins pipeline jobs are defined as code using Job DSL scripts. A seed **Pi
 
 ## Prerequisites
 
-Your Jenkins instance must have:
+See [JENKINS_REQUIREMENTS.md](./JENKINS_REQUIREMENTS.md) for the full list of
+mandatory Jenkins instance requirements (plugins, node labels, timeout behaviour).
+
+In summary, your Jenkins instance must have:
 
 1. **Job DSL Plugin** installed and configured
 2. **Pipeline Plugin** installed
 3. **Git Plugin** installed
-4. **Script Security** configured to allow Job DSL scripts
-5. Access to:
+4. **Workspace Cleanup Plugin** (`ws-cleanup`) installed
+5. **Script Security** configured to allow Job DSL scripts
+6. At least one agent labelled **`ci.role.worker`** online
+7. Access to:
    - `https://github.com/adoptium/ci-adoptium-pipelines.git` (pipeline code)
    - Your vendor-specific configuration repository
 

@@ -94,8 +94,7 @@ if (!architecture || !targetOs) {
 }
 println "✓ Platform: arch=${architecture}, os=${targetOs}, variant=${variant}"
 
-def defaultParams   = jenkinsConfig?.jobConfiguration?.defaultParameters
-def initializeLabel = jenkinsConfig?.stageAgentLabels?.get('Initialize') ?: 'ci.role.worker'
+def defaultParams = jenkinsConfig?.jobConfiguration?.defaultParameters
 
 // ============================================================================
 // STEP 3: Build collated param groups from pre-computed JSON. 
@@ -185,11 +184,6 @@ pipelineJob(jobName) {
             'Type of release build')
         stringParam('GROUP_UID', '',
             'Group identifier linking all platform builds from the same launch.')
-        stringParam('INITIALIZE_LABEL', initializeLabel,
-            'Agent label for the Initialize stage — from stageAgentLabels.Initialize in jenkins_job_config.json')
-        stringParam('ACTIVE_NODE_TIMEOUT',
-            (jenkinsConfig?.activeNodeTimeoutMinutes ?: 10).toString(),
-            'Minutes to wait for an active agent before failing.')
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')

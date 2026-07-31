@@ -111,8 +111,6 @@ def buildForwardedParams(List orderedGroups, Map platformCfg) {
         string(name: 'ARCHITECTURE',       value: platformCfg.arch),
         string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
         string(name: 'GROUP_UID',          value: env.GROUP_UID),
-        string(name: 'INITIALIZE_LABEL',   value: params.INITIALIZE_LABEL   ?: ''),
-        string(name: 'ACTIVE_NODE_TIMEOUT',value: params.ACTIVE_NODE_TIMEOUT ?: ''),
         booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE ?: true),
     ]
 

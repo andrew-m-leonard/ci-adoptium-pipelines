@@ -98,15 +98,14 @@ def ensureLibsLoaded() {
  * Reads CONFIG_STAGE_AGENT_LABELS (a JSON map set by ConfigHelper.generateJenkinsConfig()
  * during Initialize) and returns the already-resolved sw.os.* / hw.arch.* label.
  * For the Initialize stage (evaluated before CONFIG_STAGE_AGENT_LABELS exists)
- * falls back to the INITIALIZE_LABEL job parameter baked in by the Job DSL.
+ * falls back to the hardcoded default 'ci.role.worker'.
  */
 /**
  * Return the active-node timeout in minutes from CONFIG_ACTIVE_NODE_TIMEOUT,
- * falling back to ACTIVE_NODE_TIMEOUT job parameter, then to 10 minutes.
+ * falling back to 10 minutes if the config has not yet been loaded.
  */
 def getActiveNodeTimeout() {
     if (env.CONFIG_ACTIVE_NODE_TIMEOUT) return env.CONFIG_ACTIVE_NODE_TIMEOUT.toInteger()
-    if (params.ACTIVE_NODE_TIMEOUT)     return params.ACTIVE_NODE_TIMEOUT.toInteger()
     return 10
 }
 
@@ -124,11 +123,7 @@ def getStageLabel(String stageName) {
     }
     // CONFIG_STAGE_AGENT_LABELS is not yet set when the Initialize stage agent
     // block is evaluated (pipeline definition time, before any steps run).
-    // The Job DSL bakes the Initialize label from jenkins_job_config.json into
-    // the INITIALIZE_LABEL job parameter so it is available here.
-    if (stageName == 'Initialize') {
-        return params.INITIALIZE_LABEL ?: 'ci.role.worker'
-    }
+    // All vendor Jenkins instances are required to have agents matching 'ci.role.worker'.
     return 'ci.role.worker'
 }
 
@@ -158,9 +153,7 @@ pipeline {
                     ensureLibsLoaded()
                     // NOTE: CONFIG_ACTIVE_NODE_TIMEOUT is not yet set at this point — it is only
                     // populated by ConfigHelper.generateJenkinsConfig() which runs *inside* this stage.
-                    // getActiveNodeTimeout() will therefore fall back to the ACTIVE_NODE_TIMEOUT job
-                    // parameter (seeded from jenkins_job_config.json by the Job DSL) or 10 minutes
-                    // if that parameter is also absent.
+                    // getActiveNodeTimeout() will therefore fall back to 10 minutes.
                     nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Initialize') {
                         pipelineHelper.initializeStage('Initialize', [])
@@ -655,8 +648,7 @@ pipeline {
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
                     try {
                         // NOTE: If the pipeline failed before generateJenkinsConfig() completed,
-                        // CONFIG_ACTIVE_NODE_TIMEOUT may be unset; falls back to the ACTIVE_NODE_TIMEOUT
-                        // job parameter or 10 minutes.
+                        // CONFIG_ACTIVE_NODE_TIMEOUT may be unset; falls back to 10 minutes.
                         nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
                         node(getStageLabel('Initialize')) {
                             echo "Final workspace cleanup..."
