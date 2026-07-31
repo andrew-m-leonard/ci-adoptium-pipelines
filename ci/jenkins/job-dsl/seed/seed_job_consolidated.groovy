@@ -220,9 +220,15 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 }
                 group.parameters?.each { p ->
                     if (p.type == 'boolean') {
-                        booleanParam(p.name, p.default == true, p.description ?: '')
+                        def boolDefault = defaultParams?.containsKey(p.name)
+                            ? defaultParams[p.name] == true
+                            : p.default == true
+                        booleanParam(p.name, boolDefault, p.description ?: '')
                     } else {
-                        stringParam(p.name, p.default ?: '', p.description ?: '')
+                        def strDefault = defaultParams?.containsKey(p.name)
+                            ? (defaultParams[p.name] ?: '')
+                            : (p.default ?: '')
+                        stringParam(p.name, strDefault, p.description ?: '')
                     }
                 }
             }
