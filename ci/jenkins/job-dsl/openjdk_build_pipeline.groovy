@@ -277,12 +277,11 @@ pipelineJob(jobName) {
         }
     }
 
-    // Build timeout — uses the Job DSL timeout{} top-level block (since 1.24),
-    // not buildTimeoutWrapper inside properties{} which requires a separate
-    // plugin-provided PropertiesContext extension and is not universally available.
-    timeout {
-        absolute((jenkinsConfig.pipelineTimeoutHours ?: 8) * 60)
-        abortBuild()
+    wrappers {
+        timeout {
+            absolute((jenkinsConfig.pipelineTimeoutHours ?: 8) * 60)
+            abortBuild()
+        }
     }
 }
 
