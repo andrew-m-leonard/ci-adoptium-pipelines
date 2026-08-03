@@ -138,14 +138,20 @@ def _validate_param(param: dict, source: str) -> None:
 def _validate_params_file(data: dict, source: str) -> None:
     """Validate a full .params.json document."""
     # parameterGroups is optional for gate-only files (stageCondition only)
-    for group in data.get('parameterGroups', []):
+    for group in (data.get('parameterGroups') or []):
+        if group is None:
+            raise ValueError(f"[{source}] A parameterGroup entry is null (not allowed)")
         if 'name' not in group:
             raise ValueError(f"[{source}] A parameterGroup entry is missing 'name'")
-        for param in group.get('parameters', []):
+        for param in (group.get('parameters') or []):
+            if param is None:
+                raise ValueError(f"[{source}] A parameter entry in '{group['name']}' is null (not allowed)")
             _validate_param(param, source)
 
     # Validate stageCondition entries if present
-    for cond in data.get('stageCondition', []):
+    for cond in (data.get('stageCondition') or []):
+        if cond is None:
+            raise ValueError(f"[{source}] A stageCondition entry is null (not allowed)")
         if 'param' not in cond:
             raise ValueError(
                 f"[{source}] A stageCondition entry is missing 'param' field: {cond}"
@@ -214,9 +220,9 @@ def _resolve_stage_condition(default_data: dict | None,
     Falls back to default_data, then [].
     """
     if vendor_data is not None and 'stageCondition' in vendor_data:
-        return list(vendor_data['stageCondition'])
+        return list(vendor_data['stageCondition'] or [])
     if default_data is not None and 'stageCondition' in default_data:
-        return list(default_data['stageCondition'])
+        return list(default_data['stageCondition'] or [])
     return []
 
 
@@ -245,7 +251,7 @@ def _merge_stage(default_data: dict | None, vendor_data: dict | None,
     default_param_to_group: dict[str, str] = {}
 
     if default_data:
-        for grp in default_data.get('parameterGroups', []):
+        for grp in (default_data.get('parameterGroups') or []):
             gname = grp['name']
             default_groups[gname] = {
                 'name':           gname,
@@ -253,22 +259,22 @@ def _merge_stage(default_data: dict | None, vendor_data: dict | None,
                 'stageId':        stage_stem,
                 'stageDisabled':  stage_disabled,
                 'stageCondition': stage_condition,
-                'parameters':     list(grp.get('parameters', [])),
+                'parameters':     list(grp.get('parameters') or []),
             }
-            for p in grp.get('parameters', []):
+            for p in (grp.get('parameters') or []):
                 default_param_to_group[p['name']] = gname
 
     if not vendor_data:
         return list(default_groups.values())
 
     # --- Apply ignoreDefaultParams ---
-    ignore_list = vendor_data.get('ignoreDefaultParams', [])
+    ignore_list = vendor_data.get('ignoreDefaultParams') or []
 
     # A name in both ignoreDefaultParams and vendor parameters is contradictory — hard error
     vendor_param_names = {
         p['name']
-        for grp in vendor_data.get('parameterGroups', [])
-        for p in grp.get('parameters', [])
+        for grp in (vendor_data.get('parameterGroups') or [])
+        for p in (grp.get('parameters') or [])
     }
     contradictions = [n for n in ignore_list if n in vendor_param_names]
     if contradictions:
@@ -297,9 +303,9 @@ def _merge_stage(default_data: dict | None, vendor_data: dict | None,
                 del default_groups[gname]
 
     # --- Merge vendor parameterGroups ---
-    for vgrp in vendor_data.get('parameterGroups', []):
+    for vgrp in (vendor_data.get('parameterGroups') or []):
         vgname  = vgrp['name']
-        vparams = vgrp.get('parameters', [])
+        vparams = vgrp.get('parameters') or []
 
         if vgname in default_groups:
             # Vendor params replace defaults with the same name; new names are appended
@@ -375,8 +381,8 @@ def _reorder_by_priority(groups: list[dict]) -> list[dict]:
                     'stageId':        first_id,
                     'stageIds':       [first_id] if first_id else [],
                     'stageDisabled':  grp.get('stageDisabled', False),
-                    'stageCondition': list(grp.get('stageCondition', [])),
-                    'parameters':     list(grp.get('parameters', [])),
+                    'stageCondition': list(grp.get('stageCondition') or []),
+                    'parameters':     list(grp.get('parameters') or []),
                 }
             else:
                 # Subsequent occurrence — accumulate stageId and merge parameters
@@ -384,7 +390,7 @@ def _reorder_by_priority(groups: list[dict]) -> list[dict]:
                 if sid and sid not in priority_map[name]['stageIds']:
                     priority_map[name]['stageIds'].append(sid)
                 existing_names = {p['name'] for p in priority_map[name]['parameters']}
-                for p in grp.get('parameters', []):
+                for p in (grp.get('parameters') or []):
                     if p['name'] not in existing_names:
                         priority_map[name]['parameters'].append(p)
                         existing_names.add(p['name'])
@@ -410,7 +416,7 @@ def _validate_stage_conditions(groups: list[dict], param_names: set[str]) -> Non
 
     for grp in groups:
         stage_id   = grp.get('stageId', '?')
-        conditions = grp.get('stageCondition', [])
+        conditions = grp.get('stageCondition') or []
         for cond in conditions:
             param = cond.get('param', '')
             key   = (stage_id, param)
@@ -516,9 +522,9 @@ def collect(default_stages_dir: Path,
         stage_condition = _resolve_stage_condition(default_data, vendor_data)
         if stage_condition:
             all_stage_conditions.setdefault(stem, [])
-            seen = {c['param'] for c in all_stage_conditions[stem]}
+            seen = {c['param'] for c in all_stage_conditions[stem] if c is not None}
             for c in stage_condition:
-                if c['param'] not in seen:
+                if c is not None and c.get('param') and c['param'] not in seen:
                     all_stage_conditions[stem].append(c)
                     seen.add(c['param'])
 
@@ -570,8 +576,8 @@ def collect(default_stages_dir: Path,
     cross_stage = load_vendor_cross_stage()
     if cross_stage:
         for stage_id, stage_entry in cross_stage.get('vendorStageParams', {}).items():
-            ignore       = stage_entry.get('ignoreDefaultParams', [])
-            extra_params = stage_entry.get('parameters', [])
+            ignore       = stage_entry.get('ignoreDefaultParams') or []
+            extra_params = stage_entry.get('parameters') or []
             source_label = f"vendor_stage_params.json/{stage_id}"
 
             # Remove ignored params from already-collated groups for this stage
