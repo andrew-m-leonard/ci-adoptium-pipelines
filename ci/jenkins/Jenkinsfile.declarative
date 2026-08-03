@@ -127,13 +127,6 @@ def getStageLabel(String stageName) {
     return 'ci.role.worker'
 }
 
-/**
- * Update GitHub commit status for PR tester.
- */
-def updateGithubCommitStatus(String state, String description) {
-    echo "GitHub Status: ${state} - ${description}"
-}
-
 // ============================================================================
 
 pipeline {
@@ -647,16 +640,25 @@ pipeline {
                 }
 
                 if (params.CLEAN_WORKSPACE_AFTER_STAGE) {
-                    try {
-                        // NOTE: If the pipeline failed before generateJenkinsConfig() completed,
-                        // CONFIG_ACTIVE_NODE_TIMEOUT may be unset; falls back to 10 minutes.
-                        nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
-                        node(getStageLabel('Initialize')) {
-                            echo "Final workspace cleanup..."
-                            cleanWs notFailBuild: true, deleteDirs: true
+                    // CONFIG_STAGE_AGENT_LABELS is only set after the Initialize stage completes.
+                    // If absent, the pipeline was aborted/failed before any workspace was allocated;
+                    // attempting cleanWs would give Jenkins a null workspace path and produce a
+                    // spurious "Cannot delete workspace: null" error in the post-pipeline teardown
+                    // that cannot be caught by a try/catch.
+                    if (!env.CONFIG_STAGE_AGENT_LABELS) {
+                        echo "Final cleanup skipped: Initialize stage did not complete — no workspace was allocated."
+                    } else {
+                        try {
+                            // NOTE: If the pipeline failed before generateJenkinsConfig() completed,
+                            // CONFIG_ACTIVE_NODE_TIMEOUT may be unset; falls back to 10 minutes.
+                            nodeAgentHelper.waitForActiveNode(getStageLabel('Initialize'), getActiveNodeTimeout())
+                            node(getStageLabel('Initialize')) {
+                                echo "Final workspace cleanup..."
+                                cleanWs notFailBuild: true, deleteDirs: true
+                            }
+                        } catch (Exception e) {
+                            echo "Final cleanup skipped: ${e.message}"
                         }
-                    } catch (Exception e) {
-                        echo "Final cleanup skipped: ${e.message}"
                     }
                 }
             }
@@ -664,25 +666,21 @@ pipeline {
         success {
             script {
                 echo "✅ Build completed successfully"
-                if (env.JOB_NAME.contains('pr-tester')) {
-                    updateGithubCommitStatus('SUCCESS', 'Build Successful')
-                }
             }
         }
         failure {
             script {
                 echo "❌ Build failed"
-                if (env.JOB_NAME.contains('pr-tester')) {
-                    updateGithubCommitStatus('FAILURE', 'Build Failed')
-                }
             }
         }
         unstable {
             script {
                 echo "⚠️ Build unstable"
-                if (env.JOB_NAME.contains('pr-tester')) {
-                    updateGithubCommitStatus('FAILURE', 'Build Unstable')
-                }
+            }
+        }
+        aborted {
+            script {
+                echo "🚫 Build aborted"
             }
         }
     }

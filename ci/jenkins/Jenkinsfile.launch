@@ -340,8 +340,10 @@ pipeline {
                 echo "JDK: ${env.JDK_VERSION} | Platforms: ${env.SELECTED_PLATFORMS} | Result: ${currentBuild.result ?: 'SUCCESS'}"
             }
         }
-        success { echo "✓ Launch pipeline completed successfully" }
-        failure { echo "✗ Launch pipeline failed" }
+        success  { echo "✓ Launch pipeline completed successfully" }
+        failure  { echo "✗ Launch pipeline failed" }
+        unstable { echo "⚠ Launch pipeline unstable" }
+        aborted  { echo "✗ Launch pipeline aborted" }
     }
 }
 
