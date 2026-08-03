@@ -97,51 +97,26 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
 
     // Retrieve artifacts into WORKSPACE root (skip for Initialize stage)
     if (artifactFilter && stageName != 'Initialize') {
-        // Determine which build to copy artifacts from.
-        //
-        // On a "Restart from Stage", Jenkins restores env vars from the prior
-        // build, so env.BUILD_NUMBER holds the original build number rather than
-        // the restart's. We therefore track the source build number explicitly
-        // via COPY_ARTIFACTS_BUILD_NUMBER:
-        //
-        //   COPY_ARTIFACTS_BUILD_NUMBER == currentBuild.number
-        //     → A prior stage in this build already archived artifacts; copy
-        //       from the current build as normal.
-        //
-        //   COPY_ARTIFACTS_BUILD_NUMBER not set, or != currentBuild.number
-        //     → This is the first stage executing in this build. If a previous
-        //       build exists, artifacts were archived there — copy from it.
-        //       If there is no previous build this is a normal first-ever run
-        //       and artifacts are already in the current build.
-        //       Either way, pin COPY_ARTIFACTS_BUILD_NUMBER to currentBuild.number
-        //       so all subsequent stages in this build copy from here.
-        def currentBuildNumber = "${currentBuild.number}"
-        String sourceBuildNumber
-        if (env.COPY_ARTIFACTS_BUILD_NUMBER == currentBuildNumber) {
-            sourceBuildNumber = currentBuildNumber
-        } else {
-            def prev = currentBuild.previousBuild
-            if (prev != null) {
-                sourceBuildNumber = "${prev.number}"
-                echo "ℹ️  First stage in this build — copying artifacts from previous build #${sourceBuildNumber}"
-            } else {
-                sourceBuildNumber = currentBuildNumber
-            }
-            env.COPY_ARTIFACTS_BUILD_NUMBER = currentBuildNumber
-        }
-
+        // Use currentBuild.number rather than env.BUILD_NUMBER. On a
+        // "Restart from Stage" Jenkins restores env vars from the prior build,
+        // so env.BUILD_NUMBER holds the original build number. currentBuild.number
+        // is always the authoritative number for the currently-executing build.
+        // Jenkins automatically copies artifacts from the previous build into
+        // the restart build's artifact store, so specific(currentBuild.number)
+        // always resolves correctly for both normal runs and restarts.
+        def buildNumber = "${currentBuild.number}"
         try {
             copyArtifacts(
                 projectName: env.JOB_NAME,
-                selector: specific(sourceBuildNumber),
+                selector: specific(buildNumber),
                 filter: artifactFilter,
                 target: '.',
                 optional: false,
                 fingerprintArtifacts: true
             )
-            echo "✅ Successfully copied artifacts from build #${sourceBuildNumber}: ${artifactFilter}"
+            echo "✅ Successfully copied artifacts from build #${buildNumber}: ${artifactFilter}"
         } catch (Exception e) {
-            error("Failed to copy artifacts '${artifactFilter}' from build #${sourceBuildNumber}: ${e.message}")
+            error("Failed to copy artifacts '${artifactFilter}' from build #${buildNumber}: ${e.message}")
         }
     }
 
