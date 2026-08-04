@@ -484,10 +484,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('20-reproducible-compare') }
-                    expression { params.SCM_REF != null && params.SCM_REF != '' }
-                }
+                expression { stageConditionMet('20-reproducible-compare') }
             }
             steps {
                 script {
