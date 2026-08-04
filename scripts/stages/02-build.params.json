@@ -33,7 +33,13 @@
       "description": "Fine-grained overrides for the configure, make, and source-fetch steps. All fields are optional — leave empty to use the defaults from the build configuration.",
       "parameters": [
         {
-          "name": "EXTRA_CONFIGURE_OPTIONS",
+          "name": "EXTRA_BUILD_ARGS",
+          "type": "string",
+          "default": "--create-jre-image --create-sbom",
+          "description": "Additional arguments passed to the build stage script (e.g. --create-jre-image --create-sbom)"
+        },
+        {
+          "name": "EXTRA_CONFIGURE_ARGS",
           "type": "string",
           "default": "",
           "description": "Extra options appended to the configure invocation (e.g. --with-vendor-name=MyOrg)"

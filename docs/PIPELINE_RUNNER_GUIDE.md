@@ -22,7 +22,7 @@ The pipeline runner orchestrates all build stages in sequence:
 
 1. **Initialize** — clones the config repo; generates `pipeline-config.json`; archives it to `build_artifacts/`
 2. **Build** — clones `temurin-build`; runs `make-adopt-build-farm.sh`; archives JDK tarballs to `build_artifacts/`
-3. **Validate SBOM** — validates SBOM files (only when `--create-sbom` is in `BUILD_ARGS`)
+3. **Validate SBOM** — validates SBOM files (only when `--create-sbom` is in `EXTRA_BUILD_ARGS`)
 4. **Sign Artifacts** — signs tarballs (only when `enableSigner=true`; stub unless vendor-overridden)
 5. **Build Installers** — creates platform installers (only when `enableInstallers=true`; stub unless vendor-overridden)
 6. **Smoke Tests** — extracts JDK and runs four basic checks (only when `enableTests=true`)

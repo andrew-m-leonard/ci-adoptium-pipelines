@@ -148,8 +148,8 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     env.CONFIG_ARCHITECTURE      = pipelineConfig.buildConfig.ARCHITECTURE
     env.CONFIG_JAVA_TO_BUILD     = pipelineConfig.buildConfig.JAVA_TO_BUILD
     env.CONFIG_NODE_LABEL        = pipelineConfig.buildConfig.NODE_LABEL ?: 'worker'
-    env.CONFIG_BUILD_ARGS        = pipelineConfig.buildConfig.BUILD_ARGS ?: ''
-    env.CONFIG_CONFIGURE_ARGS    = pipelineConfig.buildConfig.CONFIGURE_ARGS ?: ''
+    env.CONFIG_EXTRA_BUILD_ARGS  = pipelineConfig.buildConfig.EXTRA_BUILD_ARGS ?: ''
+    env.CONFIG_EXTRA_CONFIGURE_ARGS  = pipelineConfig.buildConfig.EXTRA_CONFIGURE_ARGS ?: ''
     env.CONFIG_BUILD_REF         = pipelineConfig.refs.buildRef ?: 'master'
     env.CONFIG_BUILD_REPO_URL    = pipelineConfig.refs.buildRepoUrl ?: ''
     env.CONFIG_CLEAN_WORKSPACE   = pipelineConfig.parameters.cleanWorkspaceAfterStage?.toString() ?: 'false'
@@ -225,7 +225,7 @@ def summarizePipelineConfig(def pipelineConfig, def jenkinsConfig = null) {
     echo "  Variant: ${pipelineConfig.buildConfig.VARIANT}"
     echo "  OS: ${pipelineConfig.buildConfig.TARGET_OS}"
     echo "  Architecture: ${pipelineConfig.buildConfig.ARCHITECTURE}"
-    echo "  Build Args: ${pipelineConfig.buildConfig.BUILD_ARGS}"
+    echo "  Build Args: ${pipelineConfig.buildConfig.EXTRA_BUILD_ARGS}"
     echo "  Docker Image: ${pipelineConfig.buildConfig.DOCKER_IMAGE ?: '(none)'}"
     echo "  Docker Registry: ${pipelineConfig.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
     echo "  Docker Credential: ${pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"

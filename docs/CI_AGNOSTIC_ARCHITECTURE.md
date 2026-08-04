@@ -219,7 +219,7 @@ main() {
     variant="$(get_config_value       "${config}" ".buildConfig.VARIANT")"
     target_os="$(get_config_value     "${config}" ".buildConfig.TARGET_OS")"
     architecture="$(get_config_value  "${config}" ".buildConfig.ARCHITECTURE")"
-    build_args="$(get_config_value    "${config}" ".buildConfig.BUILD_ARGS")"
+    build_args="$(get_config_value    "${config}" ".buildConfig.EXTRA_BUILD_ARGS")"
 
     log_info "Building: ${java_to_build} ${variant} ${target_os}-${architecture}"
 

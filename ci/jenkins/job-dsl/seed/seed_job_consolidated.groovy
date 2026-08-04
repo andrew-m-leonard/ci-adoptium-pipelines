@@ -137,7 +137,6 @@ folder('Build_openjdk') {
 // STEP 5: Create Launch Orchestrator Jobs
 // ============================================================================
 
-def defaultBuildArgs          = pipelineConfig.defaultBuildArgs ?: '--create-jre-image --create-sbom'
 def pipelineRepoUrl           = pipelineConfig.repository?.url ?: 'https://github.com/adoptium/ci-adoptium-pipelines.git'
 def pipelineRepoBranch        = pipelineConfig.repository?.branch ?: 'main'
 def pipelineRepoCredentialsId = pipelineConfig.repository?.credentialsId ?: ''
@@ -191,8 +190,6 @@ pipelineConfig.activeJdkVersions.findAll { it.enabled }.each { versionInfo ->
                 'Group identifier for this launch run. Auto-generated if empty.')
             choiceParam('PLATFORMS', ['all'] + platforms,
                 'Select platform to build, or "all" for all available platforms')
-            stringParam('BUILD_ARGS', defaultBuildArgs,
-                'Additional build arguments passed to the build stage')
             choiceParam('RELEASE_TYPE',
                 ['NIGHTLY', 'WEEKLY', 'RELEASE'],
                 'Type of release build (NIGHTLY = default nightly, WEEKLY = EA beta, RELEASE = official)')

@@ -234,8 +234,8 @@ This file is not stored in any repository — it is generated fresh for each bui
     "TARGET_OS": "mac",
     "ARCHITECTURE": "aarch64",
     "VARIANT": "temurin",
-    "BUILD_ARGS": "--create-jre-image --create-sbom",
-    "CONFIGURE_ARGS": "--enable-dtrace",
+    "EXTRA_BUILD_ARGS": "--create-jre-image --create-sbom",
+    "EXTRA_CONFIGURE_ARGS": "--enable-dtrace",
     "NODE_LABEL": "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
     "DOCKER_IMAGE": ""
   },

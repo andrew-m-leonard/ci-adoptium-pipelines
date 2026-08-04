@@ -4,7 +4,7 @@
 # JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM
 # document. Must run before 10-digital-artifact-sign so that the signed SBOM
 # is included in the set of artifacts that receive a detached GPG signature.
-# Only applicable when SBOMs are generated (--create-sbom in BUILD_ARGS).
+# Only applicable when SBOMs are generated (--create-sbom in EXTRA_BUILD_ARGS).
 #
 # Override this stub by placing a script at:
 #   config-repo/vendor-scripts/09-sbom-sign.{sh,groovy,py}

@@ -132,7 +132,7 @@ Code signs installer packages (`.msi` on Windows, `.pkg` on macOS). On macOS als
 
 ### `09-sbom-sign.sh` — SBOM Sign `STUB`
 
-JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM document. Must run before `10-digital-artifact-sign` so the signed SBOM is included in GPG armoring. Only runs when `--create-sbom` is in `BUILD_ARGS`.
+JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM document. Must run before `10-digital-artifact-sign` so the signed SBOM is included in GPG armoring. Only runs when `--create-sbom` is in `EXTRA_BUILD_ARGS`.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing SBOM JSON files
 **Outputs:** `TARGET_DIR` containing JSF-signed SBOM files
@@ -159,7 +159,7 @@ Verifies that all necessary signing has been completed: Windows/macOS executable
 
 ### `12-validate-sbom.sh` — Validate SBOM `STUB`
 
-Validates SBOM files produced during Build. Vendor-specific (tooling and acceptance criteria vary). Only runs when `--create-sbom` is present in `BUILD_ARGS`.
+Validates SBOM files produced during Build. Vendor-specific (tooling and acceptance criteria vary). Only runs when `--create-sbom` is present in `EXTRA_BUILD_ARGS`.
 
 The Temurin implementation clones `temurin-build` and invokes `tooling/validateSBOM.sh`. It lives in `ci-temurin-config/vendor-scripts/12-validate-sbom.sh`.
 

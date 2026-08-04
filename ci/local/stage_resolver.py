@@ -11,7 +11,7 @@ Resolution order for a given stem (e.g. '13-smoke-tests'):
 Stage enablement is driven by parameters in pipeline-config.json (the same
 CONFIG_FILE used by stage scripts).  Mapping:
 
-  12-validate-sbom        → buildConfig.BUILD_ARGS contains '--create-sbom'
+  12-validate-sbom        → buildConfig.EXTRA_BUILD_ARGS contains '--create-sbom'
   06-post-build-code-sign → parameters.enableSigner
   07-installer            → parameters.enableInstallers
   13-smoke-tests          → parameters.enableTests
@@ -47,8 +47,8 @@ _STAGE_PARAMETER_GATE = {
 # Each entry is a callable(config_dict) -> (bool, reason_str).
 _STAGE_CONDITION = {
     '12-validate-sbom': lambda cfg: (
-        '--create-sbom' in cfg.get('buildConfig', {}).get('BUILD_ARGS', ''),
-        "parameters: --create-sbom not in BUILD_ARGS"
+        '--create-sbom' in cfg.get('buildConfig', {}).get('EXTRA_BUILD_ARGS', ''),
+        "parameters: --create-sbom not in EXTRA_BUILD_ARGS"
     ),
 }
 

@@ -360,7 +360,7 @@ pipeline {
                 allOf {
                     expression { stageConditionMet('03-internal-code-sign') }
                     expression { env.CONFIG_ENABLE_SIGNER == 'true' }
-                    expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
+                    expression { env.CONFIG_EXTRA_BUILD_ARGS?.contains('--create-sbom') }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
                     }
@@ -448,7 +448,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                expression { env.CONFIG_BUILD_ARGS?.contains('--create-sbom') }
+                expression { env.CONFIG_EXTRA_BUILD_ARGS?.contains('--create-sbom') }
             }
             steps {
                 script {
