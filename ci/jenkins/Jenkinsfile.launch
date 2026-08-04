@@ -15,14 +15,21 @@ import groovy.json.JsonSlurper
 
 
 /**
- * Return the label for the __any__ sentinel from CONFIG_STAGE_AGENT_LABELS, or
- * null if not set.  When null, agent { label null } is equivalent to agent any.
- *
- * Called in stage agent blocks — evaluated at runtime, so it is safe to read
- * env vars that are populated by earlier stages.
+ * Return the label for launch-pipeline worker stages.
+ * Reads the '__any__' sentinel from CONFIG_STAGE_AGENT_LABELS (set by the
+ * Fetch Configuration stage) so the same label map used by Jenkinsfile.declarative
+ * also controls which node runs python3-dependent steps in this pipeline.
+ * Falls back to 'ci.role.worker' — the mandatory base label every vendor Jenkins
+ * instance must provide.
  */
-def getLaunchAgentLabel() {
-    return env.LAUNCH_AGENT_LABEL ?: null
+def getWorkerLabel() {
+    def labelsJson = env.CONFIG_STAGE_AGENT_LABELS
+    if (labelsJson) {
+        def labels = new groovy.json.JsonSlurper().parseText(labelsJson)
+        def label = labels['__any__']
+        if (label?.trim()) return label.trim()
+    }
+    return 'ci.role.worker'
 }
 
 /**
@@ -187,16 +194,18 @@ pipeline {
                             .parseText(configText).buildConfigurations.keySet().join(',')
                         echo "✓ Available platforms: ${env.AVAILABLE_PLATFORMS}"
                     }
-                    // Read the __any__ sentinel from jenkins_job_config.json so that
-                    // subsequent stages requiring tooling (e.g. python3) can target
-                    // nodes with the right capabilities instead of using agent any.
+                    // Populate CONFIG_STAGE_AGENT_LABELS from jenkins_job_config.json so
+                    // that getWorkerLabel() (and downstream stages) can resolve '__any__'.
                     def jenkinsJobConfigFile = 'config-repo/jenkins_job_config.json'
                     if (fileExists(jenkinsJobConfigFile)) {
                         def jenkinsJobConfig = new JsonSlurper().parseText(readFile(jenkinsJobConfigFile))
-                        def anyLabel = jenkinsJobConfig?.stageAgentLabels?.'__any__'
-                        if (anyLabel?.trim()) {
-                            env.LAUNCH_AGENT_LABEL = anyLabel.trim()
-                            echo "✓ Launch agent label: ${env.LAUNCH_AGENT_LABEL}"
+                        def stageLabels = jenkinsJobConfig?.stageAgentLabels
+                        if (stageLabels) {
+                            env.CONFIG_STAGE_AGENT_LABELS = groovy.json.JsonOutput.toJson(stageLabels)
+                            def anyLabel = stageLabels?.'__any__'
+                            if (anyLabel?.trim()) {
+                                echo "✓ Worker label for launch stages: ${anyLabel.trim()}"
+                            }
                         }
                     }
                 }
@@ -207,7 +216,7 @@ pipeline {
             // Always runs — ordered groups and separator names must be available
             // for the 'Create/Update Platform Jobs' stage on every run.
             agent {
-                label getLaunchAgentLabel()
+                label getWorkerLabel()
             }
             steps {
                 script {
@@ -218,7 +227,7 @@ pipeline {
 
         stage('Determine Platforms') {
             agent {
-                label getLaunchAgentLabel()
+                label getWorkerLabel()
             }
             steps {
                 script {
@@ -239,7 +248,7 @@ pipeline {
 
         stage('Create/Update Platform Jobs') {
             agent {
-                label getLaunchAgentLabel()
+                label getWorkerLabel()
             }
             steps {
                 script {

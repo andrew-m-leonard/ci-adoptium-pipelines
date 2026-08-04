@@ -76,6 +76,7 @@ Jenkins-specific configuration. Contains two groups: **job-creation settings** (
   "pipelineTimeoutHours": 8,
   "activeNodeTimeoutMinutes": 10,
   "stageAgentLabels": {
+    "__any__":               "ci.role.worker",
     "Initialize":            "ci.role.worker",
     "Build":                 "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
     "Smoke Tests":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
@@ -111,7 +112,7 @@ Jenkins-specific configuration. Contains two groups: **job-creation settings** (
 | `jenkinsfilePath` | string | ✅ | Relative path within the pipeline repo to the Jenkinsfile |
 | `pipelineTimeoutHours` | integer | ☑️ default `8` | Maximum wall-clock hours a platform build pipeline run is allowed before Jenkins aborts it. Applied as a job-level `buildTimeoutWrapper` (Build Timeout plugin) by the Job DSL when the platform build job is created or regenerated. |
 | `activeNodeTimeoutMinutes` | integer | ☑️ default `10` | Minutes to wait for **at least one online agent** matching a stage label before failing. Jenkins queuing (all agents busy) is unaffected — this only fires when **zero** agents matching the label are online. Supports cloud provisioners that take time to spin up a new agent. Exposed as the `CONFIG_ACTIVE_NODE_TIMEOUT` env var at runtime. |
-| `stageAgentLabels` | object | ✅ | Map of stage name → label template. `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. Read by `ConfigHelper.generateJenkinsConfig()` to produce `jenkins-config.json` |
+| `stageAgentLabels` | object | ✅ | Map of stage name → label template. `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. Read by `ConfigHelper.generateJenkinsConfig()` to produce `jenkins-config.json`. The special key `__any__` sets the agent label for launch-pipeline worker stages (`Collate Stage Parameters`, `Determine Platforms`, `Create/Update Platform Jobs`) that require `python3`; defaults to `ci.role.worker` if absent. |
 | `jobConfiguration` | object | ✅ | Jenkins job settings (seed job only) |
 | `jobConfiguration.defaultParameters` | object | ✅ | Default values for Jenkins build parameters (can be overridden at trigger time) |
 | `jobConfiguration.defaultParameters.VARIANT` | string | ✅ | JVM variant to build, e.g. `"temurin"` |

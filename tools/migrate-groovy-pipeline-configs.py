@@ -399,6 +399,7 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
         # resolved at runtime to sw.os.* / hw.arch.* schema tokens by
         # load-json-config.py via its OS_TO_LABEL / ARCH_TO_LABEL maps.
         "stageAgentLabels": {
+            "__any__":                    "ci.role.worker",
             "Initialize":                 "ci.role.worker",
             "Build":                      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
             "Internal Code Sign":         "eclipse-codesign",
