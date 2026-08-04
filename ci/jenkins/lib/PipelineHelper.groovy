@@ -91,12 +91,12 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     buildUidHelper.initializeBuildContext(stageName)
 
     // Validate prerequisites (skip for Initialize stage)
-    if (stageName != 'Initialize') {
+    if (stageName != '01-initialize') {
         buildUidHelper.validatePrerequisites(stageName, prerequisites)
     }
 
     // Retrieve artifacts into WORKSPACE root (skip for Initialize stage)
-    if (artifactFilter && stageName != 'Initialize') {
+    if (artifactFilter && stageName != '01-initialize') {
         // Use currentBuild.number rather than env.BUILD_NUMBER. On a
         // "Restart from Stage" Jenkins restores env vars from the prior build,
         // so env.BUILD_NUMBER holds the original build number. currentBuild.number
@@ -121,7 +121,7 @@ def initializeStage(String stageName, List<String> prerequisites = [], String ar
     }
 
     // Return config for convenience (empty for Initialize stage)
-    if (stageName == 'Initialize') {
+    if (stageName == '01-initialize') {
         return [:]
     } else {
         env.INPUT_ARTIFACTS_DIR   = "${env.WORKSPACE}"
