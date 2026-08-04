@@ -90,6 +90,27 @@ def loadStageConditions() {
 }
 
 /**
+ * Read collated-stage-params.json and store a comma-separated list of all
+ * stage param names as env.STAGE_PARAM_NAMES.
+ *
+ * Called once in the Initialize stage alongside loadStageConditions().
+ * StageScriptRunner.containerEnvFlags() reads this at runtime to forward
+ * every collated param into Docker/Podman containers via -e flags, without
+ * requiring the EnvInject plugin or a hardcoded allowlist.
+ */
+def loadStageParamNames() {
+    if (!fileExists('collated-stage-params.json')) {
+        echo "ℹ️  collated-stage-params.json not found — STAGE_PARAM_NAMES will not be set"
+        return
+    }
+    def collated = new groovy.json.JsonSlurper()
+        .parseText(readFile('collated-stage-params.json'))
+    def names = (collated.paramNames ?: [])
+    env.STAGE_PARAM_NAMES = names.join(',')
+    echo "✓ Loaded STAGE_PARAM_NAMES: ${names.size()} param(s)"
+}
+
+/**
  * Evaluate the stageCondition list for a given stageId.
  *
  * Reads env.COLLATED_STAGE_CONDITIONS (populated by loadStageConditions() in
@@ -214,6 +235,7 @@ pipeline {
                         configHelper.summarizePipelineConfig(pipelineConfig, jenkinsConfig)
                         pipelineHelper.ensureBuildDescriptionSet(pipelineConfig)
                         loadStageConditions()
+                        loadStageParamNames()
                         pipelineHelper.finalizeStage(INITIALIZE)
                     }
                 }

@@ -129,16 +129,6 @@ rawGroups.each { grp ->
 def collatedParamGroups = mergedGroupMap.values().toList()
 println "✓ Received ${rawGroups.size()} raw group(s), merged to ${collatedParamGroups.size()} group(s)"
 
-// Build a deduplicated, comma-separated list of all stage param names.
-// Baked into STAGE_PARAM_NAMES so StageScriptRunner.containerEnvFlags() can
-// forward every collated param into the container via -e, without needing a
-// hardcoded allowlist.
-def stageParamNamesList = collatedParamGroups
-    .collectMany { grp -> (grp.parameters ?: []).collect { it.name } }
-    .unique()
-def stageParamNamesValue = stageParamNamesList.join(',')
-println "✓ STAGE_PARAM_NAMES: ${stageParamNamesValue}"
-
 // ============================================================================
 // STEP 4: Determine whether the platform build job needs to be (re-)created
 // ============================================================================
@@ -179,10 +169,6 @@ pipelineJob(jobName) {
 
     environmentVariables {
         env('PIPELINE_TIMEOUT_HOURS', (jenkinsConfig.pipelineTimeoutHours ?: 8).toString())
-        // Comma-separated list of all collated stage param names — baked in at
-        // job-generation time so StageScriptRunner.containerEnvFlags() can forward
-        // every stage param into Docker/Podman containers without a hardcoded allowlist.
-        env('STAGE_PARAM_NAMES', stageParamNamesValue)
     }
 
     parameters {
