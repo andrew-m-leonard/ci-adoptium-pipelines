@@ -358,12 +358,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('09-sbom-sign') }
-                    not {
-                        expression { env.JOB_NAME?.contains('pr-tester') }
-                    }
-                }
+                expression { stageConditionMet('09-sbom-sign') }
             }
             steps {
                 script {
@@ -387,12 +382,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('10-digital-artifact-sign') }
-                    not {
-                        expression { env.JOB_NAME?.contains('pr-tester') }
-                    }
-                }
+                expression { stageConditionMet('10-digital-artifact-sign') }
             }
             steps {
                 script {
@@ -416,12 +406,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('11-verify-signing') }
-                    not {
-                        expression { env.JOB_NAME?.contains('pr-tester') }
-                    }
-                }
+                expression { stageConditionMet('11-verify-signing') }
             }
             steps {
                 script {
