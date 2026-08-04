@@ -456,12 +456,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('14-aqa-tests') }
-                    expression {
-                        currentBuild.result == null || currentBuild.result == 'SUCCESS'
-                    }
-                }
+                expression { stageConditionMet('13-smoke-tests') }
             }
             steps {
                 script {
@@ -473,12 +468,8 @@ pipeline {
                         env.TARGET_DIR = "${WORKSPACE}/smoke_test_output"
 
                         def smokeTestExitCode = stageRunner.run('13-smoke-tests', config)
-
-                        env.SMOKE_TESTS_PASSED = (smokeTestExitCode == 0).toString()
-
                         if (smokeTestExitCode != 0) {
-                            currentBuild.result = 'UNSTABLE'
-                            echo "WARNING: Smoke tests failed - marking build as UNSTABLE"
+                            error("Smoke Tests failed with exit code: ${smokeTestExitCode}")
                         }
 
                         pipelineHelper.finalizeStage('Smoke Tests')
@@ -496,9 +487,6 @@ pipeline {
                 allOf {
                     expression { stageConditionMet('20-reproducible-compare') }
                     expression { params.SCM_REF != null && params.SCM_REF != '' }
-                    expression {
-                        currentBuild.result == null || currentBuild.result == 'SUCCESS'
-                    }
                 }
             }
             steps {
@@ -537,10 +525,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('14-aqa-tests') }
-                    expression { env.SMOKE_TESTS_PASSED == 'true' }
-                }
+                expression { stageConditionMet('14-aqa-tests') }
             }
             steps {
                 script {
@@ -564,18 +549,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('15-tck-tests') }
-                    expression { env.CONFIG_VARIANT == 'temurin' }
-                    expression { env.SMOKE_TESTS_PASSED == 'true' }
-                    not {
-                        allOf {
-                            expression { env.CONFIG_JAVA_TO_BUILD == 'jdk8u' }
-                            expression { env.CONFIG_ARCHITECTURE == 's390x' }
-                            expression { env.CONFIG_TARGET_OS == 'linux' }
-                        }
-                    }
-                }
+                expression { stageConditionMet('15-tck-tests') }
             }
             steps {
                 script {
