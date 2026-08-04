@@ -71,13 +71,17 @@ def collateAndMergeGroups() {
     def rawGroups    = new JsonSlurper().parseText(collatedJson).groups ?: []
     def mergedMap    = [:] as LinkedHashMap
     rawGroups.each { grp ->
+        // Priority groups (e.g. "Stage Selections") are already merged by
+        // collect-stage-params.py and carry stageIds (list); non-priority groups
+        // carry only stageId (scalar) — normalise to a list in both cases.
+        def incomingIds = grp.stageIds instanceof List ? grp.stageIds : [grp.stageId]
         if (mergedMap.containsKey(grp.name)) {
-            mergedMap[grp.name].stageIds    << grp.stageId
+            incomingIds.each { id -> if (id && !mergedMap[grp.name].stageIds.contains(id)) mergedMap[grp.name].stageIds << id }
             mergedMap[grp.name].parameters.addAll(grp.parameters ?: [])
         } else {
             mergedMap[grp.name] = [
                 name:       grp.name,
-                stageIds:   [grp.stageId],
+                stageIds:   new ArrayList(incomingIds),
                 parameters: new ArrayList(grp.parameters ?: [])
             ]
         }
@@ -294,13 +298,17 @@ pipeline {
                     def rawGroups2   = new JsonSlurper().parseText(env.COLLATED_PARAMS_JSON).groups ?: []
                     def mergedMap2   = [:] as LinkedHashMap
                     rawGroups2.each { grp ->
+                        // Priority groups (e.g. "Stage Selections") are already merged by
+                        // collect-stage-params.py and carry stageIds (list); non-priority groups
+                        // carry only stageId (scalar) — normalise to a list in both cases.
+                        def incomingIds = grp.stageIds instanceof List ? grp.stageIds : [grp.stageId]
                         if (mergedMap2.containsKey(grp.name)) {
-                            mergedMap2[grp.name].stageIds    << grp.stageId
+                            incomingIds.each { id -> if (id && !mergedMap2[grp.name].stageIds.contains(id)) mergedMap2[grp.name].stageIds << id }
                             mergedMap2[grp.name].parameters.addAll(grp.parameters ?: [])
                         } else {
                             mergedMap2[grp.name] = [
                                 name:          grp.name,
-                                stageIds:      [grp.stageId],
+                                stageIds:      new ArrayList(incomingIds),
                                 stageDisabled: grp.stageDisabled ?: false,
                                 parameters:    new ArrayList(grp.parameters ?: [])
                             ]
