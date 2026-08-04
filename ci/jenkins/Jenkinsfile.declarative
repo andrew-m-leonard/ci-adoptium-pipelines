@@ -269,7 +269,7 @@ pipeline {
                     ensureLibsLoaded('Assemble Images')
                     nodeAgentHelper.waitForActiveNode(getStageLabel('Assemble Images'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Assemble Images') {
-                        def config = pipelineHelper.initializeStage('Assemble Images', ['Build'], 'pipeline-config.json,signed-jmods/**/*')
+                        def config = pipelineHelper.initializeStage('Assemble Images', ['Internal Code Sign'], 'pipeline-config.json,signed-jmods/**/*')
 
                         def assembleExitCode = stageRunner.run('04-assemble-images', config)
                         if (assembleExitCode != 0) { error("Assemble Images failed with exit code: ${assembleExitCode}") }
@@ -293,7 +293,7 @@ pipeline {
                     ensureLibsLoaded('Post-Build Code Sign')
                     nodeAgentHelper.waitForActiveNode(getStageLabel('Post-Build Code Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Post-Build Code Sign') {
-                        def config = pipelineHelper.initializeStage('Post-Build Code Sign', ['Assemble Images'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
+                        def config = pipelineHelper.initializeStage('Post-Build Code Sign', ['Build'], 'pipeline-config.json,workspace/target/**/*.tar.gz,workspace/target/**/*.zip,workspace/target/metadata/**/*')
 
                         def signExitCode = stageRunner.run('06-post-build-code-sign', config)
                         if (signExitCode != 0) { error("Post-Build Code Sign failed with exit code: ${signExitCode}") }
@@ -370,7 +370,7 @@ pipeline {
                     ensureLibsLoaded('SBOM Sign')
                     nodeAgentHelper.waitForActiveNode(getStageLabel('SBOM Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('SBOM Sign') {
-                        def config = pipelineHelper.initializeStage('SBOM Sign', ['Post-Build Code Sign'], 'pipeline-config.json,**/*.json')
+                        def config = pipelineHelper.initializeStage('SBOM Sign', ['Build'], 'pipeline-config.json,**/*.json')
 
                         def sbomExitCode = stageRunner.run('09-sbom-sign', config)
                         if (sbomExitCode != 0) { error("SBOM Sign failed with exit code: ${sbomExitCode}") }
@@ -399,7 +399,7 @@ pipeline {
                     ensureLibsLoaded('Digital Artifact Sign')
                     nodeAgentHelper.waitForActiveNode(getStageLabel('Digital Artifact Sign'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Digital Artifact Sign') {
-                        def config = pipelineHelper.initializeStage('Digital Artifact Sign', ['Post-Build Code Sign'], 'pipeline-config.json,signed/**/*,signed-installers/**/*,signed-sbom/**/*')
+                        def config = pipelineHelper.initializeStage('Digital Artifact Sign', ['Post-Build Code Sign', 'SBOM Sign'], 'pipeline-config.json,signed/**/*,signed-installers/**/*,signed-sbom/**/*')
 
                         def gpgExitCode = stageRunner.run('10-digital-artifact-sign', config)
                         if (gpgExitCode != 0) { error("Digital Artifact Sign failed with exit code: ${gpgExitCode}") }
@@ -428,7 +428,7 @@ pipeline {
                     ensureLibsLoaded('Verify Signing')
                     nodeAgentHelper.waitForActiveNode(getStageLabel('Verify Signing'), getActiveNodeTimeout())
                     pipelineHelper.executeStageWithTracking('Verify Signing') {
-                        def config = pipelineHelper.initializeStage('Verify Signing', ['Digital Artifact Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
+                        def config = pipelineHelper.initializeStage('Verify Signing', ['Digital Artifact Sign', 'SBOM Sign', 'Code Sign Installer', 'Post-Build Code Sign'], 'pipeline-config.json,signed/**/*,*.sig,*.asc')
 
                         def verifyExitCode = stageRunner.run('11-verify-signing', config)
                         if (verifyExitCode != 0) { error("Verify Signing failed with exit code: ${verifyExitCode}") }
