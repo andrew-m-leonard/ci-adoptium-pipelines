@@ -78,7 +78,7 @@ Stages are invoked by the pipeline runner via [`StageScriptRunner.groovy`](../ci
 Clones `temurin-build`, invokes `build-farm/make-adopt-build-farm.sh`, copies outputs to `TARGET_DIR`.
 
 **Inputs:** `CONFIG_FILE` (for all build parameters)
-**Outputs:** `${TARGET_DIR}/*.tar.gz` or `*.zip`, `*.json` (SBOM if `--create-sbom`), `build-metadata.json`, `checksums.txt`
+**Outputs:** `${TARGET_DIR}/*.tar.gz` or `*.zip`, `*.json` (SBOM if `CREATE_SBOM=true`), `build-metadata.json`, `checksums.txt`
 **Extra env:** none required beyond standard set
 
 Key functions: `setup_build_environment`, `setup_temurin_build`, `setup_reproducible_build_padding` (fetches upstream SBOM to derive workspace path length for reproducible builds), `prepare_workspace`, `execute_build`, `extract_build_metadata`, `organize_build_outputs`
@@ -132,7 +132,7 @@ Code signs installer packages (`.msi` on Windows, `.pkg` on macOS). On macOS als
 
 ### `09-sbom-sign.sh` — SBOM Sign `STUB`
 
-JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM document. Must run before `10-digital-artifact-sign` so the signed SBOM is included in GPG armoring. Only runs when `--create-sbom` is in `EXTRA_BUILD_ARGS`.
+JSF-signs the SBOM by embedding a JSON signature directly inside the SBOM document. Must run before `10-digital-artifact-sign` so the signed SBOM is included in GPG armoring. Only runs when the `CREATE_SBOM` stage parameter is true.
 
 **Inputs:** `INPUT_ARTIFACTS_DIR` containing SBOM JSON files
 **Outputs:** `TARGET_DIR` containing JSF-signed SBOM files
@@ -159,7 +159,7 @@ Verifies that all necessary signing has been completed: Windows/macOS executable
 
 ### `12-validate-sbom.sh` — Validate SBOM `STUB`
 
-Validates SBOM files produced during Build. Vendor-specific (tooling and acceptance criteria vary). Only runs when `--create-sbom` is present in `EXTRA_BUILD_ARGS`.
+Validates SBOM files produced during Build. Vendor-specific (tooling and acceptance criteria vary). Only runs when the `CREATE_SBOM` stage parameter is true.
 
 The Temurin implementation clones `temurin-build` and invokes `tooling/validateSBOM.sh`. It lives in `ci-temurin-config/vendor-scripts/12-validate-sbom.sh`.
 

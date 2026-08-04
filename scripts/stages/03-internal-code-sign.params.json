@@ -1,8 +1,10 @@
 {
   "stageId": "03-internal-code-sign",
   "stageDisabled": false,
-  "stageCondition": [],
-  "description": "Parameters consumed by signing stages. SIGN_ARTIFACTS is defined here and referenced via stageCondition by stages 06-post-build-code-sign, 08-code-sign-installer, 09-sbom-sign, 10-digital-artifact-sign, and 11-verify-signing. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/03-internal-code-sign.params.json in the config repo.",
+  "stageCondition": [
+    { "param": "SIGN_ARTIFACTS", "value": true }
+  ],
+  "description": "Parameters consumed by signing stages. SIGN_ARTIFACTS is defined here and referenced via stageCondition by stages 04-assemble-images, 06-post-build-code-sign, 08-code-sign-installer, 09-sbom-sign, 10-digital-artifact-sign, and 11-verify-signing. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/03-internal-code-sign.params.json in the config repo.",
   "parameterGroups": [
     {
       "name": "Stage Selections",

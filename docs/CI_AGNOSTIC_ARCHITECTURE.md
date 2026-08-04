@@ -152,10 +152,10 @@ Stage execution is controlled by `stageCondition` entries in each stage's `param
 | 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | — | `SIGN_ARTIFACTS=true` | Assemble Images or Build | Code-signed executables |
 | 07 | Build Installer | `07-installer.sh` | `ENABLE_INSTALLERS` | `ENABLE_INSTALLERS=true` | Build | `.msi` / `.pkg` / `.deb` / `.rpm` |
 | 08 | Code Sign Installer | `08-code-sign-installer.sh` | — | `ENABLE_INSTALLERS=true`, `SIGN_ARTIFACTS=true` | Build Installer | Signed + notarized installers |
-| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `--create-sbom` | Post-Build Code Sign | JSF-signed SBOM |
+| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `CREATE_SBOM=true` | Post-Build Code Sign | JSF-signed SBOM |
 | 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | SBOM Sign | `.sig` / `.asc` GPG signatures |
 | 11 | Verify Signing | `11-verify-signing.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | Digital Artifact Sign | Verification report |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `--create-sbom` in build args | Build | SBOM validation report |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `CREATE_SBOM=true` | Build | SBOM validation report |
 | 13 | Smoke Tests | `13-smoke-tests.sh` | — | `RUN_TESTS=true`, build succeeded | Build | Test results |
 | 14 | AQA Tests | `14-aqa-tests.sh` | `RUN_TESTS` | `RUN_TESTS=true`, smoke tests passed | Smoke Tests | AQA test results |
 | 15 | TCK Tests | `15-tck-tests.sh` | `ENABLE_TCK` | `ENABLE_TCK=true`, Temurin variant, smoke tests passed | Smoke Tests | TCK test results |
@@ -219,7 +219,7 @@ main() {
     variant="$(get_config_value       "${config}" ".buildConfig.VARIANT")"
     target_os="$(get_config_value     "${config}" ".buildConfig.TARGET_OS")"
     architecture="$(get_config_value  "${config}" ".buildConfig.ARCHITECTURE")"
-    build_args="$(get_config_value    "${config}" ".buildConfig.EXTRA_BUILD_ARGS")"
+    build_args="$(get_config_value    "${config}" ".buildConfig.BUILD_ARGS")"
 
     log_info "Building: ${java_to_build} ${variant} ${target_os}-${architecture}"
 

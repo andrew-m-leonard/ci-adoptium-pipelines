@@ -1,7 +1,9 @@
 {
   "stageId": "14-aqa-tests",
   "stageDisabled": false,
-  "stageCondition": [],
+  "stageCondition": [
+    { "param": "RUN_TESTS", "value": true }
+  ],
   "description": "Parameters consumed by the AQA test stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/14-aqa-tests.params.json in the config repo.",
   "parameterGroups": [
     {

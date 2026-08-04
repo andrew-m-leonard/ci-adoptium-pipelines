@@ -39,13 +39,16 @@ main() {
     validate_standard_environment
 
     # Read build configuration from CONFIG_* environment variables set by the pipeline.
-    # These are always present — avoids a jq dependency in the build container.
+    # CONFIG_BUILD_ARGS / CONFIG_CONFIGURE_ARGS are the config-file baselines from
+    # platform buildConfigurations. EXTRA_BUILD_ARGS / EXTRA_CONFIGURE_ARGS are the
+    # stage params set by the operator at trigger time. Both are merged below.
     local java_to_build="${CONFIG_JAVA_TO_BUILD:-}"
     local target_os="${CONFIG_TARGET_OS:-}"
     local architecture="${CONFIG_ARCHITECTURE:-}"
     local variant="${CONFIG_VARIANT:-}"
-    local build_args="${CONFIG_EXTRA_BUILD_ARGS:-}"
-    local configure_args="${CONFIG_EXTRA_CONFIGURE_ARGS:-}"
+    local build_args="${CONFIG_BUILD_ARGS:-}${EXTRA_BUILD_ARGS:+ ${EXTRA_BUILD_ARGS}}"
+    local configure_args="${CONFIG_CONFIGURE_ARGS:-}${EXTRA_CONFIGURE_ARGS:+ ${EXTRA_CONFIGURE_ARGS}}"
+    local make_args="${EXTRA_MAKE_OPTIONS:-}"
     local scm_ref="${SCM_REF:-}"
     local build_ref="${CONFIG_BUILD_REF:-master}"
     local build_repo_url="${CONFIG_BUILD_REPO_URL:-https://github.com/adoptium/temurin-build.git}"
@@ -102,7 +105,7 @@ main() {
     prepare_output_dir "${TARGET_DIR}"
 
     # Execute build using build-farm/make-adopt-build-farm.sh
-    execute_build "${java_to_build}" "${target_os}" "${architecture}" "${variant}" "${build_args}" "${scm_ref}" "${configure_args}"
+    execute_build "${java_to_build}" "${target_os}" "${architecture}" "${variant}" "${build_args}" "${scm_ref}" "${configure_args}" "${make_args}"
 
     # Extract and save metadata
     extract_build_metadata
@@ -376,11 +379,19 @@ execute_build() {
     local build_args=$5
     local scm_ref=$6
     local configure_args=$7
+    local make_args=${8:-}
 
     log_section "Executing JDK Build"
 
     local build_repo_dir="${WORKSPACE}/temurin-build"
     local build_script="build-farm/make-adopt-build-farm.sh"
+
+    # Append --make-args to BUILD_ARGS if EXTRA_MAKE_OPTIONS is set.
+    # make-adopt-build-farm.sh does not have a separate MAKE_ARGS env var;
+    # extra make arguments are passed via --make-args inside BUILD_ARGS.
+    if [[ -n "${make_args}" ]]; then
+        build_args="${build_args:+${build_args} }--make-args \"${make_args}\""
+    fi
 
     log_info "Build parameters:"
     log_info "  Script: ${build_script}"
@@ -392,16 +403,18 @@ execute_build() {
     log_info "  Configure Args: ${configure_args}"
     log_info "  SCM Ref: ${scm_ref}"
 
-    # Set build environment variables (matching Jenkins pipeline)
+    # Set build environment variables for make-adopt-build-farm.sh.
+    # BUILD_ARGS and CONFIGURE_ARGS are the names that temurin-build expects;
+    # they are populated from the pipeline's EXTRA_BUILD_ARGS / EXTRA_CONFIGURE_ARGS values.
     export JAVA_TO_BUILD="${java_version}"
     export TARGET_OS="${os}"
     export ARCHITECTURE="${arch}"
     export VARIANT="${variant}"
-    export EXTRA_BUILD_ARGS="${build_args}"
+    export BUILD_ARGS="${build_args}"
     export WORKSPACE="${WORKSPACE}"
     export BUILD_NUMBER="${BUILD_NUMBER}"
     export SCM_REF="${scm_ref}"
-    export EXTRA_CONFIGURE_ARGS="${configure_args}"
+    export CONFIGURE_ARGS="${configure_args}"
 
     # Determine output filename if not already set
     if [[ -z "${FILENAME:-}" ]]; then
@@ -421,8 +434,9 @@ execute_build() {
     log_debug "  TARGET_OS=${TARGET_OS}"
     log_debug "  ARCHITECTURE=${ARCHITECTURE}"
     log_debug "  VARIANT=${VARIANT}"
-    log_debug "  EXTRA_BUILD_ARGS=${EXTRA_BUILD_ARGS}"
-    log_debug "  EXTRA_CONFIGURE_ARGS=${EXTRA_CONFIGURE_ARGS}"
+    log_debug "  BUILD_ARGS=${BUILD_ARGS}"
+    log_debug "  CONFIGURE_ARGS=${CONFIGURE_ARGS}"
+    log_debug "  EXTRA_MAKE_OPTIONS=${make_args}"
     log_debug "  WORKSPACE=${WORKSPACE}"
     log_debug "  BUILD_NUMBER=${BUILD_NUMBER}"
     log_debug "  SCM_REF=${SCM_REF}"

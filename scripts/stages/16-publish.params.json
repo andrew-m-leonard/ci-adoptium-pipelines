@@ -1,7 +1,9 @@
 {
   "stageId": "16-publish",
   "stageDisabled": false,
-  "stageCondition": [],
+  "stageCondition": [
+    { "param": "PUBLISH_ARTIFACTS", "value": true }
+  ],
   "description": "Parameters consumed by the publish artifacts stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/16-publish.params.json in the config repo.",
   "parameterGroups": [
     {

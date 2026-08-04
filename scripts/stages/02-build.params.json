@@ -35,8 +35,8 @@
         {
           "name": "EXTRA_BUILD_ARGS",
           "type": "string",
-          "default": "--create-jre-image --create-sbom",
-          "description": "Additional arguments passed to the build stage script (e.g. --create-jre-image --create-sbom)"
+          "default": "",
+          "description": "Additional arguments appended to the config-file buildArgs when invoking the build stage script. Leave empty to use only the platform config defaults."
         },
         {
           "name": "EXTRA_CONFIGURE_ARGS",

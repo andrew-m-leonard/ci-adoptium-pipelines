@@ -63,8 +63,13 @@ def loadStageConditions() {
  *
  * Reads env.COLLATED_STAGE_CONDITIONS (populated by loadStageConditions() in
  * Initialize).  Returns true when all conditions pass, or when no conditions are
- * defined for the stage (unconditional).  Value comparison is string-based to
- * handle the coercion that occurs when booleans travel through Jenkins env vars.
+ * defined for the stage (unconditional).
+ *
+ * Value matching:
+ *   - If the condition value begins with "regex:" the remainder is treated as a
+ *     Java regex and matched against the actual value using find() (substring match).
+ *   - Otherwise a case-insensitive string equality check is performed to handle
+ *     boolean coercion ('true'/'false' strings from Jenkins env vars).
  *
  * Called from within when{} expression{} blocks — must be CPS-safe.
  */
@@ -76,7 +81,11 @@ def stageConditionMet(String stageId) {
     return conditions.every { cond ->
         // Check job params first (explicit user override), then env
         def actual = params[cond.param]?.toString() ?: env[cond.param] ?: ''
-        return actual == cond.value.toString()
+        def expected = cond.value.toString()
+        if (expected.startsWith('regex:')) {
+            return actual =~ expected.substring('regex:'.length())
+        }
+        return actual.equalsIgnoreCase(expected)
     }
 }
 
@@ -219,7 +228,6 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
                     expression {
                         return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
                                env.CONFIG_JAVA_TO_BUILD != 'jdk8u'
@@ -249,8 +257,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                    expression { stageConditionMet('04-assemble-images') }
                     expression {
                         return (env.CONFIG_TARGET_OS == 'mac' || env.CONFIG_TARGET_OS == 'windows') &&
                                env.CONFIG_JAVA_TO_BUILD != 'jdk8u'
@@ -279,10 +286,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
-                }
+                expression { stageConditionMet('06-post-build-code-sign') }
             }
             steps {
                 script {
@@ -330,10 +334,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                allOf {
-                    expression { stageConditionMet('08-code-sign-installer') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
-                }
+                expression { stageConditionMet('08-code-sign-installer') }
             }
             steps {
                 script {
@@ -358,9 +359,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
-                    expression { env.CONFIG_EXTRA_BUILD_ARGS?.contains('--create-sbom') }
+                    expression { stageConditionMet('09-sbom-sign') }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
                     }
@@ -389,8 +388,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                    expression { stageConditionMet('10-digital-artifact-sign') }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
                     }
@@ -419,8 +417,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { stageConditionMet('03-internal-code-sign') }
-                    expression { env.CONFIG_ENABLE_SIGNER == 'true' }
+                    expression { stageConditionMet('11-verify-signing') }
                     not {
                         expression { env.JOB_NAME?.contains('pr-tester') }
                     }
@@ -448,7 +445,7 @@ pipeline {
             }
             when {
                 beforeAgent true
-                expression { env.CONFIG_EXTRA_BUILD_ARGS?.contains('--create-sbom') }
+                expression { stageConditionMet('12-validate-sbom') }
             }
             steps {
                 script {

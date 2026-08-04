@@ -217,8 +217,14 @@ class PipelineRunner:
         or if no conditions are defined (unconditional stage).
 
         Checks _stage_param_values (explicit CLI overrides) first, then the
-        process environment.  Value comparison is string-based to match the
-        Jenkins behaviour where booleans travel as 'true'/'false' strings.
+        process environment.
+
+        Value matching:
+          - If the condition value begins with "regex:" the remainder is treated
+            as a Python regex and matched with re.search() (substring match,
+            mirroring Groovy's =~ find operator).
+          - Otherwise a case-insensitive string equality check is performed to
+            handle boolean coercion ('true'/'false' strings).
         """
         if self._stage_disabled.get(stage_id, False):
             print(f"  ↳ [{stage_id}] stageDisabled=true — skipping")
@@ -226,13 +232,20 @@ class PipelineRunner:
         conditions = self._stage_conditions.get(stage_id, [])
         for cond in conditions:
             param_name = cond['param']
-            expected   = str(cond['value']).lower()
+            expected   = str(cond['value'])
             actual     = str(
                 self._stage_param_values.get(param_name, os.environ.get(param_name, ''))
-            ).lower()
-            if actual != expected:
-                print(f"  ↳ [{stage_id}] skipped: {param_name}={actual!r} (need {expected!r})")
-                return False
+            )
+            if expected.startswith('regex:'):
+                pattern = expected[len('regex:'):]
+                if not re.search(pattern, actual):
+                    print(f"  ↳ [{stage_id}] skipped: {param_name}={actual!r} "
+                          f"(regex {pattern!r} did not match)")
+                    return False
+            else:
+                if actual.lower() != expected.lower():
+                    print(f"  ↳ [{stage_id}] skipped: {param_name}={actual!r} (need {expected!r})")
+                    return False
         return True
 
     def _make_resolver(self) -> StageResolver:
@@ -250,7 +263,7 @@ class PipelineRunner:
             config_repo_root is not None
             and self._resolver.config_repo_root != config_repo_root
         ):
-            self._resolver = StageResolver(self.script_dir, config_repo_root, self.config_file)
+            self._resolver = StageResolver(self.script_dir, config_repo_root)
             src = str(config_repo_root) if config_repo_root else 'defaults only'
             print(f"ℹ️  StageResolver initialised (config repo: {src})")
 

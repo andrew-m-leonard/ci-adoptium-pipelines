@@ -142,14 +142,18 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     pipelineConfig.parameters.enableTCK = params.ENABLE_TCK
     writeJSON(file: 'pipeline-config.json', json: pipelineConfig, pretty: 4)
 
-    // Set CI-agnostic environment variables for use in when{} blocks
+    // Set CI-agnostic environment variables for use in when{} blocks.
+    // Only genuinely derived/resolved values live here — raw stage param values
+    // are forwarded as-is via STAGE_PARAM_NAMES and read directly via params.*.
     env.CONFIG_VARIANT           = pipelineConfig.buildConfig.VARIANT
     env.CONFIG_TARGET_OS         = pipelineConfig.buildConfig.TARGET_OS
     env.CONFIG_ARCHITECTURE      = pipelineConfig.buildConfig.ARCHITECTURE
     env.CONFIG_JAVA_TO_BUILD     = pipelineConfig.buildConfig.JAVA_TO_BUILD
     env.CONFIG_NODE_LABEL        = pipelineConfig.buildConfig.NODE_LABEL ?: 'worker'
-    env.CONFIG_EXTRA_BUILD_ARGS  = pipelineConfig.buildConfig.EXTRA_BUILD_ARGS ?: ''
-    env.CONFIG_EXTRA_CONFIGURE_ARGS  = pipelineConfig.buildConfig.EXTRA_CONFIGURE_ARGS ?: ''
+    // Config-file baseline args (from platform buildConfigurations, not stage params).
+    // Stage scripts merge these with EXTRA_BUILD_ARGS / EXTRA_CONFIGURE_ARGS at runtime.
+    env.CONFIG_BUILD_ARGS        = pipelineConfig.buildConfig.BUILD_ARGS ?: ''
+    env.CONFIG_CONFIGURE_ARGS    = pipelineConfig.buildConfig.CONFIGURE_ARGS ?: ''
     env.CONFIG_BUILD_REF         = pipelineConfig.refs.buildRef ?: 'master'
     env.CONFIG_BUILD_REPO_URL    = pipelineConfig.refs.buildRepoUrl ?: ''
     env.CONFIG_CLEAN_WORKSPACE   = pipelineConfig.parameters.cleanWorkspaceAfterStage?.toString() ?: 'false'
@@ -160,12 +164,9 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     env.CONFIG_DOCKER_CREDENTIAL = pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: ''
     env.CONFIG_DOCKER_ARGS       = pipelineConfig.buildConfig.DOCKER_ARGS ?: ''
     env.CONFIG_PODMAN_ARGS       = pipelineConfig.buildConfig.PODMAN_ARGS ?: ''
-    env.CONFIG_RUN_TESTS         = pipelineConfig.parameters.enableTests.toString()
-    env.CONFIG_ENABLE_INSTALLERS = pipelineConfig.parameters.enableInstallers.toString()
-    env.CONFIG_SIGN_ARTIFACTS    = pipelineConfig.parameters.enableSigner.toString()
-    env.CONFIG_ENABLE_TCK        = pipelineConfig.parameters.enableTCK.toString()
-    env.CONFIG_PUBLISH_ARTIFACTS = params.PUBLISH_ARTIFACTS.toString()
-    env.AQA_REF                  = pipelineConfig.refs.aqaRef
+    // CONFIG_AQA_REF: resolved ref (param if non-empty, else config repo default).
+    // Distinct from the raw AQA_REF stage param which may be empty.
+    env.CONFIG_AQA_REF           = pipelineConfig.refs.aqaRef ?: ''
     env.SMOKE_TESTS_PASSED       = 'false'
 
     return pipelineConfig
@@ -225,7 +226,8 @@ def summarizePipelineConfig(def pipelineConfig, def jenkinsConfig = null) {
     echo "  Variant: ${pipelineConfig.buildConfig.VARIANT}"
     echo "  OS: ${pipelineConfig.buildConfig.TARGET_OS}"
     echo "  Architecture: ${pipelineConfig.buildConfig.ARCHITECTURE}"
-    echo "  Build Args: ${pipelineConfig.buildConfig.EXTRA_BUILD_ARGS}"
+    echo "  Build Args: ${pipelineConfig.buildConfig.BUILD_ARGS}"
+    echo "  Configure Args: ${pipelineConfig.buildConfig.CONFIGURE_ARGS ?: '(none)'}"
     echo "  Docker Image: ${pipelineConfig.buildConfig.DOCKER_IMAGE ?: '(none)'}"
     echo "  Docker Registry: ${pipelineConfig.buildConfig.DOCKER_REGISTRY ?: '(none)'}"
     echo "  Docker Credential: ${pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: '(none)'}"

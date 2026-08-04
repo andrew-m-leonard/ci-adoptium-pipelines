@@ -1,7 +1,9 @@
 {
   "stageId": "15-tck-tests",
   "stageDisabled": false,
-  "stageCondition": [],
+  "stageCondition": [
+    { "param": "ENABLE_TCK", "value": true }
+  ],
   "description": "Parameters consumed by the TCK test stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/15-tck-tests.params.json in the config repo.",
   "parameterGroups": [
     {

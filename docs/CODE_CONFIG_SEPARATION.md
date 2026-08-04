@@ -51,7 +51,7 @@ This is the top-level config file that glues everything together. It tells the s
 ```json
 {
   "defaultVariant": "temurin",
-  "defaultBuildArgs": "--create-jre-image --create-sbom",
+  "defaultBuildArgs": "--create-jre-image",
   "defaultConfigureArgs": "",
   "defaultScmReference": "",
   "configFilePrefix": "configurations/",
@@ -151,7 +151,7 @@ One file per JDK version. Describes every supported build platform and its platf
       "additionalNodeLabels": "sw.tool.xcode.15_0_1",
       "configureArgs": "--enable-dtrace",
       "buildArgs": {
-        "temurin": "--create-jre-image --create-sbom",
+        "temurin": "--create-jre-image",
         "hotspot": "--create-jre-image"
       },
       "dockerImage": ""
@@ -162,7 +162,7 @@ One file per JDK version. Describes every supported build platform and its platf
       "additionalNodeLabels": "",
       "dockerImage": "adoptopenjdk/centos7_build_image",
       "configureArgs": "--enable-unlimited-crypto",
-      "buildArgs": "--create-jre-image --create-sbom"
+      "buildArgs": "--create-jre-image"
     }
   }
 }
@@ -204,11 +204,11 @@ Fields marked as "string or object" support **variant-specific values**: supply 
 
 ```json
 // Plain string — same value for all variants
-"buildArgs": "--create-jre-image --create-sbom"
+"buildArgs": "--create-jre-image"
 
 // Variant-specific — different value per variant; "default" is the fallback
 "buildArgs": {
-  "temurin": "--create-jre-image --create-sbom",
+  "temurin": "--create-jre-image",
   "hotspot": "--create-jre-image",
   "default": "--create-jre-image"
 }
@@ -234,8 +234,8 @@ This file is not stored in any repository — it is generated fresh for each bui
     "TARGET_OS": "mac",
     "ARCHITECTURE": "aarch64",
     "VARIANT": "temurin",
-    "EXTRA_BUILD_ARGS": "--create-jre-image --create-sbom",
-    "EXTRA_CONFIGURE_ARGS": "--enable-dtrace",
+    "BUILD_ARGS": "--create-jre-image",
+    "CONFIGURE_ARGS": "--enable-dtrace",
     "NODE_LABEL": "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
     "DOCKER_IMAGE": ""
   },

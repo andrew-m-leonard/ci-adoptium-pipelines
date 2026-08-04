@@ -99,7 +99,7 @@ def generate_adoptium_pipeline_config(version_configs: List[Dict[str, Any]]) -> 
 
     return {
         "activeJdkVersions": active_versions,
-        "defaultBuildArgs": "--create-jre-image --create-sbom",
+        "defaultBuildArgs": "",
         "defaultConfigureArgs": "",
         "defaultVariant": "temurin",
         "configFilePrefix": "configurations/",
@@ -138,6 +138,29 @@ PLATFORM_KEY_MAP = {
     'sparcv9Solaris':     'sparcv9_solaris',
     'x64Solaris':         'x86-64_solaris',
 }
+
+
+def _strip_create_sbom(args_str: str) -> str:
+    """Remove --create-sbom flag from a buildArgs string, collapsing extra whitespace."""
+    return re.sub(r'\s*--create-sbom\b', '', args_str).strip()
+
+
+def _strip_create_sbom_from_build_args(platform_config: Dict[str, Any]) -> None:
+    """Remove --create-sbom from buildArgs in a platform config entry (in-place).
+
+    buildArgs may be a plain string or a variant dict (e.g. {"temurin": "..."}).
+    --create-sbom is now controlled by the CREATE_SBOM stage parameter.
+    """
+    build_args = platform_config.get('buildArgs')
+    if build_args is None:
+        return
+    if isinstance(build_args, str):
+        platform_config['buildArgs'] = _strip_create_sbom(build_args)
+    elif isinstance(build_args, dict):
+        platform_config['buildArgs'] = {
+            variant: _strip_create_sbom(val) if isinstance(val, str) else val
+            for variant, val in build_args.items()
+        }
 
 
 def migrate_platform_keys(config: Dict[str, Any]) -> None:
@@ -358,6 +381,7 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
             "defaultParameters": {
                 "VARIANT": "temurin",
                 "CLEAN_WORKSPACE_AFTER_STAGE": True,
+                "CREATE_SBOM": True,
                 "RUN_TESTS": True,
                 "ENABLE_INSTALLERS": True,
                 "SIGN_ARTIFACTS": True,
@@ -548,6 +572,7 @@ Examples:
                         platform_config.pop("additionalTestParams", None)
                         platform_config.pop("additionalTestLabels", None)
                         migrate_additional_node_labels(platform_config)
+                        _strip_create_sbom_from_build_args(platform_config)
 
                     # Check if the job is disabled in the jdkNN(u).groovy file
                     is_disabled = check_if_job_disabled(args.source, version)

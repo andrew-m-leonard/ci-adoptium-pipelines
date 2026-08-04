@@ -33,6 +33,13 @@ Stage-level metadata fields (top-level in each .params.json):
     the final collated paramNames set — the collator validates this and exits
     non-zero if a reference is dangling.
 
+    String values may begin with "regex:" to trigger a regex match instead of
+    a string equality check.  Example:
+      { "param": "SOME_STRING_PARAM", "value": "regex:.*some-flag.*" }
+    The collator validates that the pattern after "regex:" is a valid Python
+    regex.  Both the Jenkins Groovy evaluator and the local Python runner
+    honour this prefix.
+
 Output JSON (written to --output):
   {
     "groups": [
@@ -160,6 +167,18 @@ def _validate_params_file(data: dict, source: str) -> None:
             raise ValueError(
                 f"[{source}] A stageCondition entry is missing 'value' field: {cond}"
             )
+        # If the value is a string beginning with "regex:" validate the pattern.
+        value = cond['value']
+        if isinstance(value, str) and value.startswith('regex:'):
+            import re as _re
+            pattern = value[len('regex:'):]
+            try:
+                _re.compile(pattern)
+            except _re.error as exc:
+                raise ValueError(
+                    f"[{source}] stageCondition for param '{cond['param']}' has "
+                    f"invalid regex pattern {pattern!r}: {exc}"
+                )
 
 
 # ---------------------------------------------------------------------------

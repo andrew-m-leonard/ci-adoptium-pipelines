@@ -1,0 +1,23 @@
+{
+  "stageId": "09-sbom-sign",
+  "stageDisabled": false,
+  "stageCondition": [
+    { "param": "SIGN_ARTIFACTS", "value": true },
+    { "param": "CREATE_SBOM",    "value": true }
+  ],
+  "description": "Gate-only params.json for the SBOM sign stage. Runs only when SIGN_ARTIFACTS and CREATE_SBOM are both true. SIGN_ARTIFACTS is defined in 03-internal-code-sign.params.json.",
+  "parameterGroups": [
+    {
+      "name": "Stage Selections",
+      "description": "Boolean flags that control which pipeline stages are enabled. All stage-gate parameters are collected here so operators can see and adjust the full execution plan in one place.",
+      "parameters": [
+        {
+          "name": "CREATE_SBOM",
+          "type": "boolean",
+          "default": true,
+          "description": "Generate a Software Bill of Materials (SBOM) during the build stage, and run the SBOM sign and validate-SBOM stages. Enabled by default."
+        }
+      ]
+    }
+  ]
+}

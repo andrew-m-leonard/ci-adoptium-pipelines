@@ -54,7 +54,9 @@
  *       exist inside the container; git tries to exec them and fails.
  */
 def containerEnvFlags() {
-    // Core pipeline vars set by initializeStage() / Jenkinsfile
+    // Derived/resolved CONFIG_* vars set by ConfigHelper.generatePipelineConfig().
+    // Raw stage param values (SIGN_ARTIFACTS, RUN_TESTS, etc.) are NOT listed here —
+    // they arrive automatically via the STAGE_PARAM_NAMES dynamic block below.
     def vars = [
         'WORKSPACE',
         'CONFIG_FILE',
@@ -65,26 +67,30 @@ def containerEnvFlags() {
         'GROUP_UID',
         'JOB_NAME',
         'BUILD_URL',
-        // CONFIG_* vars set by ConfigHelper.generatePipelineConfig()
+        // Derived platform identity — from pipeline-config.json buildConfig
         'CONFIG_VARIANT',
         'CONFIG_TARGET_OS',
         'CONFIG_ARCHITECTURE',
         'CONFIG_JAVA_TO_BUILD',
         'CONFIG_NODE_LABEL',
-        'CONFIG_EXTRA_BUILD_ARGS',
-        'CONFIG_EXTRA_CONFIGURE_ARGS',
+        // Config-file baseline args — merged with EXTRA_BUILD_ARGS/EXTRA_CONFIGURE_ARGS by stage scripts
+        'CONFIG_BUILD_ARGS',
+        'CONFIG_CONFIGURE_ARGS',
+        // Resolved refs — may differ from raw stage params when config repo defaults are used
         'CONFIG_BUILD_REF',
         'CONFIG_BUILD_REPO_URL',
+        'CONFIG_AQA_REF',
+        // Derived booleans — computed from release type or platform config, not direct param mirrors
         'CONFIG_CLEAN_WORKSPACE',
         'CONFIG_EA_BETA_BUILD',
         'CONFIG_COMPARE_BUILD',
-        'CONFIG_RUN_TESTS',
-        'CONFIG_ENABLE_INSTALLERS',
-        'CONFIG_SIGN_ARTIFACTS',
-        'CONFIG_ENABLE_TCK',
-        'CONFIG_PUBLISH_ARTIFACTS',
-        'SCM_REF',
-        'AQA_REF',
+        // Docker/Podman — from platform config, no stage param equivalent
+        'CONFIG_DOCKER_IMAGE',
+        'CONFIG_DOCKER_REGISTRY',
+        'CONFIG_DOCKER_CREDENTIAL',
+        'CONFIG_DOCKER_ARGS',
+        'CONFIG_PODMAN_ARGS',
+        // Pipeline flow state
         'SMOKE_TESTS_PASSED',
     ]
 

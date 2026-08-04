@@ -2,7 +2,7 @@
 # DEFAULT STUB: 12-validate-sbom
 #
 # Validates SBOM (Software Bill of Materials) files produced during the Build
-# stage. Only applicable when SBOMs are generated (--create-sbom in EXTRA_BUILD_ARGS).
+# stage. Only applicable when SBOMs are generated (CREATE_SBOM=true).
 #
 # The validation tooling and acceptance criteria are vendor-specific (e.g.,
 # Temurin uses temurin-build/tooling/validateSBOM.sh).

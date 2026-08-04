@@ -1,7 +1,9 @@
 {
   "stageId": "07-installer",
   "stageDisabled": false,
-  "stageCondition": [],
+  "stageCondition": [
+    { "param": "ENABLE_INSTALLERS", "value": true }
+  ],
   "description": "Parameters consumed by the installer build stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/07-installer.params.json in the config repo.",
   "parameterGroups": [
     {

@@ -26,7 +26,7 @@ repository references that apply regardless of which CI system runs the pipeline
     { "version": "jdk21", "enabled": true },
     { "version": "jdk17", "enabled": false }
   ],
-  "defaultBuildArgs": "--create-jre-image --create-sbom",
+  "defaultBuildArgs": "--create-jre-image",
   "defaultConfigureArgs": "",
   "defaultVariant": "temurin",
   "configFilePrefix": "configurations/",
@@ -155,7 +155,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
       "additionalTestLabels": { "temurin": "!sw.tool.glibc.2_12" },
       "cleanWorkspaceAfterBuild": true,
       "configureArgs": { "temurin": "--enable-dtrace" },
-      "buildArgs": { "temurin": "--create-jre-image --create-sbom" },
+      "buildArgs": { "temurin": "--create-jre-image" },
       "additionalSmokeTestNodeLabels": ""
     }
   }

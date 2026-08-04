@@ -142,10 +142,10 @@ Stage execution is controlled by two mechanisms:
 | 06 | Post-Build Code Sign | `06-post-build-code-sign.sh` | — | `SIGN_ARTIFACTS=true` | false |
 | 07 | Build Installer | `07-installer.sh` | `ENABLE_INSTALLERS` | `ENABLE_INSTALLERS=true` | false |
 | 08 | Code Sign Installer | `08-code-sign-installer.sh` | — | `ENABLE_INSTALLERS=true`, `SIGN_ARTIFACTS=true` | false |
-| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `--create-sbom` in build args | false |
+| 09 | SBOM Sign | `09-sbom-sign.sh` | — | `SIGN_ARTIFACTS=true`, `CREATE_SBOM=true` | false |
 | 10 | Digital Artifact Sign | `10-digital-artifact-sign.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | false |
 | 11 | Verify Signing | `11-verify-signing.sh` | — | `SIGN_ARTIFACTS=true`, non-PR | false |
-| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `--create-sbom` in build args (vendor impl required) | false |
+| 12 | Validate SBOM | `12-validate-sbom.sh` | — | `CREATE_SBOM=true` (vendor impl required) | false |
 | 13 | Smoke Tests | `13-smoke-tests.sh` | — | `RUN_TESTS=true`, build succeeded | false |
 | 14 | AQA Tests | `14-aqa-tests.sh` | `RUN_TESTS` | `RUN_TESTS=true`, smoke tests passed | false |
 | 15 | TCK Tests | `15-tck-tests.sh` | `ENABLE_TCK` | `ENABLE_TCK=true`, Temurin, smoke tests passed | false |

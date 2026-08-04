@@ -1,0 +1,8 @@
+{
+  "stageId": "13-smoke-tests",
+  "stageDisabled": false,
+  "stageCondition": [
+    { "param": "RUN_TESTS", "value": true }
+  ],
+  "description": "Gate-only params.json for the smoke-tests stage. This stage has no parameters of its own — it runs only when RUN_TESTS is true. RUN_TESTS is defined in 14-aqa-tests.params.json."
+}
