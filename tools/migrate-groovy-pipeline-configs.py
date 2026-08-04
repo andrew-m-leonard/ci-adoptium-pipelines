@@ -49,6 +49,27 @@ def find_converter_script() -> Path:
     )
 
 
+def _find_pipeline_root() -> Path:
+    """Return the ci-adoptium-pipelines repository root (parent of tools/)."""
+    return Path(__file__).parent.parent
+
+
+def load_pipeline_stages() -> list[dict]:
+    """Load the ordered stage list from scripts/stages/pipeline-stages.json.
+
+    Returns a list of dicts with at least 'id' and 'label' keys, in pipeline order.
+    Raises FileNotFoundError if the registry file is missing.
+    """
+    registry = _find_pipeline_root() / 'scripts' / 'stages' / 'pipeline-stages.json'
+    if not registry.exists():
+        raise FileNotFoundError(
+            f"pipeline-stages.json not found: {registry}\n"
+            "Ensure scripts/stages/pipeline-stages.json exists in the repository."
+        )
+    with open(registry, 'r') as f:
+        return json.load(f)['pipelineStages']
+
+
 def extract_version_from_filename(filename: str) -> str | None:
     """Extract JDK version from filename, removing 'u' suffix."""
     match = re.search(r'(jdk\d+)u?_pipeline_config', filename)
@@ -371,8 +392,48 @@ def migrate_additional_node_labels(platform_config: Dict[str, Any]) -> None:
         }
 
 
+# Default agent label template per stageId.
+# Keys match the "id" fields in scripts/stages/pipeline-stages.json exactly.
+# Stages not listed here default to "ci.role.worker".
+# Placeholders {os} and {arch} are resolved at runtime to sw.os.* / hw.arch.*
+# schema tokens by load-jenkins-json-config.py.
+_STAGE_AGENT_LABEL_DEFAULTS: Dict[str, str] = {
+    "01-initialize":           "ci.role.worker",
+    "02-build":                "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "03-internal-code-sign":   "eclipse-codesign",
+    "04-assemble-images":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "06-post-build-code-sign": "ci.role.worker",
+    "07-installer":            "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "08-code-sign-installer":  "ci.role.worker",
+    "09-sbom-sign":            "ci.role.worker",
+    "10-digital-artifact-sign":"ci.role.worker",
+    "11-verify-signing":       "ci.role.worker",
+    "12-validate-sbom":        "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "13-smoke-tests":          "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "14-aqa-tests":            "ci.role.build&&hw.arch.{arch}",
+    "15-tck-tests":            "ci.role.build&&hw.arch.{arch}",
+    "16-publish":              "ci.role.worker",
+    "20-reproducible-compare": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+}
+
+
 def generate_jenkins_job_config() -> Dict[str, Any]:
-    """Generate jenkins_job_config.json — Jenkins-specific configuration."""
+    """Generate jenkins_job_config.json — Jenkins-specific configuration.
+
+    stageAgentLabels keys are derived from scripts/stages/pipeline-stages.json
+    (the canonical stage registry) so that the generated file always uses stageIds
+    as keys, matching what Jenkinsfile.declarative and load-jenkins-json-config.py
+    expect.  Any stage present in the registry but absent from
+    _STAGE_AGENT_LABEL_DEFAULTS receives 'ci.role.worker' as a safe default.
+    """
+    stages = load_pipeline_stages()
+    stage_agent_labels: Dict[str, str] = {"__any__": "ci.role.worker"}
+    for stage in stages:
+        stage_id = stage['id']
+        stage_agent_labels[stage_id] = _STAGE_AGENT_LABEL_DEFAULTS.get(
+            stage_id, "ci.role.worker"
+        )
+
     return {
         "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
         "pipelineTimeoutHours": 8,
@@ -395,28 +456,7 @@ def generate_jenkins_job_config() -> Dict[str, Any]:
                 "artifactNumToKeep": 10
             }
         },
-        # Per-stage agent label templates.  Placeholders {os} and {arch} are
-        # resolved at runtime to sw.os.* / hw.arch.* schema tokens by
-        # load-json-config.py via its OS_TO_LABEL / ARCH_TO_LABEL maps.
-        "stageAgentLabels": {
-            "__any__":                    "ci.role.worker",
-            "Initialize":                 "ci.role.worker",
-            "Build":                      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "Internal Code Sign":         "eclipse-codesign",
-            "Assemble Images":            "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "Post-Build Code Sign":       "ci.role.worker",
-            "Build Installers":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "Code Sign Installer":        "ci.role.worker",
-            "SBOM Sign":                  "ci.role.worker",
-            "Digital Artifact Sign":      "ci.role.worker",
-            "Verify Signing":             "ci.role.worker",
-            "Validate SBOM":              "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "Smoke Tests":                "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "Reproducible Compare Build": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-            "AQA Tests":                  "ci.role.build&&hw.arch.{arch}",
-            "TCK Tests":                  "ci.role.build&&hw.arch.{arch}",
-            "Publish Artifacts":          "ci.role.worker"
-        }
+        "stageAgentLabels": stage_agent_labels,
     }
 
 

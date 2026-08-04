@@ -7,6 +7,9 @@ Stage-specific parameters are loaded dynamically from scripts/stages/*.params.js
 scripts/lib/collect-stage-params.py. This ensures the local runner always presents
 the same parameter surface as the Jenkins jobs without any hardcoding.
 
+Stage IDs and display labels are loaded from scripts/stages/pipeline-stages.json —
+the same canonical registry used by Jenkinsfile.declarative and the migration tools.
+
 Usage:
     python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64
     python3 run-pipeline.py --help
@@ -22,6 +25,22 @@ from pathlib import Path
 from datetime import datetime
 from workspace_manager import WorkspaceManager
 from stage_resolver import StageResolver
+
+
+def _load_stage_registry(script_dir: Path) -> dict:
+    """Load pipeline-stages.json and return an id → label mapping.
+
+    Args:
+        script_dir: Root of the ci-adoptium-pipelines checkout.
+
+    Returns:
+        Dict mapping stageId strings to their display labels,
+        e.g. {'02-build': 'Build', '13-smoke-tests': 'Smoke Tests', ...}
+    """
+    registry_path = script_dir / 'scripts' / 'stages' / 'pipeline-stages.json'
+    with open(registry_path, 'r') as f:
+        stages = json.load(f)['pipelineStages']
+    return {s['id']: s['label'] for s in stages}
 
 
 # ---------------------------------------------------------------------------
@@ -135,14 +154,46 @@ def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]
     return stage_params, unrecognised
 
 
-class PipelineRunner:
-    # Define stage order
-    STAGES = ['initialize', 'build', 'validate-sbom', 'sign', 'installer', 'smoke-tests', 'reproducible-compare']
+# ---------------------------------------------------------------------------
+# Stage ID constants — match the "id" fields in pipeline-stages.json exactly.
+# Used throughout PipelineRunner to refer to stages without raw string literals.
+# ---------------------------------------------------------------------------
+INITIALIZE           = '01-initialize'
+BUILD                = '02-build'
+INTERNAL_CODE_SIGN   = '03-internal-code-sign'
+ASSEMBLE_IMAGES      = '04-assemble-images'
+POST_BUILD_CODE_SIGN = '06-post-build-code-sign'
+BUILD_INSTALLERS     = '07-installer'
+CODE_SIGN_INSTALLER  = '08-code-sign-installer'
+SBOM_SIGN            = '09-sbom-sign'
+DIGITAL_ARTIFACT_SIGN= '10-digital-artifact-sign'
+VERIFY_SIGNING       = '11-verify-signing'
+VALIDATE_SBOM        = '12-validate-sbom'
+SMOKE_TESTS          = '13-smoke-tests'
+AQA_TESTS            = '14-aqa-tests'
+TCK_TESTS            = '15-tck-tests'
+PUBLISH_ARTIFACTS    = '16-publish'
+REPRODUCIBLE_COMPARE = '20-reproducible-compare'
 
+# Ordered list of stageIds that the local runner executes (subset of all pipeline
+# stages — CI-only stages such as code-signing are excluded from local runs).
+_LOCAL_STAGES = [
+    INITIALIZE,
+    BUILD,
+    VALIDATE_SBOM,
+    POST_BUILD_CODE_SIGN,
+    BUILD_INSTALLERS,
+    SMOKE_TESTS,
+    REPRODUCIBLE_COMPARE,
+]
+
+
+class PipelineRunner:
     def __init__(self, args, stage_params: dict | None = None,
                  collated: dict | None = None):
         self.args = args
         self.script_dir = Path(__file__).parent.parent.parent.resolve()  # ci-adoptium-pipelines root
+        self._stage_registry = _load_stage_registry(self.script_dir)
 
         # Collated stage params: { paramName → value } derived from
         # scripts/stages/*.params.json + vendor-scripts/*.params.json.
@@ -185,14 +236,14 @@ class PipelineRunner:
 
         # Determine which stages to run
         if args.start_from_stage:
-            if args.start_from_stage not in self.STAGES:
-                raise ValueError(f"Invalid stage: {args.start_from_stage}. Must be one of: {', '.join(self.STAGES)}")
-            start_index = self.STAGES.index(args.start_from_stage)
-            self.stages_to_run = self.STAGES[start_index:]
+            if args.start_from_stage not in _LOCAL_STAGES:
+                raise ValueError(f"Invalid stage: {args.start_from_stage}. Must be one of: {', '.join(_LOCAL_STAGES)}")
+            start_index = _LOCAL_STAGES.index(args.start_from_stage)
+            self.stages_to_run = _LOCAL_STAGES[start_index:]
             print(f"ℹ️  Starting from stage: {args.start_from_stage}")
             print(f"   Will run: {', '.join(self.stages_to_run)}")
         else:
-            self.stages_to_run = self.STAGES.copy()
+            self.stages_to_run = _LOCAL_STAGES.copy()
 
     def _load_stage_metadata(self, collated: dict) -> None:
         """Extract stageDisabled and stageCondition maps from the collated output."""
@@ -330,7 +381,7 @@ class PipelineRunner:
             env.update(extra)
         return env
 
-    def _run_stage(self, stage_label: str, stem: str, artifact_filter: str,
+    def _run_stage(self, stage_id: str, artifact_filter: str,
                    extra_env: dict | None = None, unstable_ok: bool = False) -> int:
         """
         Execute one pipeline stage — the local equivalent of a Jenkins stage block.
@@ -344,16 +395,17 @@ class PipelineRunner:
           6. Post-cleanup (≈ finalizeStage cleanWs)
 
         Args:
-            stage_label:   Human-readable name for log output.
-            stem:          Stage script stem (e.g. '02-build').
+            stage_id:        StageId from pipeline-stages.json (e.g. '02-build').
+                             Used as both the script stem and the display label source.
             artifact_filter: Comma-separated glob patterns for restore_stage_inputs.
-            extra_env:     Additional env vars beyond the standard set.
-            unstable_ok:   If True, non-zero exit code is printed as a warning
-                           rather than raising (UNSTABLE-equivalent, like Jenkins).
+            extra_env:       Additional env vars beyond the standard set.
+            unstable_ok:     If True, non-zero exit code is printed as a warning
+                             rather than raising (UNSTABLE-equivalent, like Jenkins).
 
         Returns:
             exit code of the stage script (0 on success or disabled/no-op).
         """
+        stage_label = self._stage_registry.get(stage_id, stage_id)
         print(f"\n{'=' * 80}")
         print(f"STAGE: {stage_label}")
         print('=' * 80)
@@ -362,7 +414,7 @@ class PipelineRunner:
         self.workspace_mgr.restore_stage_inputs(stage_label, artifact_filter)
 
         env = self._stage_env(extra_env)
-        exit_code = self._make_resolver().run(stem, env)
+        exit_code = self._make_resolver().run(stage_id, env)
 
         self.workspace_mgr.archive_stage_outputs(stage_label, target_dir=env.get('TARGET_DIR'))
         self.workspace_mgr.cleanup_stage_workspace('post')
@@ -420,33 +472,33 @@ class PipelineRunner:
         )
 
         try:
-            if not skip_initialize and 'initialize' in self.stages_to_run:
+            if not skip_initialize and INITIALIZE in self.stages_to_run:
                 self.stage_initialize()
 
-            if 'build' in self.stages_to_run:
-                self._run_stage('Build', '02-build', 'pipeline-config.json',
+            if BUILD in self.stages_to_run:
+                self._run_stage(BUILD, 'pipeline-config.json',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'build_output')})
 
-            if 'validate-sbom' in self.stages_to_run:
-                self._run_stage('Validate SBOM', '12-validate-sbom', 'pipeline-config.json,*sbom*.json',
+            if VALIDATE_SBOM in self.stages_to_run:
+                self._run_stage(VALIDATE_SBOM, 'pipeline-config.json,*sbom*.json',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')})
 
-            if 'sign' in self.stages_to_run and self._stage_condition_met('03-internal-code-sign'):
-                self._run_stage('Post-Build Code Sign', '06-post-build-code-sign',
+            if POST_BUILD_CODE_SIGN in self.stages_to_run and self._stage_condition_met(POST_BUILD_CODE_SIGN):
+                self._run_stage(POST_BUILD_CODE_SIGN,
                                 'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            if 'installer' in self.stages_to_run and self._stage_condition_met('07-installer'):
-                self._run_stage('Build Installer', '07-installer',
+            if BUILD_INSTALLERS in self.stages_to_run and self._stage_condition_met(BUILD_INSTALLERS):
+                self._run_stage(BUILD_INSTALLERS,
                                 'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
 
-            if 'smoke-tests' in self.stages_to_run and self._stage_condition_met('14-aqa-tests'):
-                self._run_stage('Smoke Tests', '13-smoke-tests',
+            if SMOKE_TESTS in self.stages_to_run and self._stage_condition_met(SMOKE_TESTS):
+                self._run_stage(SMOKE_TESTS,
                                 'pipeline-config.json,*.tar.gz,*.zip',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')})
 
-            if 'reproducible-compare' in self.stages_to_run and self._stage_condition_met('20-reproducible-compare'):
+            if REPRODUCIBLE_COMPARE in self.stages_to_run and self._stage_condition_met(REPRODUCIBLE_COMPARE):
                 release_type = (self.args.release_type or 'NIGHTLY').upper()
-                self._run_stage('Reproducible Compare', '20-reproducible-compare',
+                self._run_stage(REPRODUCIBLE_COMPARE,
                                 'pipeline-config.json,*.tar.gz,*.zip',
                                 extra_env={
                                     'TARGET_DIR':     str(self.stage_workspace / 'reproducible_compare_output'),
@@ -659,8 +711,7 @@ Examples:
     parser.add_argument('--clean-workspace', action='store_true',
                         help='Remove existing workspace before starting (ensures clean build)')
     parser.add_argument('--start-from-stage',
-                        choices=['initialize', 'build', 'sign', 'installer',
-                                 'smoke-tests', 'reproducible-compare'],
+                        choices=_LOCAL_STAGES,
                         help='Start pipeline from a specific stage (skips earlier stages)')
 
     # ── Release / build type ──────────────────────────────────────────────────
@@ -722,7 +773,7 @@ Examples:
     runner = PipelineRunner(args, stage_params={}, collated=None)
 
     # Run Initialize if it is in scope (i.e. not skipping past it)
-    if not args.start_from_stage or args.start_from_stage == 'initialize':
+    if not args.start_from_stage or args.start_from_stage == INITIALIZE:
         try:
             runner.stage_initialize()
         except Exception as e:
