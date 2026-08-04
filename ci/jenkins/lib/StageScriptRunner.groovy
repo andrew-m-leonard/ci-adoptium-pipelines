@@ -67,6 +67,9 @@ def containerEnvFlags() {
         'GROUP_UID',
         'JOB_NAME',
         'BUILD_URL',
+        // Fixed job-level params — not in collated stage params so not in STAGE_PARAM_NAMES
+        'RELEASE_TYPE',
+        'CLEAN_WORKSPACE_AFTER_STAGE',
         // Derived platform identity — from pipeline-config.json buildConfig
         'CONFIG_VARIANT',
         'CONFIG_TARGET_OS',
@@ -80,18 +83,12 @@ def containerEnvFlags() {
         'CONFIG_BUILD_REF',
         'CONFIG_BUILD_REPO_URL',
         'CONFIG_AQA_REF',
-        // Derived booleans — computed from release type or platform config, not direct param mirrors
-        'CONFIG_CLEAN_WORKSPACE',
-        'CONFIG_EA_BETA_BUILD',
-        'CONFIG_COMPARE_BUILD',
         // Docker/Podman — from platform config, no stage param equivalent
         'CONFIG_DOCKER_IMAGE',
         'CONFIG_DOCKER_REGISTRY',
         'CONFIG_DOCKER_CREDENTIAL',
         'CONFIG_DOCKER_ARGS',
         'CONFIG_PODMAN_ARGS',
-        // Pipeline flow state
-        'SMOKE_TESTS_PASSED',
     ]
 
     // Also forward all collated stage params (names baked into STAGE_PARAM_NAMES

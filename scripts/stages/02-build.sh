@@ -49,12 +49,13 @@ main() {
     local build_args="${CONFIG_BUILD_ARGS:-}${EXTRA_BUILD_ARGS:+ ${EXTRA_BUILD_ARGS}}"
     local configure_args="${CONFIG_CONFIGURE_ARGS:-}${EXTRA_CONFIGURE_ARGS:+ ${EXTRA_CONFIGURE_ARGS}}"
     local make_args="${EXTRA_MAKE_OPTIONS:-}"
+    local create_sbom="${CREATE_SBOM:-false}"
     local scm_ref="${SCM_REF:-}"
     local build_ref="${CONFIG_BUILD_REF:-master}"
     local build_repo_url="${CONFIG_BUILD_REPO_URL:-https://github.com/adoptium/temurin-build.git}"
-    local clean_workspace="${CONFIG_CLEAN_WORKSPACE:-false}"
-    local ea_beta_build="${CONFIG_EA_BETA_BUILD:-false}"
-    local compare_build="${CONFIG_COMPARE_BUILD:-false}"
+    local clean_workspace="${CLEAN_WORKSPACE_AFTER_STAGE:-false}"
+    local release_type="${RELEASE_TYPE:-NIGHTLY}"
+    local compare_build="${RUN_REPRODUCIBLE_COMPARE:-false}"
 
     # Validate required values
     [[ -z "${java_to_build}" ]] && { log_error "CONFIG_JAVA_TO_BUILD not set"; exit 1; }
@@ -62,14 +63,14 @@ main() {
     [[ -z "${architecture}" ]]  && { log_error "CONFIG_ARCHITECTURE not set"; exit 1; }
     [[ -z "${variant}" ]]       && { log_error "CONFIG_VARIANT not set"; exit 1; }
 
-    # If EA/Beta build is enabled, append --with-version-opt=ea to configure args
-    if [[ "${ea_beta_build}" == "true" ]]; then
+    # If WEEKLY build, append --with-version-opt=ea to configure args
+    if [[ "${release_type}" == "WEEKLY" ]]; then
         if [[ -n "${configure_args}" ]]; then
             configure_args="${configure_args} --with-version-opt=ea"
         else
             configure_args="--with-version-opt=ea"
         fi
-        log_info "EA/Beta build enabled - added --with-version-opt=ea to configure args"
+        log_info "WEEKLY build - added --with-version-opt=ea to configure args"
     fi
 
     log_info "Build Configuration:"
@@ -83,11 +84,18 @@ main() {
     log_info "  Build Args: ${build_args}"
     log_info "  Configure Args: ${configure_args}"
     log_info "  Clean Workspace: ${clean_workspace}"
-    log_info "  EA/Beta Build: ${ea_beta_build}"
+    log_info "  Release Type: ${release_type}"
     log_info "  Compare Build: ${compare_build}"
+    log_info "  Create SBOM: ${create_sbom}"
 
     # Setup build environment
     setup_build_environment
+
+    # Append --create-sbom to build_args if CREATE_SBOM is enabled
+    if [[ "${create_sbom}" == "true" ]]; then
+        build_args="${build_args:+${build_args} }--create-sbom"
+        log_info "CREATE_SBOM enabled - added --create-sbom to build args"
+    fi
 
     # Setup path padding for reproducible builds if compare-build is enabled
     # This must happen BEFORE cloning temurin-build so it clones into the padded workspace
@@ -263,14 +271,14 @@ setup_reproducible_build_padding() {
     # Use CONFIG_* env vars already set by the pipeline (avoids jq dependency)
     local target_os="${CONFIG_TARGET_OS:-}"
     local architecture="${CONFIG_ARCHITECTURE:-}"
-    local release="${CONFIG_RELEASE:-false}"
+    local release_type="${RELEASE_TYPE:-NIGHTLY}"
 
     # Remove "_adopt" suffix from SCM_REF if present
     local scm_ref_for_api="${scm_ref/_adopt/}"
     log_info "SCM_REF for API: ${scm_ref_for_api}"
 
-    # Add "-ea-beta" suffix for EA builds
-    if [[ "${release}" == "false" ]]; then
+    # Add "-ea-beta" suffix for EA/WEEKLY builds
+    if [[ "${release_type}" == "WEEKLY" ]]; then
         scm_ref_for_api="${scm_ref_for_api}-ea-beta"
         log_info "EA build detected, using: ${scm_ref_for_api}"
     fi

@@ -49,6 +49,12 @@
           "type": "string",
           "default": "",
           "description": "Extra options appended to the make invocation (e.g. LOG=debug JOBS=4)"
+        },
+        {
+          "name": "CREATE_SBOM",
+          "type": "boolean",
+          "default": true,
+          "description": "Generate a Software Bill of Materials (SBOM) during the build stage, and run the SBOM sign and validate-SBOM stages. Enabled by default."
         }
       ]
     }

@@ -130,6 +130,9 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     if (params.RELEASE_TYPE?.toUpperCase() == 'WEEKLY') {
         pythonArgs.add("--ea-beta-build")
     }
+    if (params.RUN_REPRODUCIBLE_COMPARE) {
+        pythonArgs.add("--compare-build")
+    }
 
     // Execute CI-agnostic Python script — produces pipeline-config.json.
     // python-runner.sh resolves python3/python once and execs the script.
@@ -156,9 +159,6 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     env.CONFIG_CONFIGURE_ARGS    = pipelineConfig.buildConfig.CONFIGURE_ARGS ?: ''
     env.CONFIG_BUILD_REF         = pipelineConfig.refs.buildRef ?: 'master'
     env.CONFIG_BUILD_REPO_URL    = pipelineConfig.refs.buildRepoUrl ?: ''
-    env.CONFIG_CLEAN_WORKSPACE   = pipelineConfig.parameters.cleanWorkspaceAfterStage?.toString() ?: 'false'
-    env.CONFIG_EA_BETA_BUILD     = pipelineConfig.parameters.eaBetaBuild?.toString() ?: 'false'
-    env.CONFIG_COMPARE_BUILD     = pipelineConfig.parameters.compareBuild?.toString() ?: 'false'
     env.CONFIG_DOCKER_IMAGE      = pipelineConfig.buildConfig.DOCKER_IMAGE ?: ''
     env.CONFIG_DOCKER_REGISTRY   = pipelineConfig.buildConfig.DOCKER_REGISTRY ?: ''
     env.CONFIG_DOCKER_CREDENTIAL = pipelineConfig.buildConfig.DOCKER_CREDENTIAL ?: ''
@@ -167,7 +167,6 @@ def generatePipelineConfig(String configRepoPath = './config-repo') {
     // CONFIG_AQA_REF: resolved ref (param if non-empty, else config repo default).
     // Distinct from the raw AQA_REF stage param which may be empty.
     env.CONFIG_AQA_REF           = pipelineConfig.refs.aqaRef ?: ''
-    env.SMOKE_TESTS_PASSED       = 'false'
 
     return pipelineConfig
 }

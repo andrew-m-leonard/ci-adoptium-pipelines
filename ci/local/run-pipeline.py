@@ -333,12 +333,15 @@ class PipelineRunner:
         stage scripts (e.g. 02-build.sh) can read them without needing jq.
         """
         env = os.environ.copy()
-        env['WORKSPACE']            = str(self.stage_workspace)
-        env['PIPELINE_ROOT']        = str(self.script_dir)
-        env['CONFIG_FILE']          = str(self.stage_workspace / 'pipeline-config.json')
-        env['INPUT_ARTIFACTS_DIR']  = str(self.stage_workspace)
-        env['TARGET_DIR']           = str(self.stage_workspace / 'target')
-        env['BUILD_NUMBER']         = self.build_number
+        env['WORKSPACE']                  = str(self.stage_workspace)
+        env['PIPELINE_ROOT']              = str(self.script_dir)
+        env['CONFIG_FILE']                = str(self.stage_workspace / 'pipeline-config.json')
+        env['INPUT_ARTIFACTS_DIR']        = str(self.stage_workspace)
+        env['TARGET_DIR']                 = str(self.stage_workspace / 'target')
+        env['BUILD_NUMBER']               = self.build_number
+        # Fixed job-level params that stage scripts read directly (not in pipeline-config.json)
+        env['RELEASE_TYPE']               = (self.args.release_type or 'NIGHTLY').upper()
+        env['CLEAN_WORKSPACE_AFTER_STAGE'] = 'true' if self.args.clean_workspace else 'false'
 
         # Inject CONFIG_* variables from pipeline-config.json so that stage
         # shell scripts can consume them without a jq dependency.
@@ -351,12 +354,6 @@ class PipelineRunner:
             # Map every buildConfig key → CONFIG_<KEY>
             for key, value in build_cfg.items():
                 env[f'CONFIG_{key}'] = str(value) if value is not None else ''
-
-            params = cfg.get('parameters', {})
-            env['CONFIG_EA_BETA_BUILD']  = 'true' if params.get('eaBetaBuild')  else 'false'
-            env['CONFIG_COMPARE_BUILD']  = 'true' if params.get('compareBuild') else 'false'
-            env['CONFIG_RELEASE']        = 'true' if params.get('release')      else 'false'
-            env['CONFIG_CLEAN_WORKSPACE'] = 'true' if params.get('cleanWorkspaceAfterStage') else 'false'
 
             refs = cfg.get('refs', {})
             if refs.get('scmRef'):
@@ -818,6 +815,8 @@ Examples:
         stage_params.setdefault('ENABLE_INSTALLERS', 'false')
     if not args.enable_signer:
         stage_params.setdefault('SIGN_ARTIFACTS', 'false')
+    if args.compare_build:
+        stage_params.setdefault('RUN_REPRODUCIBLE_COMPARE', 'true')
 
     # Also map the fixed git-ref args into stage_params under their canonical
     # UPPER_SNAKE_CASE names so stage scripts receive them consistently.
