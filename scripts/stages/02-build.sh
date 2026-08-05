@@ -420,7 +420,6 @@ execute_build() {
     export VARIANT="${variant}"
     export BUILD_ARGS="${build_args}"
     export WORKSPACE="${WORKSPACE}"
-    export BUILD_NUMBER="${BUILD_NUMBER}"
     export SCM_REF="${scm_ref}"
     export CONFIGURE_ARGS="${configure_args}"
     export RELEASE="$([[ "${RELEASE_TYPE:-NIGHTLY}" == "RELEASE" ]] && echo "true" || echo "false")"
@@ -447,7 +446,6 @@ execute_build() {
     log_info "  CONFIGURE_ARGS=${CONFIGURE_ARGS}"
     log_info "  EXTRA_MAKE_OPTIONS=${make_args}"
     log_info "  WORKSPACE=${WORKSPACE}"
-    log_info "  BUILD_NUMBER=${BUILD_NUMBER}"
     log_info "  SCM_REF=${SCM_REF}"
     log_info "  JAVA_HOME=${JAVA_HOME:-not set}"
 
