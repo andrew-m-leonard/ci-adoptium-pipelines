@@ -423,6 +423,7 @@ execute_build() {
     export BUILD_NUMBER="${BUILD_NUMBER}"
     export SCM_REF="${scm_ref}"
     export CONFIGURE_ARGS="${configure_args}"
+    export RELEASE="$([[ "${RELEASE_TYPE:-NIGHTLY}" == "RELEASE" ]] && echo "true" || echo "false")"
 
     # Determine output filename if not already set
     if [[ -z "${FILENAME:-}" ]]; then
@@ -438,17 +439,17 @@ execute_build() {
     export OVERRIDE_FILE_NAME_VERSION="${OVERRIDE_FILE_NAME_VERSION:-}"
 
     log_info "Environment variables set:"
-    log_debug "  JAVA_TO_BUILD=${JAVA_TO_BUILD}"
-    log_debug "  TARGET_OS=${TARGET_OS}"
-    log_debug "  ARCHITECTURE=${ARCHITECTURE}"
-    log_debug "  VARIANT=${VARIANT}"
-    log_debug "  BUILD_ARGS=${BUILD_ARGS}"
-    log_debug "  CONFIGURE_ARGS=${CONFIGURE_ARGS}"
-    log_debug "  EXTRA_MAKE_OPTIONS=${make_args}"
-    log_debug "  WORKSPACE=${WORKSPACE}"
-    log_debug "  BUILD_NUMBER=${BUILD_NUMBER}"
-    log_debug "  SCM_REF=${SCM_REF}"
-    log_debug "  JAVA_HOME=${JAVA_HOME:-not set}"
+    log_info "  JAVA_TO_BUILD=${JAVA_TO_BUILD}"
+    log_info "  TARGET_OS=${TARGET_OS}"
+    log_info "  ARCHITECTURE=${ARCHITECTURE}"
+    log_info "  VARIANT=${VARIANT}"
+    log_info "  BUILD_ARGS=${BUILD_ARGS}"
+    log_info "  CONFIGURE_ARGS=${CONFIGURE_ARGS}"
+    log_info "  EXTRA_MAKE_OPTIONS=${make_args}"
+    log_info "  WORKSPACE=${WORKSPACE}"
+    log_info "  BUILD_NUMBER=${BUILD_NUMBER}"
+    log_info "  SCM_REF=${SCM_REF}"
+    log_info "  JAVA_HOME=${JAVA_HOME:-not set}"
 
     log_info "Starting build at $(date)"
     log_info "Build command: bash ${build_script}"
