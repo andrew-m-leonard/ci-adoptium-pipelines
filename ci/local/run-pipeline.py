@@ -420,7 +420,7 @@ class PipelineRunner:
             if unstable_ok:
                 print(f"\n⚠️  {stage_label} completed with warnings (exit code: {exit_code})")
             else:
-                raise subprocess.CalledProcessError(exit_code, stem)
+                raise subprocess.CalledProcessError(exit_code, stage_id)
 
         return exit_code
 
@@ -768,6 +768,16 @@ Examples:
     # Create a minimal runner just to drive the Initialize stage.
     # stage_params and collated are empty at this point — extra_tokens are not yet injected.
     runner = PipelineRunner(args, stage_params={}, collated=None)
+
+    # Perform workspace validation and clean BEFORE Initialize runs, so that
+    # --clean-workspace takes effect even though validate_and_setup() will be
+    # called again (with initialize_already_run=True) inside run() and skip it.
+    runner.workspace_mgr.validate_and_setup(
+        is_restarting=args.start_from_stage is not None,
+        clean_requested=args.clean_workspace,
+        start_from_stage=args.start_from_stage,
+        initialize_already_run=False,
+    )
 
     # Run Initialize if it is in scope (i.e. not skipping past it)
     if not args.start_from_stage or args.start_from_stage == INITIALIZE:

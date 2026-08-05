@@ -447,6 +447,7 @@ execute_build() {
     log_info "  EXTRA_MAKE_OPTIONS=${make_args}"
     log_info "  WORKSPACE=${WORKSPACE}"
     log_info "  SCM_REF=${SCM_REF}"
+    log_info "  RELEASE=${RELEASE}"
     log_info "  JAVA_HOME=${JAVA_HOME:-not set}"
 
     log_info "Starting build at $(date)"

@@ -72,21 +72,12 @@ class StageResolver:
         """
         Resolve and execute the stage script for *stem*.
 
-        Checks the enablement gate from pipeline-config.json first.
         Ensures TARGET_DIR exists (mirrors Jenkins runStageScript behaviour)
         before launching the script.
 
         Returns:
             int: exit code — 0 = success, non-zero = failure.
         """
-        enabled, reason = self.is_enabled(stem)
-        if not enabled:
-            msg = f"ℹ️  Stage '{stem}' disabled"
-            if reason:
-                msg += f": {reason}"
-            print(msg)
-            return 0
-
         script = self.resolve(stem)
 
         if script is None:
