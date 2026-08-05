@@ -2,388 +2,151 @@
 
 This directory contains tools for running the Adoptium build pipeline locally without a CI server.
 
-## Files
-
-### run-pipeline.py
-
-Python script for local pipeline execution with full stage orchestration.
-
 ## Quick Start
 
 ```bash
-# Basic build
+# Standard nightly build
 python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
+  --jdk-version jdk21 \
   --target-os mac \
   --architecture aarch64
 
-# Build without tests or installers
+# Build without tests or SBOM
 python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
+  --jdk-version jdk21 \
+  --target-os mac \
+  --architecture aarch64 \
+  --run-tests false \
+  --create-sbom false
+
+# Release build with reproducible compare, pinned source tag
+python3 ci/local/run-pipeline.py \
+  --jdk-version jdk21 \
   --target-os linux \
   --architecture x64 \
-  --no-tests \
-  --no-installers
+  --release-type RELEASE \
+  --scm-ref jdk-21.0.7+6_adopt \
+  --run-reproducible-compare true
 
-# Resume from specific stage
+# Resume from a specific stage after a failure
 python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
+  --jdk-version jdk21 \
   --target-os mac \
   --architecture aarch64 \
-  --start-from-stage smoke-tests
+  --start-from-stage 02-build
 ```
 
-## Features
+## Stage Parameters
 
-### Stage Orchestration
+All stage-specific parameters are defined in `scripts/stages/*.params.json` (and vendor
+overrides in `config-repo/vendor-scripts/*.params.json`). They are discovered dynamically
+after the config repo is cloned during the Initialize stage.
 
-The runner executes all pipeline stages in order:
-1. **Initialize**: Generate configuration from JSON
-2. **Build**: Compile OpenJDK
-3. **Sign**: Sign artifacts (if enabled)
-4. **Installer**: Create installers (if enabled)
-5. **Smoke Tests**: Run validation tests (if enabled)
+Pass them as `--<lower-kebab-case-name> <value>`:
 
-### Configuration Repository Support
+| Example | params.json source |
+|---|---|
+| `--scm-ref jdk-21.0.7+6_adopt` | `02-build.params.json` `SCM_REF` |
+| `--create-sbom false` | `02-build.params.json` `CREATE_SBOM` |
+| `--run-tests false` | `14-aqa-tests.params.json` `RUN_TESTS` |
+| `--enable-installers false` | `07-installer.params.json` `ENABLE_INSTALLERS` |
+| `--sign-artifacts true` | `03-internal-code-sign.params.json` `SIGN_ARTIFACTS` |
+| `--run-reproducible-compare true` | `20-reproducible-compare.params.json` `RUN_REPRODUCIBLE_COMPARE` |
 
-Automatically clones external configuration repository:
+Boolean params accept `true` or `false`. String params accept any value.
 
-```bash
-# Use default ci-temurin-config repository
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64
+Any unrecognised parameter prints a warning and is ignored — it does not abort the run.
 
-# Use custom configuration repository
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os linux \
-  --architecture x64 \
-  --config-repo-url https://github.com/myorg/my-jdk-configs.git \
-  --config-repo-branch develop
-```
+## Fixed CLI Options
 
-### Stage Resume
+These are pipeline-level controls, not stage params:
 
-Resume from any stage after a failure:
+### Required
+- `--jdk-version` — JDK version (e.g. `jdk21`, `jdk8`). Format: `jdkNN`.
+- `--target-os` — Target OS: `mac`, `linux`, `windows`, `aix`
+- `--architecture` — Target architecture: `aarch64`, `x64`, `x32`, `ppc64`, `s390x`
 
-```bash
-# Build fails at installer stage
-python3 ci/local/run-pipeline.py ...
-# (fails)
+### Workspace
+- `--workspace` — Workspace directory (default: `~/openjdk-build`)
+- `--build-number` — Build number (default: `local-YYYYMMDD-HHMMSS`)
+- `--clean-workspace` — Remove existing workspace before starting
+- `--start-from-stage` — Start from a specific stage (skips earlier stages)
 
-# Fix the issue, then resume from installer
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64 \
-  --start-from-stage installer
-```
+### Build type
+- `--release-type` — `NIGHTLY` (default), `WEEKLY`, or `RELEASE`
 
-### Workspace Management
-
-Control workspace behavior:
-
-```bash
-# Clean workspace before build (fresh start)
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64 \
-  --clean-workspace
-
-# Use existing workspace (faster for iterative testing)
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64
-```
-
-## Command-Line Options
-
-### Required Arguments
-
-- `--jdk-version`: JDK version (jdk8u, jdk11u, jdk17u, jdk21u, jdk22u, jdk23u, jdk)
-- `--variant`: Build variant (temurin, openj9, hotspot)
-- `--target-os`: Target OS (mac, linux, windows, aix)
-- `--architecture`: Target architecture (aarch64, x64, x32, ppc64, s390x)
-
-### Optional Arguments
-
-**Workspace:**
-- `--workspace`: Workspace directory (default: ~/openjdk-build)
-- `--build-number`: Build number (default: local-YYYYMMDD-HHMMSS)
-- `--clean-workspace`: Remove existing workspace before starting
-
-**Build Type:**
-- `--release`: Release build
-- `--weekly`: Weekly build
-
-**Git References:**
-- `--scm-ref`: OpenJDK source branch/tag
-- `--build-ref`: temurin-build branch/tag
-- `--build-repo-url`: temurin-build repository URL
-
-**Configuration Repository:**
-- `--config-repo-url`: Configuration repository URL (default: ci-temurin-config)
-- `--config-repo-branch`: Configuration branch (default: main)
-
-**Stage Control:**
-- `--start-from-stage`: Start from specific stage (initialize, build, sign, installer, smoke-tests)
-- `--skip-build`: Skip build stage (only generate configuration)
-- `--no-tests`: Disable tests
-- `--no-installers`: Disable installer building
-- `--no-signer`: Disable artifact signing
-
-## Examples
-
-### Development Workflow
-
-```bash
-# 1. Initial build
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64 \
-  --workspace ~/my-jdk-build
-
-# 2. Make code changes to stage scripts
-
-# 3. Re-run from specific stage
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64 \
-  --workspace ~/my-jdk-build \
-  --start-from-stage build
-```
-
-### Testing Configuration Changes
-
-```bash
-# Test with custom configuration
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os linux \
-  --architecture x64 \
-  --config-repo-url file:///path/to/local/config/repo \
-  --config-repo-branch my-test-branch
-```
-
-### Quick Validation
-
-```bash
-# Fast validation without tests/installers
-python3 ci/local/run-pipeline.py \
-  --jdk-version jdk21u \
-  --variant temurin \
-  --target-os mac \
-  --architecture aarch64 \
-  --no-tests \
-  --no-installers \
-  --no-signer
-```
-
-## Output
-
-All artifacts are stored in the workspace using a two-directory structure:
-
-```
-~/openjdk-build/                    # pipeline_workspace (root)
-├── pipeline-config.json            # Generated configuration
-├── stage_workspace/                # Ephemeral - cleaned before/after each stage
-│   └── (temporary stage files)
-├── artifacts/                      # Persistent - all build outputs
-│   ├── *.tar.gz                   # JDK tarballs
-│   ├── *.sig                      # Signatures
-│   ├── *.pkg / *.msi              # Installers
-│   └── test-results/              # Test outputs
-└── config-repo/                    # Cloned configuration repository
-```
-
-**Directory Purpose:**
-- `stage_workspace/` - Ephemeral workspace cleaned before each stage (ensures clean state)
-- `artifacts/` - Persistent directory where all build outputs are stored
-
-## Troubleshooting
-
-### Configuration Repository Clone Fails
-
-**Problem**: "Failed to clone configuration repository"
-
-**Solution**:
-- Verify URL is accessible
-- Check branch name is correct
-- Ensure git is installed and configured
-
-### Stage Script Not Found
-
-**Problem**: "scripts/stages/XX-stage.sh: not found"
-
-**Solution**: Run from ci-adoptium-pipelines repository root
-
-### Permission Denied
-
-**Problem**: "Permission denied" when running scripts
-
-**Solution**: Ensure scripts are executable:
-```bash
-chmod +x scripts/stages/*.sh
-```
+### Configuration repository
+- `--config-repo-url` — Config repo URL (default: `https://github.com/adoptium/ci-temurin-config.git`)
+- `--config-repo-branch` — Config repo branch (default: `main`)
 
 ## Architecture
 
-### Code Organization
-
-The local pipeline runner is organized into two main modules:
-
-#### run-pipeline.py (556 lines)
-Main pipeline orchestrator that:
-- Manages stage execution flow
-- Handles command-line arguments
-- Coordinates between stages
-- Reports pipeline status
-
-#### workspace_manager.py (137 lines)
-Dedicated workspace management module that:
-- Validates workspace state
-- Manages directory structure (pipeline_workspace, stage_workspace, artifacts_dir)
-- Handles cleanup operations (pre/post stage)
-- Provides user-friendly error messages
-
-### Workspace Manager
-
-The `WorkspaceManager` class encapsulates all workspace-related logic:
-
-**Constructor:**
-```python
-WorkspaceManager(pipeline_workspace, config_file)
-```
-
-**Methods:**
-- `validate_and_setup(is_restarting, clean_requested, start_from_stage)` - Validates workspace state and creates directory structure
-- `cleanup_stage_workspace(cleanup_type)` - Cleans ephemeral stage workspace ('pre' or 'post')
-
-**Properties:**
-- `pipeline_workspace` - Root workspace directory
-- `stage_workspace` - Ephemeral workspace for stage execution
-- `artifacts_dir` - Persistent artifacts directory
-- `config_file` - Path to pipeline configuration JSON
-
-### Two-Directory Architecture
-
-The workspace uses a two-directory structure for optimal restartability:
+### Workspace layout
 
 ```
-~/openjdk-build/                    # pipeline_workspace (root)
-├── stage_workspace/                # Ephemeral - cleaned before/after each stage
+~/openjdk-build/                   # pipeline_workspace
+├── pipeline-config.json           # Generated by Initialize; archived immediately
+├── config-repo/                   # Cloned config repository
+│   ├── adoptium_pipeline_config.json
+│   ├── configurations/
+│   └── vendor-scripts/
+├── stage_workspace/               # Ephemeral — cleaned before/after each stage
 │   └── (temporary stage files)
-├── artifacts/                      # Persistent - survives between stages
-│   └── (build outputs, configs)
-├── pipeline-config.json            # Generated configuration
-└── workspace/
-    └── target/                     # Shared artifact directory
-        ├── *.tar.gz               # JDK tarballs
-        ├── *.sig                  # Signatures
-        ├── *.pkg / *.msi          # Installers
-        └── test-results/          # Test outputs
+└── build_artifacts/               # Persistent artifact store (≈ Jenkins archiveArtifacts)
+    ├── pipeline-config.json
+    ├── *.tar.gz / *.zip
+    └── ...
 ```
 
-**Benefits:**
-- **Restartability**: Clean workspace before each stage ensures consistent state
-- **Artifact Persistence**: Important outputs survive stage cleanup
-- **Isolation**: Each stage starts with a clean ephemeral workspace
-- **Debugging**: Artifacts directory preserves outputs for inspection
+### pipeline-config.json structure
 
-### Workspace Validation
+Generated by `scripts/lib/load-json-config.py` from `adoptium_pipeline_config.json`
+and `jdkNN_pipeline_config.json`. Contains **only** init-time derived values:
 
-The workspace manager enforces strict validation rules:
+```json
+{
+  "buildConfig": {
+    "JAVA_TO_BUILD": "jdk21u",
+    "TARGET_OS": "mac",
+    "ARCHITECTURE": "aarch64",
+    "VARIANT": "temurin",
+    "BUILD_ARGS": "...",
+    "CONFIGURE_ARGS": "..."
+  },
+  "parameters": {
+    "cleanWorkspaceAfterStage": true
+  },
+  "repoDefaults": {
+    "buildRef": "master",
+    "buildRepoUrl": "https://github.com/adoptium/temurin-build.git",
+    "aqaRef": "master",
+    "aqaRepoUrl": "https://github.com/adoptium/aqa-tests.git"
+  }
+}
+```
 
-| Operation Mode | Workspace Exists | --clean-workspace | Result |
-|---------------|------------------|-------------------|---------|
-| Fresh build | No | N/A | ✅ Create workspace |
-| Fresh build | Yes | No | ❌ Error: Use --clean-workspace or --start-from-stage |
-| Fresh build | Yes | Yes | ✅ Clean and recreate workspace |
-| Restart | No | N/A | ❌ Error: Workspace must exist |
+**Stage params** (`SCM_REF`, `BUILD_REF`, `CREATE_SBOM`, `RUN_TESTS`, etc.) are **not**
+stored in `pipeline-config.json`. They flow exclusively through the process environment —
+the orchestrator injects them via `_stage_env()` before each stage script runs.
+`repoDefaults` provides fallback values for stage scripts when their own stage param is empty
+(e.g. `02-build.sh` uses `$BUILD_REF` if set, otherwise falls back to `$CONFIG_BUILD_REF`).
+
+### Three-phase execution in main()
+
+1. **Phase 1** — argparse fixed options only; extra tokens captured as raw list
+2. **Phase 2** — pre-parse extra tokens against *default* `scripts/stages/*.params.json`
+   (no config repo yet); inject into runner so `stage_initialize()` can use them;
+   clone config repo and run Initialize
+3. **Phase 3** — full collation with `config-repo/vendor-scripts/*.params.json`;
+   re-parse extra tokens against complete set; inject final stage params; run remaining stages
+
+## Workspace validation
+
+| Mode | Workspace exists | `--clean-workspace` | Result |
+|---|---|---|---|
+| Fresh build | No | — | ✅ Create workspace |
+| Fresh build | Yes | No | ❌ Error: use `--clean-workspace` or `--start-from-stage` |
+| Fresh build | Yes | Yes | ✅ Clean and recreate |
+| Restart | No | — | ❌ Error: workspace must exist |
 | Restart | Yes | No | ✅ Use existing workspace |
-| Restart | Yes | Yes | ❌ Error: Cannot clean when restarting |
-
-### Cleanup Operations
-
-Each stage performs cleanup operations:
-
-**Pre-cleanup (Always):**
-- Cleans `stage_workspace/` before stage execution
-- Ensures clean state for restartability
-- Critical for consistent builds
-
-**Post-cleanup (Optional):**
-- Cleans `stage_workspace/` after stage completion
-- Controlled by `cleanWorkspaceAfterStage` parameter in config
-- Saves disk space but preserves artifacts
-
-### Integration Example
-
-```python
-# Initialize workspace manager
-self.workspace_mgr = WorkspaceManager(pipeline_workspace, config_file)
-
-# Validate and setup workspace
-self.workspace_mgr.validate_and_setup(
-    is_restarting=self.args.start_from_stage is not None,
-    clean_requested=self.args.clean_workspace,
-    start_from_stage=self.args.start_from_stage
-)
-
-# In each stage:
-def stage_build(self):
-    # Pre-cleanup: Always clean stage_workspace
-    self.workspace_mgr.cleanup_stage_workspace('pre')
-
-    # Execute stage logic...
-
-    # Post-cleanup: Clean if cleanWorkspaceAfterStage=true
-    self.workspace_mgr.cleanup_stage_workspace('post')
-```
-
-## Design Benefits
-
-### 1. Improved Readability
-- Main pipeline logic is focused on orchestration
-- Workspace concerns separated into dedicated module
-- Reduced cognitive load when reading code
-
-### 2. Better Maintainability
-- Workspace logic centralized in one place
-- Changes to workspace behavior only affect `workspace_manager.py`
-- Easier to test workspace management independently
-
-### 3. Cleaner Code Organization
-- Single Responsibility Principle applied
-- `PipelineRunner`: Orchestrates pipeline stages
-- `WorkspaceManager`: Manages workspace directories and cleanup
-
-### 4. Preserved Functionality
-- All existing functionality intact
-- Backward compatibility maintained
-- No changes to external API or CLI
-
-## Related Documentation
-
-- [LOCAL_TESTING_GUIDE.md](../../docs/LOCAL_TESTING_GUIDE.md) - Comprehensive local testing guide
-- [LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md](../../docs/LOCAL_RUNNER_WORKSPACE_ARCHITECTURE.md) - Detailed workspace architecture
-- [JENKINS_CLEANUP_REFACTORING.md](../../docs/JENKINS_CLEANUP_REFACTORING.md) - Jenkins cleanup patterns
-- [RESTARTABILITY_GUIDE.md](../../docs/RESTARTABILITY_GUIDE.md) - Pipeline restart guide
-- [CI_AGNOSTIC_ARCHITECTURE.md](../../docs/CI_AGNOSTIC_ARCHITECTURE.md) - Architecture overview
+| Restart | Yes | Yes | ❌ Error: cannot clean when restarting |

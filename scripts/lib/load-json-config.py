@@ -2,10 +2,18 @@
 """
 Load JSON Configuration and Generate Pipeline Config
 
-This script loads the jdkNN_pipeline_config.json file and generates
-the pipeline-config.json needed by the build stages.
+Reads adoptium_pipeline_config.json and jdkNN_pipeline_config.json from
+the config repository root and generates the CI-agnostic pipeline-config.json
+consumed by all stage scripts.
 
-This is CI-agnostic and can be used by Jenkins, GitLab CI, GitHub Actions, etc.
+Architecture:
+  pipeline-config.json contains ONLY values derived from config-file data at
+  init time — platform identity, build tool config, repo defaults, and the
+  single pipeline-level control (cleanWorkspaceAfterStage).
+
+  Stage params (SCM_REF, BUILD_REF, AQA_REF, CREATE_SBOM, RUN_TESTS, etc.)
+  are NOT stored here — they flow exclusively through the process environment,
+  injected by the orchestrator (Jenkins: params→env; ci/local: _stage_env()).
 
 Usage:
     python3 load-json-config.py \
@@ -13,7 +21,7 @@ Usage:
         --variant temurin \
         --target-os mac \
         --architecture aarch64 \
-        --config-dir ./configurations \
+        --config-repo-path ./config-repo \
         --output-dir .
 """
 
@@ -158,44 +166,64 @@ def build_node_label(build_label_template, additional_labels, target_os, archite
 def load_configuration(args):
     """Load CI-agnostic JSON configuration and generate pipeline-config.json."""
 
-    jdk_version = args.jdk_version
-    variant = args.variant
-    target_os = args.target_os
+    jdk_version  = args.jdk_version
+    variant      = args.variant
+    target_os    = args.target_os
     architecture = args.architecture
-    config_dir = args.config_dir
-    output_dir = args.output_dir
+    output_dir   = args.output_dir
 
-    # Optional parameters
-    # Determine release type from --release-type parameter (defaults to NIGHTLY)
-    # Convert to uppercase for case-insensitive comparison
+    # Resolve release type (defaults to NIGHTLY)
     release_type = (args.release_type or 'NIGHTLY').upper()
-    
-    # Validate release type
     valid_release_types = ['NIGHTLY', 'WEEKLY', 'RELEASE']
     if release_type not in valid_release_types:
-        print(f"ERROR: Invalid release type '{args.release_type}'. Must be one of: {', '.join(valid_release_types)} (case-insensitive)", file=sys.stderr)
+        print(f"ERROR: Invalid release type '{args.release_type}'. "
+              f"Must be one of: {', '.join(valid_release_types)} (case-insensitive)",
+              file=sys.stderr)
         sys.exit(1)
-    
-    is_release = (release_type == 'RELEASE')
-    is_weekly = (release_type == 'WEEKLY')
-    scm_ref = args.scm_ref
-    build_ref = args.build_ref
-    build_repo_url = args.build_repo_url
-    aqa_ref = args.aqa_ref
-    aqa_repo_url = args.aqa_repo_url
-    enable_tests = args.enable_tests
-    enable_installers = args.enable_installers
-    enable_signer = args.enable_signer
-    ea_beta_build = args.ea_beta_build
-    compare_build = args.compare_build
 
-    print(f"Loading configuration for: {jdk_version} {variant} {target_os} {architecture}")
+    # ── Load adoptium_pipeline_config.json ───────────────────────────────────
+    # Always read from the config repo root — this is the single source of truth
+    # for repo default refs and the configFilePrefix.  Stage params (SCM_REF,
+    # BUILD_REF, etc.) are NOT read here; they come from the process environment.
+    config_repo_path  = Path(args.config_repo_path)
+    adoptium_cfg_path = config_repo_path / 'adoptium_pipeline_config.json'
+    if not adoptium_cfg_path.exists():
+        print(f"ERROR: adoptium_pipeline_config.json not found at: {adoptium_cfg_path}",
+              file=sys.stderr)
+        sys.exit(1)
+    with open(adoptium_cfg_path, 'r') as f:
+        adoptium_cfg = json.load(f)
 
-    # Load JSON configuration file
-    config_file = Path(config_dir) / f"{jdk_version}_pipeline_config.json"
+    repo_defaults = adoptium_cfg.get('repository', {})
+    build_ref      = repo_defaults.get('buildBranch')
+    build_repo_url = repo_defaults.get('buildRepoUrl')
+    aqa_ref        = repo_defaults.get('aqaBranch')
+    aqa_repo_url   = repo_defaults.get('aqaRepoUrl')
+
+    missing_defaults = [k for k, v in {
+        'repository.buildBranch':  build_ref,
+        'repository.buildRepoUrl': build_repo_url,
+        'repository.aqaBranch':    aqa_ref,
+        'repository.aqaRepoUrl':   aqa_repo_url,
+    }.items() if not v]
+    if missing_defaults:
+        print(f"ERROR: Required fields missing from adoptium_pipeline_config.json: "
+              f"{', '.join(missing_defaults)}", file=sys.stderr)
+        sys.exit(1)
+
+    # Use defaultVariant from adoptium_pipeline_config.json if variant not overridden
+    if not variant:
+        variant = adoptium_cfg.get('defaultVariant', 'temurin')
+
+    # ── Load jdkNN_pipeline_config.json ──────────────────────────────────────
+    config_prefix = adoptium_cfg.get('configFilePrefix', 'configurations/')
+    config_dir    = config_repo_path / config_prefix.rstrip('/')
+    config_file   = config_dir / f"{jdk_version}_pipeline_config.json"
     if not config_file.exists():
         print(f"ERROR: Configuration file not found: {config_file}", file=sys.stderr)
         sys.exit(1)
+
+    print(f"Loading configuration for: {jdk_version} {variant} {target_os} {architecture}")
 
     with open(config_file, 'r') as f:
         json_config = json.load(f)
@@ -214,64 +242,80 @@ def load_configuration(args):
             None
         )
         if legacy_key and legacy_key in build_configurations:
-            print(f"Warning: config uses legacy platform key '{legacy_key}'; treating as '{platform_key}'")
+            print(f"Warning: config uses legacy platform key '{legacy_key}'; "
+                  f"treating as '{platform_key}'")
             platform_key = legacy_key
         else:
             available = ', '.join(build_configurations.keys())
-            print(f"ERROR: Platform '{platform_key}' not found in configuration.", file=sys.stderr)
+            print(f"ERROR: Platform '{platform_key}' not found in configuration.",
+                  file=sys.stderr)
             print(f"Available platforms: {available}", file=sys.stderr)
             sys.exit(1)
 
     platform_config = build_configurations[platform_key]
 
     # Extract variant-specific values
-    build_args = extract_variant_value(platform_config.get('buildArgs'), variant)
-    configure_args = extract_variant_value(platform_config.get('configureArgs'), variant)
-    docker_image = extract_variant_value(platform_config.get('dockerImage'), variant)
-    docker_file = extract_variant_value(platform_config.get('dockerFile'), variant)
+    build_args             = extract_variant_value(platform_config.get('buildArgs'), variant)
+    configure_args         = extract_variant_value(platform_config.get('configureArgs'), variant)
+    docker_image           = extract_variant_value(platform_config.get('dockerImage'), variant)
+    docker_file            = extract_variant_value(platform_config.get('dockerFile'), variant)
     additional_node_labels = extract_variant_value(platform_config.get('additionalNodeLabels'), variant)
-    podman_args = platform_config.get('podmanArgs', '')
+    podman_args            = platform_config.get('podmanArgs', '')
 
     # Build the fully-resolved Build-stage node label using a CI-agnostic default.
-    # CI-specific stageAgentLabels (e.g. from jenkins_job_config.json) are injected
-    # by a separate CI-specific script (e.g. ci/jenkins/lib/load-jenkins-json-config.py)
-    # which augments this file after generation.
+    # CI-specific stageAgentLabels (from jenkins_job_config.json) are injected by
+    # ci/jenkins/lib/load-jenkins-json-config.py which augments this file after generation.
     build_label_template = 'ci.role.build&&sw.os.{os}&&hw.arch.{arch}'
-    node_label = build_node_label(build_label_template, additional_node_labels, target_os, architecture)
+    node_label = build_node_label(build_label_template, additional_node_labels,
+                                  target_os, architecture)
 
-    # Create pipeline-config.json (CI-agnostic)
+    # ── Generate pipeline-config.json ────────────────────────────────────────
+    #
+    # Three sections — each with a clear, non-overlapping ownership:
+    #
+    #   buildConfig   — platform identity and build tool config derived from
+    #                   jdkNN_pipeline_config.json.  Exposed as CONFIG_* env vars
+    #                   by the orchestrator so stage scripts don't need jq.
+    #
+    #   parameters    — pipeline-level controls that are NOT stage params.
+    #                   Only cleanWorkspaceAfterStage belongs here; it is a
+    #                   platform config value consumed by workspace-cleanup logic,
+    #                   not by stage scripts.
+    #
+    #   repoDefaults  — DEFAULT git refs from adoptium_pipeline_config.json that
+    #                   stage scripts (02-build.sh, 14-aqa-tests.sh, …) fall back
+    #                   to when their own stage params (BUILD_REF, AQA_REF) are
+    #                   empty.  Exposed as CONFIG_BUILD_REF / CONFIG_AQA_REF env
+    #                   vars.  Stage params always take precedence.
+    #
+    # Stage params (SCM_REF, BUILD_REF, AQA_REF, CREATE_SBOM, RUN_TESTS,
+    # ENABLE_INSTALLERS, SIGN_ARTIFACTS, RUN_REPRODUCIBLE_COMPARE, …) are NOT
+    # stored here — they flow exclusively through the process environment.
     pipeline_config = {
         'buildConfig': {
-            'JAVA_TO_BUILD': openjdk_version,
-            'TARGET_OS': target_os,
-            'ARCHITECTURE': architecture,
-            'VARIANT': variant,
-            'BUILD_ARGS': build_args or '',
-            'CONFIGURE_ARGS': configure_args or '',
-            'NODE_LABEL': node_label,
-            'DOCKER_IMAGE': docker_image or '',
-            'DOCKER_FILE': docker_file or '',
-            'DOCKER_REGISTRY': platform_config.get('dockerRegistry', ''),
+            'JAVA_TO_BUILD':     openjdk_version,
+            'TARGET_OS':         target_os,
+            'ARCHITECTURE':      architecture,
+            'VARIANT':           variant,
+            'BUILD_ARGS':        build_args or '',
+            'CONFIGURE_ARGS':    configure_args or '',
+            'NODE_LABEL':        node_label,
+            'DOCKER_IMAGE':      docker_image or '',
+            'DOCKER_FILE':       docker_file or '',
+            'DOCKER_REGISTRY':   platform_config.get('dockerRegistry', ''),
             'DOCKER_CREDENTIAL': platform_config.get('dockerCredential', ''),
-            'DOCKER_ARGS': platform_config.get('dockerArgs', ''),
-            'PODMAN_ARGS': podman_args,
+            'DOCKER_ARGS':       platform_config.get('dockerArgs', ''),
+            'PODMAN_ARGS':       podman_args,
         },
         'parameters': {
-            'enableTests': enable_tests,
-            'enableInstallers': enable_installers,
-            'enableSigner': enable_signer,
             'cleanWorkspaceAfterStage': platform_config.get('cleanWorkspaceAfterBuild', True),
-            'eaBetaBuild': ea_beta_build,
-            'compareBuild': compare_build,
-            'release': is_release
         },
-        'refs': {
-            'scmRef': scm_ref,
-            'buildRef': build_ref,
+        'repoDefaults': {
+            'buildRef':     build_ref,
             'buildRepoUrl': build_repo_url,
-            'aqaRef': aqa_ref,
-            'aqaRepoUrl': aqa_repo_url
-        }
+            'aqaRef':       aqa_ref,
+            'aqaRepoUrl':   aqa_repo_url,
+        },
     }
 
     # Save configuration
@@ -284,27 +328,30 @@ def load_configuration(args):
     print(f"Created: {pipeline_config_file}")
 
     print("\nConfiguration Summary:")
-    print(f"  Platform: {platform_key}")
-    print(f"  Build Args: {build_args}")
+    print(f"  Platform:       {platform_key}")
+    print(f"  Build Args:     {build_args}")
     print(f"  Configure Args: {configure_args}")
-    print(f"  Node Label: {node_label}")
-    print(f"  Docker Image: {docker_image}")
+    print(f"  Node Label:     {node_label}")
+    print(f"  Docker Image:   {docker_image}")
+    print(f"  Build Ref:      {build_ref}  (repoDefault)")
+    print(f"  AQA Ref:        {aqa_ref}  (repoDefault)")
 
     return pipeline_config
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Load JSON configuration and generate pipeline configs',
+        description='Load JSON configuration and generate pipeline-config.json',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic usage
+  # Nightly build
   python3 load-json-config.py \\
       --jdk-version jdk21u \\
       --variant temurin \\
       --target-os mac \\
-      --architecture aarch64
+      --architecture aarch64 \\
+      --config-repo-path ./config-repo
 
   # Release build
   python3 load-json-config.py \\
@@ -313,44 +360,29 @@ Examples:
       --target-os linux \\
       --architecture x64 \\
       --release-type RELEASE \\
-      --scm-ref jdk-17.0.10+7
-
-  # Disable tests and installers
-  python3 load-json-config.py \\
-      --jdk-version jdk21u \\
-      --variant temurin \\
-      --target-os mac \\
-      --architecture aarch64 \\
-      --no-tests \\
-      --no-installers
+      --config-repo-path ./config-repo
         """
     )
 
-    # Required arguments
-    parser.add_argument('--jdk-version', required=True, help='JDK version (e.g., jdk21u, jdk17u)')
-    parser.add_argument('--variant', required=True, help='Build variant (temurin, openj9, hotspot)')
-    parser.add_argument('--target-os', required=True, help='Target OS (mac, linux, windows, aix)')
-    parser.add_argument('--architecture', required=True, help='Target architecture (aarch64, x64, x32, ppc64, s390x)')
+    # ── Required ──────────────────────────────────────────────────────────────
+    parser.add_argument('--jdk-version',      required=True,
+                        help='JDK version (e.g., jdk21u, jdk17u)')
+    parser.add_argument('--variant',          required=True,
+                        help='Build variant (temurin, openj9, hotspot)')
+    parser.add_argument('--target-os',        required=True,
+                        help='Target OS (mac, linux, windows, aix)')
+    parser.add_argument('--architecture',     required=True,
+                        help='Target architecture (aarch64, x64, x32, ppc64, s390x)')
+    parser.add_argument('--config-repo-path', required=True,
+                        help='Path to the checked-out config repository root '
+                             '(must contain adoptium_pipeline_config.json and '
+                             'the configurations/ subdirectory)')
 
-    # Optional arguments
-    parser.add_argument('--config-dir', default='./configurations', help='Configuration directory (default: ./configurations)')
-    parser.add_argument('--output-dir', default='.', help='Output directory for generated configs (default: .)')
-
-    # Release type - case-insensitive (will be converted to uppercase)
+    # ── Optional ──────────────────────────────────────────────────────────────
+    parser.add_argument('--output-dir', default='.',
+                        help='Output directory for pipeline-config.json (default: .)')
     parser.add_argument('--release-type', type=str,
-                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE (case-insensitive)')
-    parser.add_argument('--scm-ref', help='OpenJDK source branch/tag (default: HEAD)')
-    parser.add_argument('--build-ref', required=True, help='temurin-build branch/tag (required, from adoptium_pipeline_config.json)')
-    parser.add_argument('--build-repo-url', required=True, help='temurin-build repository URL (required, from adoptium_pipeline_config.json)')
-    parser.add_argument('--aqa-ref', required=True, help='aqa-tests branch/tag (required, from adoptium_pipeline_config.json)')
-    parser.add_argument('--aqa-repo-url', required=True, help='aqa-tests repository URL (required, from adoptium_pipeline_config.json)')
-
-    parser.add_argument('--no-tests', dest='enable_tests', action='store_false', help='Disable tests')
-    parser.add_argument('--no-installers', dest='enable_installers', action='store_false', help='Disable installers')
-    parser.add_argument('--no-signer', dest='enable_signer', action='store_false', help='Disable signing')
-    parser.add_argument('--ea-beta-build', dest='ea_beta_build', action='store_true', help='Enable EA/Beta build (adds --with-version-opt=ea to configure args)')
-    parser.add_argument('--compare-build', dest='compare_build', action='store_true', help='Enable reproducible build comparison with path padding (requires --scm-ref)')
-    parser.set_defaults(enable_tests=True, enable_installers=True, enable_signer=True, ea_beta_build=False, compare_build=False)
+                        help='Type of release build: NIGHTLY (default), WEEKLY, or RELEASE')
 
     args = parser.parse_args()
 
