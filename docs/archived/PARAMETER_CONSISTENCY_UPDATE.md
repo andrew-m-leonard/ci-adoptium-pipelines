@@ -38,7 +38,7 @@ Updated the Job DSL to create jobs with parameters that match what the Jenkinsfi
 
 ## Implementation Details
 
-### 1. Job DSL Script (`openjdk_build_pipeline.groovy`)
+### 1. Job DSL Script (`openjdk_build_pipeline_job_dsl.groovy`)
 
 The Job DSL now:
 1. Receives `PLATFORM` parameter from launch job (e.g., "x64Linux")
@@ -100,12 +100,12 @@ Launch jobs still use:
 
 ### ci-adoptium-pipelines Repository
 
-1. **ci/jenkins/job-dsl/openjdk_build_pipeline.groovy**
+1. **ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy**
    - Added platform configuration loading
    - Extracts `os`, `arch`, and `variant` from platform config
    - Creates `TARGET_OS`, `ARCHITECTURE`, and `VARIANT` parameters
 
-2. **ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy**
+2. **ci/jenkins/job-dsl/seed/seed_job_dsl.groovy**
    - Renamed `BUILD_VARIANT` to `VARIANT`
    - Added platform loading logic
    - Changed `PLATFORMS` parameter from string to choice dropdown

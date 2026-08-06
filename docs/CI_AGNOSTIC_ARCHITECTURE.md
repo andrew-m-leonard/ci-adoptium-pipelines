@@ -252,9 +252,9 @@ ci-adoptium-pipelines/
 │   │   │   ├── PipelineHelper.groovy       # Stage lifecycle
 │   │   │   └── StageScriptRunner.groovy    # Vendor-override script resolution
 │   │   └── job-dsl/
-│   │       ├── openjdk_build_pipeline.groovy
+│   │       ├── openjdk_build_pipeline_job_dsl.groovy
 │   │       └── seed/
-│   │           └── seed_job_consolidated.groovy
+│   │           └── seed_job_dsl.groovy
 │   └── local/
 │       ├── run-pipeline.py
 │       ├── stage_resolver.py

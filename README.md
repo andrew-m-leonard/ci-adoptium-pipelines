@@ -31,9 +31,9 @@ ci-adoptium-pipelines/
 │   │   │   ├── PipelineHelper.groovy      # Stage lifecycle (init/finalize/tracking)
 │   │   │   └── StageScriptRunner.groovy   # Vendor-overridable script resolution
 │   │   └── job-dsl/
-│   │       ├── openjdk_build_pipeline.groovy   # Job DSL: per-platform build job
+│   │       ├── openjdk_build_pipeline_job_dsl.groovy   # Job DSL: per-platform build job
 │   │       └── seed/
-│   │           └── seed_job_consolidated.groovy # Job DSL: bootstrap seed job
+│   │           └── seed_job_dsl.groovy # Job DSL: bootstrap seed job
 │   │
 │   └── local/
 │       ├── run-pipeline.py          # Local pipeline runner
@@ -82,7 +82,7 @@ ci-adoptium-pipelines/
 
 ```
 seed-job (Freestyle)
-  └─ seed_job_consolidated.groovy  ← creates/updates all jobs
+  └─ seed_job_dsl.groovy  ← creates/updates all jobs
        │
        ├─ Build_openjdk_launchers/
        │    ├─ Build_openjdk21_launch  (Jenkinsfile.launch)
@@ -177,7 +177,7 @@ At runtime, `ConfigHelper` calls `scripts/lib/load-json-config.py` which merges 
 1. Create a Jenkins **Freestyle** job named `seed-job`
 2. Add parameters: `CONFIG_REPO_URL` (String), `CONFIG_REPO_BRANCH` (String)
 3. SCM: Git → this repository
-4. Build step: **Process Job DSLs** → `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+4. Build step: **Process Job DSLs** → `ci/jenkins/job-dsl/seed/seed_job_dsl.groovy`
 5. Run the seed job with your config repo URL and branch
 
 The seed job creates all launch and platform build jobs automatically.

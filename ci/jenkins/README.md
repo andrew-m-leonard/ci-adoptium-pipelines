@@ -59,7 +59,7 @@ Shared Groovy helpers loaded with `load()` at the start of each stage. These are
 
 Job DSL scripts that create and maintain all Jenkins jobs from code — no manual job configuration required.
 
-#### seed/seed_job_consolidated.groovy
+#### seed/seed_job_dsl.groovy
 
 Bootstrap script. Run once from a Freestyle "seed job" to create all other jobs:
 - Creates `Build_openjdk_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
@@ -67,7 +67,7 @@ Bootstrap script. Run once from a Freestyle "seed job" to create all other jobs:
 - Configures log rotation, parameters, and SCM from the config repo's `jenkins_job_config.json`
 - Creates the `Build_openjdk_launchers/` and `Build_openjdk/` top-level folders
 
-#### openjdk_build_pipeline.groovy
+#### openjdk_build_pipeline_job_dsl.groovy
 
 Called by the launch pipeline (via `jobDsl()` step) to create or update a single platform build job:
 - Fetches `jdk${version}_pipeline_config.json` from the config repo to extract `arch`, `os`, and `variant` for the platform
@@ -91,7 +91,7 @@ Called by the launch pipeline (via `jobDsl()` step) to create or update a single
 1. Create a **Freestyle** job named `seed-job`
 2. Add string parameters: `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH`
 3. SCM: Git → `https://github.com/adoptium/ci-adoptium-pipelines.git`, branch `main`
-4. Build step: **Process Job DSLs** → script path `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+4. Build step: **Process Job DSLs** → script path `ci/jenkins/job-dsl/seed/seed_job_dsl.groovy`
 5. Run the seed job with your configuration repository URL and branch
 
 The seed job creates all launch jobs. Running a launch job creates the platform build jobs.

@@ -45,7 +45,7 @@ def generateJobs(String configRepoUrl, String configRepoBranch, String pipelineC
     }
 
     jobDsl(
-        targets:             'pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy',
+        targets:             'pipelines/ci/jenkins/job-dsl/seed/seed_job_dsl.groovy',
         removedJobAction:    'DELETE',
         removedViewAction:   'DELETE',
         additionalClasspath: 'pipelines/ci/jenkins/job-dsl',

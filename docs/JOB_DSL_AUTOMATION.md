@@ -42,7 +42,7 @@ openjdk-build-seed-job  (Pipeline job — Pipeline from SCM → config repo Jenk
   │    git checkout ci-adoptium-pipelines → pipelines/
   │
   └─ stage('Generate jobs')  [jobDsl step]
-       pipelines/ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy
+       pipelines/ci/jenkins/job-dsl/seed/seed_job_dsl.groovy
          reads adoptium_pipeline_config.json   (active JDK versions, repo URLs)
          reads jenkins_job_config.json         (log rotation, default params)
          reads pipelines/scripts/stages/       (default stage params)
@@ -56,7 +56,7 @@ Build_openjdk_launchers/Build_openjdk21_launch  (Pipeline — Jenkinsfile.launch
     → fails immediately with instructions if they differ (job is stale — re-run seed)
   reads configurations/jdk21_pipeline_config.json  (available platforms)
   stage('Create/Update Platform Jobs') — runs on every launch:
-    jobDsl → openjdk_build_pipeline.groovy  (per platform)
+    jobDsl → openjdk_build_pipeline_job_dsl.groovy  (per platform)
       checks Jenkins.instance for existing job + stored pipeline-sha
       skips if job exists and pipeline-sha matches current GIT_COMMIT
       otherwise creates/updates Build_openjdk/Build_openjdk21_temurin_x86-64_linux  etc.

@@ -8,7 +8,7 @@ This document describes the parameter consolidation effort to eliminate duplicat
 
 ### 1. Launch Job Parameters Added
 
-**File**: [`ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`](../ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy)
+**File**: [`ci/jenkins/job-dsl/seed/seed_job_dsl.groovy`](../ci/jenkins/job-dsl/seed/seed_job_dsl.groovy)
 
 Added three new parameters to the launch job to support source control and release management:
 
@@ -27,7 +27,7 @@ choiceParam('RELEASE_TYPE',
 
 ### 2. Build Job Duplicate Parameters Removed
 
-**File**: [`ci/jenkins/job-dsl/openjdk_build_pipeline.groovy`](../ci/jenkins/job-dsl/openjdk_build_pipeline.groovy)
+**File**: [`ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy`](../ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy)
 
 Removed duplicate parameters that conflicted with existing parameters:
 
@@ -190,7 +190,7 @@ After applying these changes:
 
 If issues arise, the old parameters can be temporarily restored by:
 
-1. Re-adding the removed parameters to `openjdk_build_pipeline.groovy`
+1. Re-adding the removed parameters to `openjdk_build_pipeline_job_dsl.groovy`
 2. Reverting the changes to `Jenkinsfile.launch`
 3. Regenerating jobs via the seed job
 

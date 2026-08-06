@@ -15,7 +15,7 @@ This document describes the migration from separate `RELEASE` and `WEEKLY` boole
 
 ### 1. Job DSL Configuration
 
-**File**: `ci/jenkins/job-dsl/openjdk_build_pipeline.groovy`
+**File**: `ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy`
 
 **Before**:
 ```groovy
@@ -311,7 +311,7 @@ python3 run-pipeline.py --release-type NIGHTLY  # or omit for default
 
 ## Related Files
 
-- `ci/jenkins/job-dsl/openjdk_build_pipeline.groovy`
+- `ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy`
 - `ci/jenkins/Jenkinsfile.declarative`
 - `scripts/lib/load-json-config.py`
 - `ci/local/run-pipeline.py`

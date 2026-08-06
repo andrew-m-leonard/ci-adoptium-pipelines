@@ -77,7 +77,7 @@ This is the top-level config file that glues everything together. It tells the s
 
 | Consumer | Method |
 |---|---|
-| Seed job (`seed_job_consolidated.groovy`) | Fetched directly from `raw.githubusercontent.com` via HTTP during seed job execution |
+| Seed job (`seed_job_dsl.groovy`) | Fetched directly from `raw.githubusercontent.com` via HTTP during seed job execution |
 | Build pipeline (`ConfigHelper.groovy`) | Read from `./config-repo/adoptium_pipeline_config.json` after Git sparse-checkout |
 | Local runner (`run-pipeline.py`) | Read from `<workspace>/config-repo/adoptium_pipeline_config.json` after `git clone` |
 | CLI tool (`load-adoptium-pipeline-config-json.py`) | Either local path (`--config-repo-dir`) or fetched from remote (`--config-repo-url`) |
@@ -87,7 +87,7 @@ This is the top-level config file that glues everything together. It tells the s
 ### 2. `jenkins_job_config.json` — Jenkins-specific job and agent settings
 
 **Location**: root of the config repo  
-**Consumed by**: seed job (`seed_job_consolidated.groovy`) at job-creation time, and by `ConfigHelper.generateJenkinsConfig()` at build runtime (via `ci/jenkins/lib/load-jenkins-json-config.py`)
+**Consumed by**: seed job (`seed_job_dsl.groovy`) at job-creation time, and by `ConfigHelper.generateJenkinsConfig()` at build runtime (via `ci/jenkins/lib/load-jenkins-json-config.py`)
 
 Contains two distinct groups of settings:
 
@@ -317,7 +317,7 @@ Vendors can place scripts here to replace any default stage script in `scripts/s
 ### Jenkins path
 
 ```
-Seed Job (seed_job_consolidated.groovy)
+Seed Job (seed_job_dsl.groovy)
   │  reads adoptium_pipeline_config.json    ← HTTP from raw.githubusercontent.com
   │  reads jenkins_job_config.json          ← HTTP from raw.githubusercontent.com
   │

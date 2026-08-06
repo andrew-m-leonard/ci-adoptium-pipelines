@@ -15,9 +15,9 @@ ci/
 │   │   ├── PipelineHelper.groovy
 │   │   └── StageScriptRunner.groovy
 │   └── job-dsl/
-│       ├── openjdk_build_pipeline.groovy
+│       ├── openjdk_build_pipeline_job_dsl.groovy
 │       └── seed/
-│           └── seed_job_consolidated.groovy
+│           └── seed_job_dsl.groovy
 ├── local/
 │   ├── run-pipeline.py
 │   ├── stage_resolver.py
@@ -58,8 +58,8 @@ Job DSL scripts that create and maintain all Jenkins jobs from code.
 
 | File | Role |
 |---|---|
-| `seed/seed_job_consolidated.groovy` | Bootstrap — run once to create all launch and platform jobs |
-| `openjdk_build_pipeline.groovy` | Called by the launch pipeline to create/update one platform build job |
+| `seed/seed_job_dsl.groovy` | Bootstrap — run once to create all launch and platform jobs |
+| `openjdk_build_pipeline_job_dsl.groovy` | Called by the launch pipeline to create/update one platform build job |
 
 See [docs/JOB_DSL_AUTOMATION.md](../docs/JOB_DSL_AUTOMATION.md) for setup instructions.
 

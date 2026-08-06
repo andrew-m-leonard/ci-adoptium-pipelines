@@ -6,13 +6,10 @@ This directory contains Jenkins Job DSL scripts for automated job creation.
 
 ```
 ci/jenkins/job-dsl/
-├── seed/                                    # Seed job scripts
-│   ├── seed_job_consolidated.groovy       # Main seed job script (USE THIS)
-│   ├── load_config.groovy                 # Legacy - kept for reference
-│   ├── openjdk_launch_pipeline.groovy     # Legacy - kept for reference
-│   └── seed_job.groovy                    # Legacy - kept for reference
+├── seed/
+│   └── seed_job_dsl.groovy                # Seed job script
 │
-└── openjdk_build_pipeline.groovy          # Dynamic job creation (called by launch jobs)
+└── openjdk_build_pipeline_job_dsl.groovy  # Dynamic job creation (called by launch jobs)
 ```
 
 ## Script Categories
@@ -22,19 +19,15 @@ ci/jenkins/job-dsl/
 The seed job uses a **consolidated script** that contains all logic in a single file to avoid binding issues between separate script executions.
 
 **Active Script:**
-- **`seed_job_consolidated.groovy`**: Main seed job script that:
+- **`seed_job_dsl.groovy`**: Main seed job script that:
   1. Loads configuration from `jenkins_job_config.json` and `adoptium_pipeline_config.json`
   2. Creates `Build_openjdk_launchers/Build_openjdk<version>_launch` jobs for each active JDK version
   3. Creates the `Build_openjdk_launchers/` and `Build_openjdk/` top-level folders
   4. Creates/updates the seed job itself (self-updating)
   5. Creates the `Build_openjdk_launchers` and `Build_openjdk` views
 
-**Legacy Scripts (kept for reference):**
-- `load_config.groovy` - Original config loader (functionality now in consolidated script)
-- `seed_job.groovy` - Original seed job (functionality now in consolidated script)
-
 **Seed Job Configuration:**
-- DSL Scripts: `ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy`
+- DSL Scripts: `ci/jenkins/job-dsl/seed/seed_job_dsl.groovy`
 - Processes a single consolidated script
 - Requires `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH` parameters
 
@@ -46,7 +39,7 @@ Job DSL's `external()` method creates separate script execution contexts, so bin
 These scripts are NOT processed by the seed job. They are called dynamically by pipeline jobs using the `jobDsl` step.
 
 **Files:**
-- **`openjdk_build_pipeline.groovy`**: Creates platform-specific build jobs
+- **`openjdk_build_pipeline_job_dsl.groovy`**: Creates platform-specific build jobs
   - Called by: Launch jobs (`Jenkinsfile.launch`)
   - When: `REGENERATE_JOBS=true` or when platform jobs don't exist
   - Requires: `JDK_VERSION`, `PLATFORM`, `CONFIG_REPO_URL`, `CONFIG_REPO_BRANCH` parameters
@@ -59,7 +52,7 @@ These scripts are NOT processed by the seed job. They are called dynamically by 
 
 If you need to add new functionality to the seed job:
 
-1. Edit `seed_job_consolidated.groovy` directly
+1. Edit `seed_job_dsl.groovy` directly
 2. Add your logic in the appropriate section (marked with comments)
 3. The seed job is self-updating, so it will recreate itself on the next run
 4. Ensure your code doesn't require parameters beyond `CONFIG_REPO_URL` and `CONFIG_REPO_BRANCH`

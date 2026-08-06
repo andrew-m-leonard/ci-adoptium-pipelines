@@ -83,7 +83,6 @@ These documents capture decisions, refactoring work, and intermediate designs fr
 - [REPRODUCIBLE_BUILD_PATH_PADDING.md](./archived/REPRODUCIBLE_BUILD_PATH_PADDING.md) — Path padding for macOS LC_UUID
 - [PATH_PADDING_IMPLEMENTATION_SUMMARY.md](./archived/PATH_PADDING_IMPLEMENTATION_SUMMARY.md) — Path padding quick reference
 - [BUILD_MONITORING_TRACEABILITY.md](./archived/BUILD_MONITORING_TRACEABILITY.md) — BUILD_UID / GROUP_UID traceability design
-- [TEST_BUILD_UID_GUIDE.md](./archived/TEST_BUILD_UID_GUIDE.md) — Testing BUILD_UID logic
 - [MIGRATION_PLAN.md](./archived/MIGRATION_PLAN.md) — Original phased migration strategy
 - [MIGRATION_STRATEGY.md](./archived/MIGRATION_STRATEGY.md) — Design choices and trade-offs
 - [MIGRATION_IMPLEMENTATION_GUIDE.md](./archived/MIGRATION_IMPLEMENTATION_GUIDE.md) — Step-by-step migration instructions

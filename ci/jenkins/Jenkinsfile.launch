@@ -110,7 +110,7 @@ def collateAndMergeGroups() {
  */
 def buildForwardedParams(List orderedGroups, Map platformCfg) {
     // Order must exactly match the parameter declaration order in
-    // openjdk_build_pipeline.groovy so that the triggered build's sidebar
+    // openjdk_build_pipeline_job_dsl.groovy so that the triggered build's sidebar
     // renders parameters in the correct grouped sequence.
 
     // ── Build Configuration separator ────────────────────────────────────────
@@ -165,7 +165,7 @@ pipeline {
 
     // NOTE: Parameters and build discarder are defined by the seed job via Job DSL, not here.
     // Defining them in the Jenkinsfile would override the seed job's settings.
-    // See: ci/jenkins/job-dsl/seed/seed_job_consolidated.groovy
+    // See: ci/jenkins/job-dsl/seed/seed_job_dsl.groovy
 
     options {
         timestamps()
@@ -266,7 +266,7 @@ pipeline {
                         // Read the DSL file and execute it inline via scriptText so it
                         // inherits this pipeline's trusted context rather than requiring
                         // separate script approval for the external DSL file.
-                        def dslScript = readFile('ci/jenkins/job-dsl/openjdk_build_pipeline.groovy')
+                        def dslScript = readFile('ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy')
                         jobDsl(
                             scriptText:            dslScript,
                             removedJobAction:      'IGNORE',
