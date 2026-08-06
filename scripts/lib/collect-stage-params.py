@@ -381,6 +381,10 @@ def _reorder_by_priority(groups: list[dict]) -> list[dict]:
 
     Groups in PRIORITY_GROUPS that are absent from the collated output are
     silently skipped (no error — a disabled stage may have removed them).
+
+    The internal '_extra_stage_ids' set (populated by the collation loop for
+    stems that contributed only duplicate params) is folded into 'stageIds' here
+    and then stripped from the output.
     """
     priority_set = set(PRIORITY_GROUPS)
     # priority_map: group name → merged group dict
@@ -389,33 +393,47 @@ def _reorder_by_priority(groups: list[dict]) -> list[dict]:
 
     for grp in groups:
         name = grp['name']
+        # Collect all stems that contributed to this group: the primary stageId
+        # plus any stems recorded in the internal _extra_stage_ids accumulator.
+        extra_ids: set[str] = grp.pop('_extra_stage_ids', set()) or set()
+        all_ids: list[str] = []
+        primary = grp.get('stageId', '')
+        if primary:
+            all_ids.append(primary)
+        for eid in sorted(extra_ids):
+            if eid not in all_ids:
+                all_ids.append(eid)
+
         if name in priority_set:
             if name not in priority_map:
                 # First occurrence — seed the merged group.
                 # Keep 'stageId' (the first stem) for backward compatibility with any
                 # consumer that reads the singular field; also emit 'stageIds' (a list
                 # of all contributing stems) so Groovy can build the full label.
-                first_id = grp.get('stageId', '')
                 priority_map[name] = {
                     'name':           name,
                     'description':    grp.get('description', ''),
-                    'stageId':        first_id,
-                    'stageIds':       [first_id] if first_id else [],
+                    'stageId':        primary,
+                    'stageIds':       list(all_ids),
                     'stageDisabled':  grp.get('stageDisabled', False),
                     'stageCondition': list(grp.get('stageCondition') or []),
                     'parameters':     list(grp.get('parameters') or []),
                 }
             else:
-                # Subsequent occurrence — accumulate stageId and merge parameters
-                sid = grp.get('stageId', '')
-                if sid and sid not in priority_map[name]['stageIds']:
-                    priority_map[name]['stageIds'].append(sid)
+                # Subsequent occurrence — accumulate stageIds and merge parameters
+                for sid in all_ids:
+                    if sid and sid not in priority_map[name]['stageIds']:
+                        priority_map[name]['stageIds'].append(sid)
                 existing_names = {p['name'] for p in priority_map[name]['parameters']}
                 for p in (grp.get('parameters') or []):
                     if p['name'] not in existing_names:
                         priority_map[name]['parameters'].append(p)
                         existing_names.add(p['name'])
         else:
+            # Non-priority group: strip the internal field, expose extra stageIds
+            # as a plain list if any were recorded (for completeness).
+            if all_ids and len(all_ids) > 1:
+                grp['stageIds'] = all_ids
             remainder.append(grp)
 
     front = [priority_map[name] for name in PRIORITY_GROUPS if name in priority_map]
@@ -589,6 +607,10 @@ def collect(default_stages_dir: Path,
                             else (prev_desc or new_desc)
                         )
                         existing_param['description'] = merged_desc
+                    # Record this stem as a contributor to the existing group even
+                    # though it emitted no new params (needed for stageIds tracking).
+                    existing_grp = output_groups[grp_idx]
+                    existing_grp.setdefault('_extra_stage_ids', set()).add(stem)
                     # Skip — do not re-emit this param
                     continue
                 all_param_names[p['name']] = (

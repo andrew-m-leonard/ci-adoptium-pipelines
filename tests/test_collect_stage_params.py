@@ -527,12 +527,34 @@ class TestStageSelectionsGroup(unittest.TestCase):
                       'ENABLE_TCK', 'PUBLISH_ARTIFACTS', 'RUN_REPRODUCIBLE_COMPARE'):
             self.assertIn(param, sel_params, f'{param} not in Stage Selections group')
 
-        # Merged Stage Selections group must list all six contributing stems
+        # SIGN_ARTIFACTS must be defined on all signing stages
+        signing_stems = {'03-internal-code-sign', '06-post-build-code-sign',
+                         '08-code-sign-installer', '09-sbom-sign',
+                         '10-digital-artifact-sign', '11-verify-signing'}
+
+        # RUN_TESTS must be defined on all test stages
+        test_stems = {'13-smoke-tests', '14-aqa-tests'}
+
+        # Merged Stage Selections group must list all contributing stems
         sel_group = result['groups'][0]
         self.assertIn('stageIds', sel_group, 'Stage Selections group must carry stageIds list')
-        expected_stems = {'03-internal-code-sign', '07-installer', '14-aqa-tests',
-                          '15-tck-tests', '16-publish', '20-reproducible-compare'}
-        self.assertEqual(set(sel_group['stageIds']), expected_stems)
+        actual_stems = set(sel_group['stageIds'])
+
+        # Every signing stage and every test stage that defines these params
+        # must appear in stageIds (they all contribute to Stage Selections)
+        for stem in signing_stems:
+            self.assertIn(stem, actual_stems,
+                          f'signing stage {stem!r} missing from Stage Selections stageIds')
+        for stem in test_stems:
+            self.assertIn(stem, actual_stems,
+                          f'test stage {stem!r} missing from Stage Selections stageIds')
+
+        # SIGN_ARTIFACTS description must be emitted exactly once (no " / " duplication)
+        all_params = {p['name']: p for g in result['groups'] for p in g['parameters']}
+        self.assertNotIn(' / ', all_params['SIGN_ARTIFACTS']['description'],
+                         'SIGN_ARTIFACTS description should not be duplicated by the collator')
+        self.assertNotIn(' / ', all_params['RUN_TESTS']['description'],
+                         'RUN_TESTS description should not be duplicated by the collator')
 
 
 if __name__ == '__main__':

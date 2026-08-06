@@ -4,5 +4,5 @@
   "stageCondition": [
     { "param": "SIGN_ARTIFACTS", "value": true }
   ],
-  "description": "Gate-only params.json for the verify-signing stage. This stage has no parameters of its own — it runs only when SIGN_ARTIFACTS is true. SIGN_ARTIFACTS is defined in 03-internal-code-sign.params.json."
+  "description": "Gate-only params.json for the verify-signing stage. Runs only when SIGN_ARTIFACTS is true."
 }

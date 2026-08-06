@@ -4,7 +4,7 @@
   "stageCondition": [
     { "param": "RUN_TESTS", "value": true }
   ],
-  "description": "Parameters consumed by the AQA test stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/14-aqa-tests.params.json in the config repo.",
+  "description": "Parameters for the AQA test stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/14-aqa-tests.params.json in the config repo.",
   "parameterGroups": [
     {
       "name": "Stage Selections",
@@ -14,7 +14,7 @@
           "name": "RUN_TESTS",
           "type": "boolean",
           "default": true,
-          "description": "Enable test stages. Set to false to skip all testing — useful for build-only runs or when test infrastructure is unavailable."
+          "description": "Enable test stages."
         }
       ]
     },

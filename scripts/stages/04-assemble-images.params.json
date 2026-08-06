@@ -4,5 +4,5 @@
   "stageCondition": [
     { "param": "SIGN_ARTIFACTS", "value": true }
   ],
-  "description": "Gate-only params.json for the assemble-images stage. This stage has no parameters of its own — it runs only when SIGN_ARTIFACTS is true and the platform is mac or windows on a non-jdk8u build. SIGN_ARTIFACTS is defined in 03-internal-code-sign.params.json."
+  "description": "Gate-only params.json for the assemble-images stage. This stage has no parameters of its own — it runs only when SIGN_ARTIFACTS is true and the platform is mac or windows on a non-jdk8u build."
 }

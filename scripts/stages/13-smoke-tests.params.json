@@ -4,5 +4,19 @@
   "stageCondition": [
     { "param": "RUN_TESTS", "value": true }
   ],
-  "description": "Gate-only params.json for the smoke-tests stage. This stage has no parameters of its own — it runs only when RUN_TESTS is true. RUN_TESTS is defined in 14-aqa-tests.params.json."
+  "description": "Gate-only params.json for the smoke-tests stage. Runs only when RUN_TESTS is true.",
+  "parameterGroups": [
+    {
+      "name": "Stage Selections",
+      "description": "Boolean flags that control which pipeline stages are enabled. All stage-gate parameters are collected here so operators can see and adjust the full execution plan in one place.",
+      "parameters": [
+        {
+          "name": "RUN_TESTS",
+          "type": "boolean",
+          "default": true,
+          "description": "Enable test stages."
+        }
+      ]
+    }
+  ]
 }

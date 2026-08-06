@@ -5,7 +5,7 @@
     { "param": "RUN_REPRODUCIBLE_COMPARE", "value": true },
     { "param": "SCM_REF", "value": "regex:.+" }
   ],
-  "description": "Parameters consumed by the reproducible build comparison stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/20-reproducible-compare.params.json in the config repo.",
+  "description": "Parameters consumed by the reproducible build comparison stage.",
   "parameterGroups": [
     {
       "name": "Stage Selections",

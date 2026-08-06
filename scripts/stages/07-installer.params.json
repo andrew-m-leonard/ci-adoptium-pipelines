@@ -4,7 +4,7 @@
   "stageCondition": [
     { "param": "ENABLE_INSTALLERS", "value": true }
   ],
-  "description": "Parameters consumed by the installer build stage. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/07-installer.params.json in the config repo.",
+  "description": "Parameters consumed by the installer build stage.",
   "parameterGroups": [
     {
       "name": "Stage Selections",
@@ -14,7 +14,7 @@
           "name": "ENABLE_INSTALLERS",
           "type": "boolean",
           "default": true,
-          "description": "Build platform-specific installer packages (.msi on Windows, .pkg on macOS, .deb/.rpm on Linux). Enabled by default. Set to false for archive-only builds that do not require installer packages."
+          "description": "Build platform-specific installer packages (.msi on Windows, .pkg on macOS, .deb/.rpm on Linux)."
         }
       ]
     }

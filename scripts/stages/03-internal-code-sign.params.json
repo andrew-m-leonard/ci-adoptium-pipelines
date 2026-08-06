@@ -4,7 +4,7 @@
   "stageCondition": [
     { "param": "SIGN_ARTIFACTS", "value": true }
   ],
-  "description": "Parameters consumed by signing stages. SIGN_ARTIFACTS is defined here and referenced via stageCondition by stages 04-assemble-images, 06-post-build-code-sign, 08-code-sign-installer, 09-sbom-sign, 10-digital-artifact-sign, and 11-verify-signing. Vendor overrides may suppress, replace, or extend these via a vendor-scripts/03-internal-code-sign.params.json in the config repo.",
+  "description": "Parameters for the internal-code-sign stage.",
   "parameterGroups": [
     {
       "name": "Stage Selections",
@@ -14,7 +14,7 @@
           "name": "SIGN_ARTIFACTS",
           "type": "boolean",
           "default": false,
-          "description": "Enable artifact signing stages (internal code sign, post-build code sign, installer signing, SBOM signing, GPG digital artifact signing, and signature verification). Disabled by default — enable for release and weekly builds that require signed artifacts."
+          "description": "Enable artifact signing."
         }
       ]
     }
