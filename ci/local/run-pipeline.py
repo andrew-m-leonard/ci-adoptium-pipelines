@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import enum
 import os
 import sys
 import subprocess
@@ -25,6 +26,25 @@ from pathlib import Path
 from datetime import datetime
 from workspace_manager import WorkspaceManager
 from stage_resolver import StageResolver
+
+
+class StageResult(enum.Enum):
+    """Mirrors Jenkins build result states: SUCCESS → UNSTABLE → FAILURE."""
+    SUCCESS  = 'SUCCESS'
+    UNSTABLE = 'UNSTABLE'
+    FAILURE  = 'FAILURE'
+
+    def is_worse_than(self, other: 'StageResult') -> bool:
+        _rank = {StageResult.SUCCESS: 0, StageResult.UNSTABLE: 1, StageResult.FAILURE: 2}
+        return _rank[self] > _rank[other]
+
+    @staticmethod
+    def from_exit_code(exit_code: int) -> 'StageResult':
+        if exit_code == 0:
+            return StageResult.SUCCESS
+        if exit_code == 1:
+            return StageResult.UNSTABLE
+        return StageResult.FAILURE
 
 
 def _load_stage_registry(script_dir: Path) -> dict:
@@ -213,6 +233,10 @@ _LOCAL_STAGES = [
 ]
 
 
+class _PipelineAbort(Exception):
+    """Raised internally to stop stage execution after a FAILURE result."""
+
+
 class PipelineRunner:
     def __init__(self, args, stage_params: dict | None = None,
                  collated: dict | None = None):
@@ -394,7 +418,7 @@ class PipelineRunner:
         return env
 
     def _run_stage(self, stage_id: str, artifact_filter: str,
-                   extra_env: dict | None = None, unstable_ok: bool = False) -> int:
+                   extra_env: dict | None = None) -> StageResult:
         """
         Execute one pipeline stage — the local equivalent of a Jenkins stage block.
 
@@ -406,16 +430,19 @@ class PipelineRunner:
           5. Archive outputs from stage_workspace/target/ (≈ archiveArtifacts)
           6. Post-cleanup (≈ finalizeStage cleanWs)
 
+        Exit-code → StageResult mapping (mirrors Jenkins):
+          0  → SUCCESS
+          1  → UNSTABLE  (stage completed but reported differences / warnings)
+          >1 → FAILURE   (hard failure — pipeline stops after this stage)
+
         Args:
             stage_id:        StageId from pipeline-stages.json (e.g. '02-build').
                              Used as both the script stem and the display label source.
             artifact_filter: Comma-separated glob patterns for restore_stage_inputs.
             extra_env:       Additional env vars beyond the standard set.
-            unstable_ok:     If True, non-zero exit code is printed as a warning
-                             rather than raising (UNSTABLE-equivalent, like Jenkins).
 
         Returns:
-            exit code of the stage script (0 on success or disabled/no-op).
+            StageResult reflecting the stage outcome.
         """
         stage_label = self._stage_registry.get(stage_id, stage_id)
         print(f"\n{'=' * 80}")
@@ -431,13 +458,13 @@ class PipelineRunner:
         self.workspace_mgr.archive_stage_outputs(stage_label, target_dir=env.get('TARGET_DIR'))
         self.workspace_mgr.cleanup_stage_workspace('post')
 
-        if exit_code != 0:
-            if unstable_ok:
-                print(f"\n⚠️  {stage_label} completed with warnings (exit code: {exit_code})")
-            else:
-                raise subprocess.CalledProcessError(exit_code, stage_id)
+        result = StageResult.from_exit_code(exit_code)
+        if result == StageResult.UNSTABLE:
+            print(f"\n⚠️  {stage_label} completed as UNSTABLE (exit code: {exit_code})")
+        elif result == StageResult.FAILURE:
+            print(f"\n❌ {stage_label} FAILED (exit code: {exit_code})")
 
-        return exit_code
+        return result
 
     def _load_adoptium_pipeline_config(self, config_repo_dir: Path) -> dict:
         """Load adoptium_pipeline_config.json from the config repo directory."""
@@ -483,57 +510,78 @@ class PipelineRunner:
             initialize_already_run=skip_initialize,
         )
 
+        pipeline_result = StageResult.SUCCESS
+        failure_exit_code = 0
+
+        def _run(stage_id, artifact_filter, extra_env=None):
+            """Run a stage, update pipeline_result, return False if pipeline should stop."""
+            nonlocal pipeline_result, failure_exit_code
+            result = self._run_stage(stage_id, artifact_filter, extra_env=extra_env)
+            if result.is_worse_than(pipeline_result):
+                pipeline_result = result
+            if result == StageResult.FAILURE:
+                failure_exit_code = 2  # sentinel — actual code already printed
+                return False
+            return True
+
         try:
             if not skip_initialize and INITIALIZE in self.stages_to_run:
                 self.stage_initialize()
 
             if BUILD in self.stages_to_run:
-                self._run_stage(BUILD, 'pipeline-config.json',
-                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'build_output')})
+                if not _run(BUILD, 'pipeline-config.json',
+                            extra_env={'TARGET_DIR': str(self.stage_workspace / 'build_output')}):
+                    raise _PipelineAbort()
 
             if VALIDATE_SBOM in self.stages_to_run:
-                self._run_stage(VALIDATE_SBOM, 'pipeline-config.json,*sbom*.json',
-                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')})
+                if not _run(VALIDATE_SBOM, 'pipeline-config.json,*sbom*.json',
+                            extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')}):
+                    raise _PipelineAbort()
 
             if SMOKE_TESTS in self.stages_to_run and self._stage_condition_met(SMOKE_TESTS):
-                self._run_stage(SMOKE_TESTS,
-                                'pipeline-config.json,*.tar.gz,*.zip',
-                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')})
+                if not _run(SMOKE_TESTS,
+                            'pipeline-config.json,*.tar.gz,*.zip',
+                            extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')}):
+                    raise _PipelineAbort()
 
             if AQA_TESTS in self.stages_to_run and self._stage_condition_met(AQA_TESTS):
-                self._run_stage(AQA_TESTS,
-                                'pipeline-config.json,*.tar.gz,*.zip',
-                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'aqa_test_output')})
+                if not _run(AQA_TESTS,
+                            'pipeline-config.json,*.tar.gz,*.zip',
+                            extra_env={'TARGET_DIR': str(self.stage_workspace / 'aqa_test_output')}):
+                    raise _PipelineAbort()
 
             if REPRODUCIBLE_COMPARE in self.stages_to_run and self._stage_condition_met(REPRODUCIBLE_COMPARE):
                 release_type = (self.args.release_type or 'NIGHTLY').upper()
-                self._run_stage(REPRODUCIBLE_COMPARE,
-                                'pipeline-config.json,*.tar.gz,*.zip',
-                                extra_env={
-                                    'TARGET_DIR': str(self.stage_workspace / 'reproducible_compare_output'),
-                                    'RELEASE':    'true' if release_type == 'RELEASE' else 'false',
-                                },
-                                unstable_ok=True)
+                _run(REPRODUCIBLE_COMPARE,
+                     'pipeline-config.json,*.tar.gz,*.zip',
+                     extra_env={
+                         'TARGET_DIR': str(self.stage_workspace / 'reproducible_compare_output'),
+                         'RELEASE':    'true' if release_type == 'RELEASE' else 'false',
+                     })
 
-            print()
-            print("=" * 80)
-            print("✅ Pipeline completed successfully!")
-            print("=" * 80)
-            print(f"\n📦 All artifacts in: {self.build_artifacts_dir}")
-            return 0
-
-        except subprocess.CalledProcessError as e:
-            print()
-            print("=" * 80)
-            print(f"❌ Pipeline failed: {e.cmd} (exit code {e.returncode})")
-            print("=" * 80)
-            return e.returncode
+        except _PipelineAbort:
+            pass
         except Exception as e:
             print()
             print("=" * 80)
             print(f"❌ Pipeline failed: {e}")
             print("=" * 80)
             return 1
+
+        print()
+        print("=" * 80)
+        if pipeline_result == StageResult.SUCCESS:
+            print("✅ Pipeline completed successfully!")
+            rc = 0
+        elif pipeline_result == StageResult.UNSTABLE:
+            print("⚠️  Pipeline completed as UNSTABLE (one or more stages reported warnings)")
+            rc = 1
+        else:
+            print("❌ Pipeline FAILED")
+            rc = failure_exit_code
+        print("=" * 80)
+        print(f"\n📦 All artifacts in: {self.build_artifacts_dir}")
+        return rc
 
     # ------------------------------------------------------------------
     # Initialize stage (unique logic — not reducible to _run_stage)
