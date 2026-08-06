@@ -16,8 +16,8 @@ Merge strategy per stage stem:
   3. Also load optional vendor_stage_params.json (cross-stage extras,
      for params not tied to a specific script override)
   4. Cross-stage duplicate param names: both definitions MUST share the same
-     Group name (error if not). The param is emitted once; descriptions are
-     merged — kept as-is if identical, concatenated with " / " if different.
+     Group name (error if not). The param is emitted once; the first
+     description seen is kept and subsequent ones are ignored.
 
 Stage-level metadata fields (top-level in each .params.json):
   stageDisabled   (boolean, default false)
@@ -596,17 +596,11 @@ def collect(default_stages_dir: Path,
                             f"'{grp['name']}' (at '{source_label}'). "
                             f"Duplicate parameters across stages must share the same Group name."
                         )
-                    # Merge descriptions on the already-emitted param
+                    # Keep the first description seen — subsequent definitions
+                    # from other stages are ignored for brevity.
                     existing_param = output_groups[grp_idx]['parameters'][param_idx]
-                    prev_desc = existing_param.get('description', '')
-                    new_desc  = p.get('description', '')
-                    if prev_desc != new_desc:
-                        merged_desc = (
-                            f"{prev_desc} / {new_desc}"
-                            if prev_desc and new_desc
-                            else (prev_desc or new_desc)
-                        )
-                        existing_param['description'] = merged_desc
+                    if not existing_param.get('description'):
+                        existing_param['description'] = p.get('description', '')
                     # Record this stem as a contributor to the existing group even
                     # though it emitted no new params (needed for stageIds tracking).
                     existing_grp = output_groups[grp_idx]

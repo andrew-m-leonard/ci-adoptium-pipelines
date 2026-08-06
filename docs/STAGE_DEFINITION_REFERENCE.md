@@ -135,6 +135,14 @@ Each parameter name must be declared in **exactly one** stage's `params.json`. T
 
 Other stages that need to gate on a parameter reference it via their `stageCondition` only — they do not re-declare it.
 
+### Shared parameters across stages
+
+Some parameters (e.g. `BUILD_REF`, `AQA_REF`) are logically meaningful to more than one stage and may be re-declared in multiple `params.json` files — both default and vendor. The collator permits this **only when all declarations use the same group name**. The parameter is emitted once in the collated output.
+
+**Description precedence:** the description from the **first declaration encountered** (lowest stage number, default file before vendor file) is used. Descriptions from subsequent declarations are silently ignored. This keeps the displayed parameter description concise and avoids verbose concatenation.
+
+> When adding a shared parameter, write its canonical description in the lowest-numbered stage that declares it, since that will be the one shown to users.
+
 ### Current ownership map
 
 | Parameter | Owned by | Referenced via stageCondition by |
