@@ -103,7 +103,7 @@ def _param_name_to_cli_flag(name: str) -> str:
     return '--' + name.lower().replace('_', '-')
 
 
-def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]]:
+def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str], list[str]]:
     """
     Parse a list of raw unknown CLI tokens against the collated stage parameter
     definitions.
@@ -118,9 +118,11 @@ def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]
     ambiguity between a flag and the next positional token.
 
     Returns:
-        (stage_params, unrecognised)
-          stage_params   — dict of PARAM_NAME → value for every recognised token
+        (stage_params, unrecognised, errors)
+          stage_params   — dict of PARAM_NAME → value for every valid token
           unrecognised   — list of flag names that matched no collated param
+          errors         — list of human-readable error strings for malformed
+                           tokens (missing value, wrong boolean value)
     """
     # Build a lookup: --lower-kebab-case flag → param def dict
     flag_to_param: dict[str, dict] = {}
@@ -130,6 +132,7 @@ def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]
 
     stage_params: dict[str, str] = {}
     unrecognised: list[str] = []
+    errors:       list[str] = []
 
     i = 0
     while i < len(extra):
@@ -157,23 +160,24 @@ def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str]
                 value = extra[i + 1]
                 i += 2
             else:
-                print(f"WARNING: flag '{flag}' expects a value but none was found — skipping.",
-                      file=sys.stderr)
+                errors.append(
+                    f"  {flag}: missing value (expected {p['type']})"
+                )
                 i += 1
                 continue
 
         if p['type'] == 'boolean':
             if value.lower() not in ('true', 'false'):
-                print(f"WARNING: flag '{flag}' is boolean but got value '{value}' "
-                      f"(expected 'true' or 'false') — skipping.",
-                      file=sys.stderr)
+                errors.append(
+                    f"  {flag}: invalid value {value!r} — boolean must be 'true' or 'false'"
+                )
                 i += 1
                 continue
             stage_params[p['name']] = value.lower()
         else:
             stage_params[p['name']] = value
 
-    return stage_params, unrecognised
+    return stage_params, unrecognised, errors
 
 
 # ---------------------------------------------------------------------------
@@ -806,6 +810,17 @@ Examples:
             f"Must be in format jdkNN (e.g., jdk21, jdk8)."
         )
 
+    # Syntax-only pre-check: reject any extra token that doesn't start with '--'.
+    # Single-dash flags (e.g. -dsfsdfsdf) are never valid stage params and would
+    # otherwise silently pass through until post-Initialize collation.
+    bad_tokens = [t for t in extra_tokens if t.startswith('-') and not t.startswith('--')]
+    if bad_tokens:
+        parser.error(
+            f"Unrecognised argument(s): {' '.join(bad_tokens)}\n"
+            f"Stage parameters must use --<lower-kebab-case-name> <value> syntax.\n"
+            f"Run with --help to see all available parameters."
+        )
+
     # Create runner — stage params are empty until the config repo is cloned.
     runner = PipelineRunner(args, stage_params={}, collated=None)
 
@@ -839,13 +854,25 @@ Examples:
     # Load stage metadata (disabled flags, conditions) from the collated output.
     runner._load_stage_metadata(collated)
 
-    stage_params, unrecognised = _parse_extra_args(extra_tokens, collated)
+    stage_params, unrecognised, param_errors = _parse_extra_args(extra_tokens, collated)
 
+    failed = False
     if unrecognised:
-        print(f"\n⚠️  Unrecognised parameters (not defined in any *.params.json for this config repo):")
+        print(f"\n❌ Unrecognised parameter(s) — not defined in any *.params.json for this config repo:")
         for flag in unrecognised:
             print(f"   {flag}")
-        print("   These will be ignored. Check --help or the vendor-scripts/*.params.json files.\n")
+        print(f"\n   Run with --help to see all available stage parameters.")
+        failed = True
+
+    if param_errors:
+        print(f"\n❌ Invalid parameter value(s):")
+        for msg in param_errors:
+            print(msg)
+        print(f"\n   Run with --help to see all available stage parameters.")
+        failed = True
+
+    if failed:
+        return 1
 
     if stage_params:
         print("Stage parameters accepted:")
