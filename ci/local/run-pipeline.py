@@ -408,10 +408,10 @@ class PipelineRunner:
 
         # Inject collated stage params so vendor stage scripts can read them
         # as environment variables without needing any other mechanism.
-        # setdefault ensures pipeline-config.json values (set above) take
-        # precedence; explicit extra_env values applied next will override all.
+        # Stage params always override ambient env — the stage script itself
+        # decides how to merge its param with the CONFIG_* repo defaults.
         for name, value in self._stage_param_values.items():
-            env.setdefault(name, str(value))
+            env[name] = str(value)
 
         if extra:
             env.update(extra)

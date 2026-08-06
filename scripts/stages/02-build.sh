@@ -51,7 +51,10 @@ main() {
     local make_args="${EXTRA_MAKE_OPTIONS:-}"
     local create_sbom="${CREATE_SBOM:-false}"
     local scm_ref="${SCM_REF:-}"
-    local build_ref="${CONFIG_BUILD_REF:-master}"
+    # BUILD_REF stage param takes precedence; fall back to the repo default
+    # from pipeline-config.json (CONFIG_BUILD_REF), then hard-coded 'master'.
+    local build_ref="${BUILD_REF:-${CONFIG_BUILD_REF:-master}}"
+    local build_ref_source; [[ -n "${BUILD_REF:-}" ]] && build_ref_source="param" || build_ref_source="default"
     local build_repo_url="${CONFIG_BUILD_REPO_URL:-https://github.com/adoptium/temurin-build.git}"
     local clean_workspace="${CLEAN_WORKSPACE_AFTER_STAGE:-false}"
     local release_type="${RELEASE_TYPE:-NIGHTLY}"
@@ -79,8 +82,8 @@ main() {
     log_info "  Architecture: ${architecture}"
     log_info "  Variant: ${variant}"
     log_info "  SCM Ref: ${scm_ref}"
-    log_info "  Build Repo URL: ${build_repo_url}"
-    log_info "  Build Ref: ${build_ref}"
+    log_info "  Build Repo URL: ${build_repo_url} (${build_ref_source})"
+    log_info "  Build Ref: ${build_ref} (${build_ref_source})"
     log_info "  Build Args: ${build_args}"
     log_info "  Configure Args: ${configure_args}"
     log_info "  Clean Workspace: ${clean_workspace}"
