@@ -757,6 +757,22 @@ def _build_stage_params_help(script_dir: Path, argv: list[str]) -> str:
             except Exception:
                 existing_url = ''
             if existing_url == config_repo_url:
+                # URL matches — fetch latest so we always collate against
+                # up-to-date vendor params (stale clones cause duplicate-param
+                # errors when the remote has already fixed the conflict).
+                try:
+                    subprocess.run(
+                        ['git', '-C', str(existing), 'fetch', '--depth', '1',
+                         'origin', config_repo_branch],
+                        check=True, capture_output=True
+                    )
+                    subprocess.run(
+                        ['git', '-C', str(existing), 'reset', '--hard',
+                         f'origin/{config_repo_branch}'],
+                        check=True, capture_output=True
+                    )
+                except Exception:
+                    pass  # best-effort; stale content is better than no help output
                 candidate = existing / 'vendor-scripts'
                 if candidate.exists():
                     vendor_scripts_dir = candidate

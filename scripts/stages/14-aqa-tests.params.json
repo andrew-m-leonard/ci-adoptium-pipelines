@@ -19,14 +19,20 @@
       ]
     },
     {
-      "name": "AQAVit Test Options",
-      "description": "Parameters for AQAVit testing. Leave empty to use the defaults defined in adoptium_pipeline_config.json.",
+      "name": "Source Control",
+      "description": "Refs that pin exactly what source is checked out for this stage. Leave empty to use the defaults defined in adoptium_pipeline_config.json.",
       "parameters": [
         {
           "name": "AQA_REF",
           "type": "string",
           "default": "",
           "description": "Git branch or tag for the aqa-tests repository. Empty = default branch defined in adoptium_pipeline_config.json."
+        },
+        {
+          "name": "BUILD_REF",
+          "type": "string",
+          "default": "",
+          "description": "Git branch or tag for the build-scripts repository. Empty = default defined in adoptium_pipeline_config.json."
         }
       ]
     }
