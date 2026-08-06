@@ -273,7 +273,6 @@ pipeline {
                             removedViewAction:     'IGNORE',
                             ignoreExisting:        false,
                             lookupStrategy:        'JENKINS_ROOT',
-                            unstableOnModification: false,
                             additionalParameters: [
                                 JDK_VERSION:          env.JDK_VERSION,
                                 PLATFORM:             platform,
