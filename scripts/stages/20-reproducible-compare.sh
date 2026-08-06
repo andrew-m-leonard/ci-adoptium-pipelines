@@ -16,6 +16,6 @@
 #   INPUT_ARTIFACTS_DIR  - Directory containing locally built JDK tarballs/zips
 #   TARGET_DIR           - Directory for comparison report output
 #   SCM_REF              - Git tag/ref for the build (e.g., jdk-21.0.2+13)
-#   RELEASE              - Boolean: true for release builds, false for EA
+#   RELEASE_TYPE         - Build type: RELEASE or NIGHTLY (default: NIGHTLY)
 echo "ℹ️  Reproducible Compare: no vendor implementation configured — skipping"
 exit 0
