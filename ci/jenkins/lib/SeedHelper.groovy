@@ -24,8 +24,15 @@ def generateJobs(String configRepoUrl, String configRepoBranch, String pipelineC
     // stage parameter collation shared by seed, launch, and build jobs.
     // vendor-scripts/ lives in the workspace root (config repo SCM checkout).
     // pipelines/ contains the default *.params.json files.
+    //
+    // Load the canonical stage list from PipelineStages.groovy so that
+    // --orchestrated-stages is defined in exactly one place.
+    // Note: pipelines/ prefix because the seed job checks out ci-adoptium-pipelines
+    // into pipelines/ (see Jenkinsfile.seed dir('pipelines') block).
+    def ps = load('pipelines/ci/jenkins/lib/PipelineStages.groovy')
     def collectCmd = 'python3 pipelines/scripts/lib/collect-stage-params.py' +
         ' --default-stages-dir pipelines/scripts/stages' +
+        " --orchestrated-stages ${ps.orchestratedStages()}" +
         ' --output collated-stage-params.json'
     if (fileExists('vendor-scripts')) {
         collectCmd += ' --vendor-scripts-dir vendor-scripts'

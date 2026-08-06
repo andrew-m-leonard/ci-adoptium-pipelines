@@ -79,12 +79,14 @@ Usage:
     python3 scripts/lib/collect-stage-params.py \\
         --default-stages-dir  scripts/stages \\
         --vendor-scripts-dir  config-repo/vendor-scripts \\
+        --orchestrated-stages 01-initialize,02-build,12-validate-sbom,13-smoke-tests,14-aqa-tests,20-reproducible-compare \\
         --output              /tmp/collated-stage-params.json
 
     # Remote vendor files — used by Jenkins Job DSL at job-generation time:
     python3 scripts/lib/collect-stage-params.py \\
         --default-stages-dir  scripts/stages \\
         --vendor-raw-base-url https://raw.githubusercontent.com/myorg/myrepo/main \\
+        --orchestrated-stages 01-initialize,02-build,03-internal-code-sign,04-assemble-images,06-post-build-code-sign,07-installer,08-code-sign-installer,09-sbom-sign,10-digital-artifact-sign,11-verify-signing,12-validate-sbom,13-smoke-tests,14-aqa-tests,15-tck-tests,16-publish,20-reproducible-compare \\
         --output              /tmp/collated-stage-params.json
 """
 
@@ -460,9 +462,17 @@ def _validate_stage_conditions(groups: list[dict], param_names: set[str]) -> Non
 
 def collect(default_stages_dir: Path,
             vendor_scripts_dir: Path | None,
-            vendor_raw_base_url: str | None) -> dict:
+            vendor_raw_base_url: str | None,
+            orchestrated_stages: set[str] | None = None) -> dict:
     """
-    Collate all stage *.params.json files into a single structured output dict.
+    Collate stage *.params.json files into a single structured output dict.
+
+    When orchestrated_stages is provided only stems whose ID appears in that
+    set are processed — all others are silently skipped.  This lets each CI
+    orchestrator (local runner, Jenkins launch job, seed job) restrict the
+    collated output to exactly the stages it actually runs, preventing
+    parameters from CI-only stages (e.g. code-signing) from leaking into
+    contexts where those stages are not executed.
 
     Returns:
         {
@@ -497,12 +507,15 @@ def collect(default_stages_dir: Path,
             return _load_json_local(vendor_scripts_dir.parent / filename)
         return None
 
-    # Collect stage stems from default params files, preserving sort order
+    # Collect stage stems from default params files, preserving sort order.
+    # When orchestrated_stages is set, skip any stem not in that allowlist.
     stems_seen: list[str] = []
     stems_set:  set[str]  = set()
 
     for path in sorted(default_stages_dir.glob('*.params.json')):
         stem = path.name.replace('.params.json', '')
+        if orchestrated_stages and stem not in orchestrated_stages:
+            continue
         if stem not in stems_set:
             stems_seen.append(stem)
             stems_set.add(stem)
@@ -511,6 +524,8 @@ def collect(default_stages_dir: Path,
     if vendor_scripts_dir:
         for path in sorted(vendor_scripts_dir.glob('*.params.json')):
             stem = path.name.replace('.params.json', '')
+            if orchestrated_stages and stem not in orchestrated_stages:
+                continue
             if stem not in stems_set:
                 stems_seen.append(stem)
                 stems_set.add(stem)
@@ -752,6 +767,15 @@ Examples:
         )
     )
     parser.add_argument(
+        '--orchestrated-stages', default=None,
+        help=(
+            'Comma-separated list of stage IDs to include (e.g. '
+            '"01-initialize,02-build,14-aqa-tests"). '
+            'Stems not in this list are silently skipped. '
+            'Omit to process all discovered stems.'
+        )
+    )
+    parser.add_argument(
         '--output', required=True,
         help='Path to write the collated output JSON'
     )
@@ -774,11 +798,16 @@ Examples:
 
     vendor_dir = Path(args.vendor_scripts_dir) if args.vendor_scripts_dir else None
 
+    orchestrated: set[str] | None = None
+    if args.orchestrated_stages:
+        orchestrated = {s.strip() for s in args.orchestrated_stages.split(',') if s.strip()}
+
     try:
         result = collect(
             default_stages_dir=default_dir,
             vendor_scripts_dir=vendor_dir,
             vendor_raw_base_url=args.vendor_raw_base_url,
+            orchestrated_stages=orchestrated,
         )
     except (ValueError, RuntimeError) as e:
         print(f"ERROR: {e}", file=sys.stderr)

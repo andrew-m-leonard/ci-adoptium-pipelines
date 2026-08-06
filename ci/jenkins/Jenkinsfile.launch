@@ -58,12 +58,15 @@ def resolveGroupUid() {
  * Stores env.SEPARATOR_NAMES (comma list) for reference/debugging.
  */
 def collateAndMergeGroups() {
-    sh(script: '''\
-        python3 scripts/lib/collect-stage-params.py \
-            --default-stages-dir scripts/stages \
-            --vendor-scripts-dir config-repo/vendor-scripts \
+    // Load the canonical stage list so --orchestrated-stages is never duplicated here.
+    def ps = load('ci/jenkins/lib/PipelineStages.groovy')
+    sh(script: """\
+        python3 scripts/lib/collect-stage-params.py \\
+            --default-stages-dir scripts/stages \\
+            --vendor-scripts-dir config-repo/vendor-scripts \\
+            --orchestrated-stages ${ps.orchestratedStages()} \\
             --output collated-stage-params.json
-        '''.stripIndent())
+        """.stripIndent())
 
     def collatedJson = readFile('collated-stage-params.json')
     env.COLLATED_PARAMS_JSON = collatedJson

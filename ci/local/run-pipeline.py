@@ -48,14 +48,19 @@ def _load_stage_registry(script_dir: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def _collect_stage_params(script_dir: Path, vendor_scripts_dir: Path | None,
-                           silent: bool = False) -> dict:
+                           silent: bool = False,
+                           orchestrated_stages: list[str] | None = None) -> dict:
     """
     Run scripts/lib/collect-stage-params.py and return the parsed output.
 
     Args:
-        script_dir:          Root of the ci-adoptium-pipelines checkout.
-        vendor_scripts_dir:  Path to config-repo/vendor-scripts, or None.
-        silent:              Suppress stdout (used when building --help text).
+        script_dir:           Root of the ci-adoptium-pipelines checkout.
+        vendor_scripts_dir:   Path to config-repo/vendor-scripts, or None.
+        silent:               Suppress stdout (used when building --help text).
+        orchestrated_stages:  List of stage IDs to include; stems not in this
+                              list are skipped by the collator.  Pass
+                              _LOCAL_STAGES to restrict output to only the
+                              stages this runner actually executes.
 
     Returns:
         Dict with keys 'groups' and 'paramNames', or empty structure on failure.
@@ -77,6 +82,8 @@ def _collect_stage_params(script_dir: Path, vendor_scripts_dir: Path | None,
     ]
     if vendor_scripts_dir and vendor_scripts_dir.exists():
         cmd += ['--vendor-scripts-dir', str(vendor_scripts_dir)]
+    if orchestrated_stages:
+        cmd += ['--orchestrated-stages', ','.join(orchestrated_stages)]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -191,14 +198,13 @@ PUBLISH_ARTIFACTS    = '16-publish'
 REPRODUCIBLE_COMPARE = '20-reproducible-compare'
 
 # Ordered list of stageIds that the local runner executes (subset of all pipeline
-# stages — CI-only stages such as code-signing are excluded from local runs).
+# stages — CI-only stages such as code-signing and publishing are excluded).
 _LOCAL_STAGES = [
     INITIALIZE,
     BUILD,
     VALIDATE_SBOM,
-    POST_BUILD_CODE_SIGN,
-    BUILD_INSTALLERS,
     SMOKE_TESTS,
+    AQA_TESTS,
     REPRODUCIBLE_COMPARE,
 ]
 
@@ -485,18 +491,15 @@ class PipelineRunner:
                 self._run_stage(VALIDATE_SBOM, 'pipeline-config.json,*sbom*.json',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'sbom_validation_output')})
 
-            if POST_BUILD_CODE_SIGN in self.stages_to_run and self._stage_condition_met(POST_BUILD_CODE_SIGN):
-                self._run_stage(POST_BUILD_CODE_SIGN,
-                                'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
-
-            if BUILD_INSTALLERS in self.stages_to_run and self._stage_condition_met(BUILD_INSTALLERS):
-                self._run_stage(BUILD_INSTALLERS,
-                                'pipeline-config.json,*.tar.gz,*.zip,metadata/**/*')
-
             if SMOKE_TESTS in self.stages_to_run and self._stage_condition_met(SMOKE_TESTS):
                 self._run_stage(SMOKE_TESTS,
                                 'pipeline-config.json,*.tar.gz,*.zip',
                                 extra_env={'TARGET_DIR': str(self.stage_workspace / 'smoke_test_output')})
+
+            if AQA_TESTS in self.stages_to_run and self._stage_condition_met(AQA_TESTS):
+                self._run_stage(AQA_TESTS,
+                                'pipeline-config.json,*.tar.gz,*.zip',
+                                extra_env={'TARGET_DIR': str(self.stage_workspace / 'aqa_test_output')})
 
             if REPRODUCIBLE_COMPARE in self.stages_to_run and self._stage_condition_met(REPRODUCIBLE_COMPARE):
                 release_type = (self.args.release_type or 'NIGHTLY').upper()
@@ -668,7 +671,8 @@ def _build_stage_params_help(script_dir: Path, argv: list[str]) -> str:
         source_note = "(defaults only — add --config-repo-url for vendor params)"
 
     try:
-        collated = _collect_stage_params(script_dir, vendor_scripts_dir, silent=True)
+        collated = _collect_stage_params(script_dir, vendor_scripts_dir, silent=True,
+                                         orchestrated_stages=_LOCAL_STAGES)
     except Exception:
         collated = {'groups': [], 'paramNames': []}
     finally:
@@ -697,12 +701,7 @@ def _build_stage_params_help(script_dir: Path, argv: list[str]) -> str:
         for p in params:
             flag    = _param_name_to_cli_flag(p['name'])
             default = str(p.get('default', '')).lower() if p['type'] == 'boolean' else repr(p.get('default', ''))
-            # First sentence of description only, to keep output compact
-            # Split on '. ' (period-space) to avoid breaking mid-word on
-            # abbreviations like 'e.g.' — take the first sentence only.
-            raw_desc = p.get('description', '')
-            first_sentence = re.split(r'\.\s', raw_desc, maxsplit=1)[0].strip()
-            desc = first_sentence.rstrip('.')
+            desc = p.get('description', '').strip()
             lines.append(f"    {flag} <{p['type']}>  default: {default}")
             if desc:
                 lines.append(f"      {desc}")
@@ -834,7 +833,8 @@ Examples:
     # *.params.json overrides so vendor-specific params are also recognised.
     # -----------------------------------------------------------------------
     vendor_dir = runner.workspace / 'config-repo' / 'vendor-scripts'
-    collated   = _collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None)
+    collated   = _collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None,
+                                       orchestrated_stages=_LOCAL_STAGES)
 
     # Load stage metadata (disabled flags, conditions) from the collated output.
     runner._load_stage_metadata(collated)

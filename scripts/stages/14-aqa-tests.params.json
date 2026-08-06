@@ -14,7 +14,7 @@
           "name": "RUN_TESTS",
           "type": "boolean",
           "default": true,
-          "description": "Enable test stages (smoke tests, AQA, TCK). Set to false to skip all testing — useful for build-only runs or when test infrastructure is unavailable."
+          "description": "Enable test stages. Set to false to skip all testing — useful for build-only runs or when test infrastructure is unavailable."
         }
       ]
     },

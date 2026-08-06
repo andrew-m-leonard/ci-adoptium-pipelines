@@ -34,11 +34,17 @@ import groovy.transform.Field
 @Field def nodeAgentHelper
 
 // ── Stage ID constants ───────────────────────────────────────────────────────
-// Each value matches the "id" field in scripts/stages/pipeline-stages.json.
-// These are the single definition of every stageId string used in this file —
-// in stage() names, agent labels, when{} conditions, initializeStage(),
-// executeStageWithTracking(), stageRunner.run(), finalizeStage(), and
-// prerequisites lists.
+// Each value matches the "id" field in scripts/stages/pipeline-stages.json
+// and the JENKINS_STAGES list in ci/jenkins/lib/PipelineStages.groovy.
+//
+// IMPORTANT: If you add, remove, or rename a stage here you MUST make the
+// same change in PipelineStages.groovy — that file is the single source of
+// truth consumed by Jenkinsfile.launch and SeedHelper.groovy to pass
+// --orchestrated-stages to collect-stage-params.py.
+//
+// These @Field finals cannot be replaced by a load() of PipelineStages.groovy
+// because declarative stage() names are evaluated at pipeline definition time —
+// before any script{} block runs — so the constants must exist at this scope.
 @Field final INITIALIZE           = '01-initialize'
 @Field final BUILD                = '02-build'
 @Field final INTERNAL_CODE_SIGN   = '03-internal-code-sign'
@@ -56,9 +62,6 @@ import groovy.transform.Field
 @Field final PUBLISH_ARTIFACTS    = '16-publish'
 @Field final REPRODUCIBLE_COMPARE = '20-reproducible-compare'
 // ────────────────────────────────────────────────────────────────────────────
-// Note: stage() names in declarative pipelines are evaluated at pipeline
-// definition time — before any steps run — so these @Field final constants
-// are used directly as stage() arguments.  No registry lookup is needed.
 
 /**
  * Read collated-stage-params.json (written by collect-stage-params.py during the
