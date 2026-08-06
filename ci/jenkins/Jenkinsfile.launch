@@ -259,6 +259,7 @@ pipeline {
             }
             steps {
                 script {
+                    echo "[DEBUG] result before Create/Update Platform Jobs: ${currentBuild.result}"
                     echo "Checking platform jobs against pipeline SHA: ${env.GIT_COMMIT}"
 
                     env.SELECTED_PLATFORMS.split(',').each { platform ->
@@ -267,6 +268,7 @@ pipeline {
                         // inherits this pipeline's trusted context rather than requiring
                         // separate script approval for the external DSL file.
                         def dslScript = readFile('ci/jenkins/job-dsl/openjdk_build_pipeline_job_dsl.groovy')
+                        echo "[DEBUG] result before jobDsl(${platform}): ${currentBuild.result}"
                         jobDsl(
                             scriptText:            dslScript,
                             removedJobAction:      'IGNORE',
@@ -282,8 +284,10 @@ pipeline {
                                 CONFIG_REPO_BRANCH:   params.CONFIG_REPO_BRANCH
                             ]
                         )
+                        echo "[DEBUG] result after jobDsl(${platform}): ${currentBuild.result}"
                     }
                     echo "✓ Platform jobs created/updated"
+                    echo "[DEBUG] result at end of Create/Update Platform Jobs: ${currentBuild.result}"
                 }
             }
         }
@@ -294,6 +298,7 @@ pipeline {
             agent none
             steps {
                 script {
+                    echo "[DEBUG] result at start of Launch Platform Builds: ${currentBuild.result}"
                     def versionConfig = new JsonSlurper().parseText(env.VERSION_CONFIG)
                     // Re-derive the merged groups from the raw collated JSON that
                     // collateAndMergeGroups() already stored in env.COLLATED_PARAMS_JSON —
@@ -345,9 +350,11 @@ pipeline {
 
                     parallel buildJobs
 
+                    echo "[DEBUG] result after parallel builds: ${currentBuild.result}"
                     def failed = buildResults.findAll { _, r -> r != 'SUCCESS' }
                     if (failed) error("Platform builds failed: ${failed.keySet().join(', ')}")
                     echo "✓ All platform builds completed successfully"
+                    echo "[DEBUG] result at end of Launch Platform Builds: ${currentBuild.result}"
                 }
             }
         }
