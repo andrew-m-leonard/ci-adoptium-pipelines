@@ -82,7 +82,7 @@ main() {
     log_info "  Architecture: ${architecture}"
     log_info "  Variant: ${variant}"
     log_info "  SCM Ref: ${scm_ref}"
-    log_info "  Build Repo URL: ${build_repo_url} (${build_ref_source})"
+    log_info "  Build Repo URL: ${build_repo_url} (default)"
     log_info "  Build Ref: ${build_ref} (${build_ref_source})"
     log_info "  Build Args: ${build_args}"
     log_info "  Configure Args: ${configure_args}"

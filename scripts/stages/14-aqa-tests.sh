@@ -20,7 +20,7 @@ aqa_ref_source="default"; [[ -n "${AQA_REF:-}" ]] && aqa_ref_source="param"
 aqa_repo_url="${CONFIG_AQA_REPO_URL:-https://github.com/adoptium/aqa-tests.git}"
 
 log_info "Test Configuration:"
-log_info "  AQA Repo URL: ${aqa_repo_url} (${aqa_ref_source})"
+log_info "  AQA Repo URL: ${aqa_repo_url} (default)"
 log_info "  AQA Ref: ${aqa_ref} (${aqa_ref_source})"
 
 echo "ℹ️  AQA Tests: no vendor implementation configured — skipping"
