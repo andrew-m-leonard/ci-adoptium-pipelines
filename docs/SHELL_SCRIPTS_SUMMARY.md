@@ -1,6 +1,6 @@
 # Shell Scripts Reference
 
-Index of all files under `scripts/` — stage scripts and shared utility libraries. For the stage interface contract (environment variables, archive/restore flow) see [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md). For writing a new stage see [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md).
+Index of all files under `scripts/` — stage scripts and shared utility libraries. For the stage interface contract (environment variables, archive/restore flow) see [WORKSPACE_ARTIFACTS_ARCHITECTURE.md](./WORKSPACE_ARTIFACTS_ARCHITECTURE.md). For writing a new stage see [UNIVERSAL_STAGE_PATTERN.md](./UNIVERSAL_STAGE_PATTERN.md). For the `.params.json` sidecar files that gate and parameterise each stage see [STAGE_DEFINITION_REFERENCE.md](./STAGE_DEFINITION_REFERENCE.md).
 
 ---
 
@@ -51,7 +51,78 @@ Artifact directory and file helpers.
 
 ### [`scripts/lib/workspace-cleanup.sh`](../scripts/lib/workspace-cleanup.sh)
 
-Utility functions for cleaning build scratch directories inside `WORKSPACE`.
+**Standalone executable script** (not a function library). Cleans the ephemeral stage workspace. Called by the orchestrator before and after each stage.
+
+Required env vars: `CONFIG_FILE`, `WORKSPACE`, `CLEANUP_TYPE` (`"pre"` or `"post"`)
+
+- **Pre-cleanup** (`CLEANUP_TYPE=pre`): always removes `${WORKSPACE}/workspace/` — required for restartability.
+- **Post-cleanup** (`CLEANUP_TYPE=post`): removes only if `parameters.cleanWorkspaceAfterStage=true` in `pipeline-config.json`.
+
+### [`scripts/lib/build-metadata-writer.py`](../scripts/lib/build-metadata-writer.py)
+
+CLI script. Writes `build-metadata.json` from explicit arguments and a small set of `CONFIG_*` environment variables. Called by `02-build.sh` after a successful build.
+
+| Argument | Required | Description |
+|---|---|---|
+| `--output` | ✅ | Destination path for `build-metadata.json` |
+| `--version` | ✅ | JDK version string (e.g. `jdk-21.0.12+7`) |
+| `--build-number` | ✅ | Build number |
+| `--stage` | ✅ | Stage name (e.g. `build`) |
+| `--workspace` | ✅ | Absolute path to the build workspace |
+| `--build-uid` | ☑️ | `BUILD_UID` value (optional) |
+| `--group-uid` | ☑️ | `GROUP_UID` value (optional) |
+
+Reads from env: `CONFIG_JAVA_TO_BUILD`, `CONFIG_TARGET_OS`, `CONFIG_ARCHITECTURE`, `CONFIG_VARIANT`.
+
+### [`scripts/lib/sbom-workspace-extractor.py`](../scripts/lib/sbom-workspace-extractor.py)
+
+CLI script. Reads an Adoptium SBOM JSON file and prints the `"Build Workspace Directory"` property value to stdout. Used by `02-build.sh` to derive the workspace path length needed for reproducible build path padding.
+
+```bash
+value=$(python3 sbom-workspace-extractor.py --sbom /path/to/sbom.json)
+```
+
+Exits 0 (prints empty line) when the property is absent; exits non-zero only on unreadable file or invalid JSON.
+
+### [`scripts/lib/python-runner.sh`](../scripts/lib/python-runner.sh)
+
+Thin shim. Resolves the Python interpreter (`python3` → `python` fallback) and execs the given script with all arguments forwarded. Exits 127 if no Python is found. Used as the single canonical entry point for all shell-context Python invocations.
+
+```bash
+python-runner.sh <script.py> [args...]
+```
+
+### [`scripts/lib/collect-stage-params.py`](../scripts/lib/collect-stage-params.py)
+
+CLI script. Collates all `scripts/stages/*.params.json` sidecar files (plus optional vendor overrides) into a single structured JSON document consumed by Jenkins Job DSL (at job-creation time) and the local runner (at runtime).
+
+Key behaviour:
+- Merges default + vendor params per stage stem; vendor params override defaults with the same name
+- Deduplicates params shared across stages (e.g. `RUN_TESTS` defined in multiple `*.params.json` files)
+- Validates `stageCondition` cross-references — every referenced param name must exist in the final set
+- Applies priority group ordering (`"Stage Selections"` always appears first)
+- Supports `--orchestrated-stages` to restrict output to only the stages a given orchestrator runs
+
+```bash
+python3 scripts/lib/collect-stage-params.py \
+    --default-stages-dir scripts/stages \
+    --vendor-scripts-dir config-repo/vendor-scripts \
+    --output /tmp/collated-stage-params.json
+```
+
+### [`scripts/lib/load-adoptium-pipeline-config-json.py`](../scripts/lib/load-adoptium-pipeline-config-json.py)
+
+CLI script. Loads `adoptium_pipeline_config.json` from a local directory or remote GitHub URL and outputs the content in three formats: `json` (default), `env` (shell `export` statements), or `summary` (human-readable).
+
+```bash
+# Print as env exports
+python3 load-adoptium-pipeline-config-json.py --config-repo-dir ./ci-temurin-config --format env
+
+# Fetch from remote and print a specific field
+python3 load-adoptium-pipeline-config-json.py \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --field activeJdkVersions
+```
 
 ---
 
@@ -222,7 +293,7 @@ The Temurin implementation downloads from `api.adoptium.net` and uses `temurin-b
 **Outputs:** `${TARGET_DIR}/comparison-report.txt`, `reprotest.diff`, `ReproduciblePercent`
 **Extra env:** `SCM_REF` (required), `RELEASE` (`true`/`false`), `BUILD_REPO_URL` (optional), `BUILD_REF` (optional)
 
-Exit codes: `0` = 100% reproducible, non-zero = differences found (pipeline marks build UNSTABLE, does not fail)
+Exit codes: `0` = 100% reproducible, non-zero = differences found (pipeline fails the build)
 
 ---
 

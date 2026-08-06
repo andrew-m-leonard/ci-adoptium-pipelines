@@ -70,6 +70,8 @@ repository references that apply regardless of which CI system runs the pipeline
 
 Jenkins-specific configuration. Contains two groups: **job-creation settings** (`jenkinsfilePath`, `pipelineTimeoutHours`, `activeNodeTimeoutMinutes`, `jobConfiguration`) used by the seed job only; and **agent-selection settings** (`stageAgentLabels`) read at build runtime by `ConfigHelper.generateJenkinsConfig()` to resolve which node each stage runs on.
 
+> For a full annotated example and a description of how each section is consumed, see [CODE_CONFIG_SEPARATION.md §2](./CODE_CONFIG_SEPARATION.md#2-jenkins_job_configjson--jenkins-specific-job-and-agent-settings).
+
 ```json
 {
   "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
@@ -77,18 +79,28 @@ Jenkins-specific configuration. Contains two groups: **job-creation settings** (
   "activeNodeTimeoutMinutes": 10,
   "stageAgentLabels": {
     "__any__":               "ci.role.worker",
-    "Initialize":            "ci.role.worker",
-    "Build":                 "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "Smoke Tests":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "AQA Tests":             "ci.role.test&&hw.arch.{arch}",
-    "Post-Build Code Sign":  "ci.role.sign&&sw.os.{os}",
-    "Build Installers":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "Publish Artifacts":     "ci.role.publish"
+    "01-initialize":         "ci.role.worker",
+    "02-build":              "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "03-internal-code-sign": "eclipse-codesign",
+    "04-assemble-images":    "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "06-post-build-code-sign": "ci.role.worker",
+    "07-installer":          "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "08-code-sign-installer": "ci.role.worker",
+    "09-sbom-sign":          "ci.role.worker",
+    "10-digital-artifact-sign": "ci.role.worker",
+    "11-verify-signing":     "ci.role.worker",
+    "12-validate-sbom":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "13-smoke-tests":        "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "14-aqa-tests":          "ci.role.build&&hw.arch.{arch}",
+    "15-tck-tests":          "ci.role.build&&hw.arch.{arch}",
+    "16-publish":            "ci.role.worker",
+    "20-reproducible-compare": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}"
   },
   "jobConfiguration": {
     "defaultParameters": {
       "VARIANT": "temurin",
       "CLEAN_WORKSPACE_AFTER_STAGE": true,
+      "CREATE_SBOM": true,
       "RUN_TESTS": true,
       "ENABLE_INSTALLERS": true,
       "SIGN_ARTIFACTS": true,
@@ -112,16 +124,9 @@ Jenkins-specific configuration. Contains two groups: **job-creation settings** (
 | `jenkinsfilePath` | string | ✅ | Relative path within the pipeline repo to the Jenkinsfile |
 | `pipelineTimeoutHours` | integer | ☑️ default `8` | Maximum wall-clock hours a platform build pipeline run is allowed before Jenkins aborts it. Applied as a job-level `buildTimeoutWrapper` (Build Timeout plugin) by the Job DSL when the platform build job is created or regenerated. |
 | `activeNodeTimeoutMinutes` | integer | ☑️ default `10` | Minutes to wait for **at least one online agent** matching a stage label before failing. Jenkins queuing (all agents busy) is unaffected — this only fires when **zero** agents matching the label are online. Supports cloud provisioners that take time to spin up a new agent. Exposed as the `CONFIG_ACTIVE_NODE_TIMEOUT` env var at runtime. |
-| `stageAgentLabels` | object | ✅ | Map of stage name → label template. `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. Read by `ConfigHelper.generateJenkinsConfig()` to produce `jenkins-config.json`. The special key `__any__` sets the agent label for launch-pipeline worker stages (`Collate Stage Parameters`, `Determine Platforms`, `Create/Update Platform Jobs`) that require `python3`; defaults to `ci.role.worker` if absent. |
+| `stageAgentLabels` | object | ✅ | Map of **stage ID** → label template. Keys must match stage IDs from `scripts/stages/pipeline-stages.json` (e.g. `"02-build"`, `"13-smoke-tests"`). `{os}` and `{arch}` placeholders are resolved at build runtime to `sw.os.*` / `hw.arch.*` values. The special key `__any__` sets the fallback label for any stage not explicitly listed; also used for launch-pipeline worker stages that require `python3`; defaults to `ci.role.worker` if absent. |
 | `jobConfiguration` | object | ✅ | Jenkins job settings (seed job only) |
-| `jobConfiguration.defaultParameters` | object | ✅ | Default values for Jenkins build parameters (can be overridden at trigger time) |
-| `jobConfiguration.defaultParameters.VARIANT` | string | ✅ | JVM variant to build, e.g. `"temurin"` |
-| `jobConfiguration.defaultParameters.CLEAN_WORKSPACE_AFTER_STAGE` | boolean | ✅ | Whether to clean the workspace after each stage completes |
-| `jobConfiguration.defaultParameters.RUN_TESTS` | boolean | ✅ | Whether to run the test stage |
-| `jobConfiguration.defaultParameters.ENABLE_INSTALLERS` | boolean | ✅ | Whether to build installer packages |
-| `jobConfiguration.defaultParameters.SIGN_ARTIFACTS` | boolean | ✅ | Whether to sign build artifacts |
-| `jobConfiguration.defaultParameters.PUBLISH_ARTIFACTS` | boolean | ✅ | Whether to publish artifacts to a remote location |
-| `jobConfiguration.defaultParameters.RUN_REPRODUCIBLE_COMPARE` | boolean | ✅ | Whether to run the reproducible-build comparison stage |
+| `jobConfiguration.defaultParameters` | object | ✅ | Default values for Jenkins build parameters (can be overridden at trigger time). Keys are the stage-param names defined in `scripts/stages/*.params.json`. |
 | `jobConfiguration.logRotation` | object | ✅ | Jenkins log/artifact retention policy |
 | `jobConfiguration.logRotation.daysToKeep` | integer | ✅ | Number of days to retain build logs |
 | `jobConfiguration.logRotation.numToKeep` | integer | ✅ | Maximum number of build records to retain |
@@ -138,9 +143,6 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
 ```json
 {
   "version": "jdk21",
-  "openjdkVersion": "jdk21u",
-  "enabled": true,
-  "targetConfigurations": ["x86-64_linux", "x86-64_mac", "x86-64_windows"],
   "buildConfigurations": {
     "x86-64_linux": {
       "os": "linux",
@@ -156,8 +158,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
       "additionalTestLabels": { "temurin": "!sw.tool.glibc.2_12" },
       "cleanWorkspaceAfterBuild": true,
       "configureArgs": { "temurin": "--enable-dtrace" },
-      "buildArgs": { "temurin": "--create-jre-image" },
-      "additionalSmokeTestNodeLabels": ""
+      "buildArgs": { "temurin": "--create-jre-image" }
     }
   }
 }
@@ -167,10 +168,7 @@ Per-version platform build matrix. One file per JDK version, named `jdk8_pipelin
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `version` | string | ✅ | JDK version identifier without `u` suffix, e.g. `"jdk21"`, `"jdk8"` |
-| `openjdkVersion` | string | ✅ | OpenJDK source stream identifier, typically with `u` suffix, e.g. `"jdk21u"`. Used to locate the upstream source |
-| `enabled` | boolean | ✅ | Whether this version is active. Must match the corresponding entry in `adoptium_pipeline_config.json` |
-| `targetConfigurations` | array of strings | ✅ | Ordered list of platform keys from `buildConfigurations` that should be built. Must be a subset of the keys in `buildConfigurations` |
+| `version` | string | ✅ | JDK version identifier, e.g. `"jdk21"`, `"jdk8"` |
 | `buildConfigurations` | object | ✅ | Map of platform name → platform build configuration. Key follows the aqa-tests `PLATFORM_MAP` naming convention: `{arch}_{os}` with hyphens for compound words (e.g. `"x86-64_linux"`, `"aarch64_mac"`). See `LABEL_SCHEMA.md` for the full mapping table |
 
 ### `buildConfigurations` platform entry fields
@@ -190,7 +188,6 @@ values. This is noted in the Type column as `string | variant-object`.
 |---|---|---|---|
 | `os` | string | ✅ | Target operating system. Known values: `"linux"`, `"mac"`, `"windows"`, `"aix"`, `"solaris"`, `"alpine-linux"` |
 | `arch` | string | ✅ | Target CPU architecture. Known values: `"x64"`, `"aarch64"`, `"ppc64"`, `"ppc64le"`, `"s390x"`, `"arm"` (32-bit), `"x86-32"`, `"riscv64"`, `"sparcv9"` |
-| `additionalSmokeTestNodeLabels` | string | ✅ | Jenkins node label expression used to select agents for the SmokeTest stage. Empty string means no additional constraint |
 
 #### Optional fields
 

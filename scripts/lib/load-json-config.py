@@ -153,7 +153,7 @@ def resolve_label_placeholders(template, target_os, architecture):
 def build_node_label(build_label_template, additional_labels, target_os, architecture):
     """Build the fully-resolved Build-stage node label.
 
-    Resolves {os} and {arch} placeholders in the stageAgentLabels["Build"]
+    Resolves {os} and {arch} placeholders in the stageAgentLabels["02-build"]
     template via the sw.os.* / hw.arch.* label schema, then appends any
     platform additionalNodeLabels with '&&'.
     """

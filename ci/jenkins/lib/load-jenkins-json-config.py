@@ -150,7 +150,7 @@ def generateJenkinsConfig(config_repo_path, pipeline_config_path, output_path):
     }
 
     # Build the jenkins-config.json output — pipeline-config.json is not touched
-    build_node_label = resolved.get('Build', '')
+    build_node_label = resolved.get('02-build', '')
     additional_node_labels = pipeline_config['buildConfig'].get('ADDITIONAL_NODE_LABELS', '')
     if build_node_label and additional_node_labels:
         build_node_label = build_node_label + '&&' + additional_node_labels

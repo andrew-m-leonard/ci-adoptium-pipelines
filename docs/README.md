@@ -48,6 +48,7 @@ This directory contains reference documentation for the Adoptium CI pipeline inf
 ## Stage Implementation Details
 
 - **[SHELL_SCRIPTS_SUMMARY.md](./SHELL_SCRIPTS_SUMMARY.md)** — Index of all `scripts/stages/` and `scripts/lib/` files; STUB vs REAL status; key functions and I/O contract per stage; vendor override resolution order
+- **[STAGE_DEFINITION_REFERENCE.md](./STAGE_DEFINITION_REFERENCE.md)** — Authoritative reference for the four artefacts that define every stage; how to add, modify, disable, and enable stages
 
 ## Pipeline Features
 

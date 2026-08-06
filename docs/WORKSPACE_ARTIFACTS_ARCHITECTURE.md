@@ -158,9 +158,8 @@ Each stage passes a glob pattern telling the restore step which files to copy fr
 |---|---|
 | Build | `pipeline-config.json` |
 | Validate SBOM | `pipeline-config.json,*sbom*.json` |
-| Post-Build Code Sign | `pipeline-config.json,*.tar.gz,*.zip,metadata/**/*` |
-| Build Installers | `pipeline-config.json,*.tar.gz,*.zip,metadata/**/*` |
 | Smoke Tests | `pipeline-config.json,*.tar.gz,*.zip` |
+| AQA Tests | `pipeline-config.json,*.tar.gz,*.zip` |
 | Reproducible Compare | `pipeline-config.json,*.tar.gz,*.zip` |
 
 ### Local-runner-specific notes
@@ -202,27 +201,30 @@ Each stage passes a glob pattern telling the restore step which files to copy fr
 ```bash
 # Fresh build (workspace must not exist, or use --clean-workspace)
 python3 run-pipeline.py \
-    --jdk-version jdk21u \
+    --jdk-version jdk21 \
     --target-os mac \
-    --architecture aarch64
+    --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git
 
 # Fresh build cleaning a previous workspace
 python3 run-pipeline.py \
-    --jdk-version jdk21u \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --clean-workspace
 
 # Restart from a specific stage (workspace + build_artifacts/ must exist)
 python3 run-pipeline.py \
-    --jdk-version jdk21u \
+    --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --start-from-stage sign
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --start-from-stage 13-smoke-tests
 
 # ERROR: these two flags are mutually exclusive
 python3 run-pipeline.py \
-    --start-from-stage sign \
+    --start-from-stage 13-smoke-tests \
     --clean-workspace   # ❌ option conflict
 ```
 
@@ -242,7 +244,7 @@ This ensures workspace cleanliness and prevents pollution from previous runs.
 
 **Restart but workspace missing:**
 ```
-ERROR: Cannot restart from stage 'sign' - workspace does not exist: /Users/user/openjdk-build
+ERROR: Cannot restart from stage '13-smoke-tests' - workspace does not exist: /Users/user/openjdk-build
 
 When restarting from a stage, the workspace must exist with artifacts from previous stages.
 Run a full build first (without --start-from-stage) to create the workspace.
@@ -250,7 +252,7 @@ Run a full build first (without --start-from-stage) to create the workspace.
 
 **Restart but `build_artifacts/` missing (older runner version):**
 ```
-ERROR: Cannot restart from stage 'sign' - build_artifacts/ does not exist: /Users/user/openjdk-build/build_artifacts
+ERROR: Cannot restart from stage '13-smoke-tests' - build_artifacts/ does not exist: /Users/user/openjdk-build/build_artifacts
 
 The build_artifacts/ directory is required for stage restarts — it holds outputs
 archived by previously completed stages.
@@ -342,7 +344,7 @@ The stage must call `archiveArtifacts` for its `TARGET_DIR` output, and the next
 
 This means the workspace was created by an older version of the local runner (which used `artifacts/` rather than `build_artifacts/`). Remove the existing workspace and run a fresh full build:
 ```bash
-python3 run-pipeline.py --jdk-version jdk21u ... --clean-workspace
+python3 run-pipeline.py --jdk-version jdk21 --config-repo-url https://github.com/adoptium/ci-temurin-config.git ... --clean-workspace
 ```
 
 ---

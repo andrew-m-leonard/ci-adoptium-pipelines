@@ -14,21 +14,22 @@ python3 ci/local/run-pipeline.py \
     --config-repo-url https://github.com/adoptium/ci-temurin-config.git
 ```
 
-The `--config-repo-url` default is already `https://github.com/adoptium/ci-temurin-config.git`, so for Temurin builds it can be omitted.
+`--config-repo-url` is required. It points to the config repo that provides build configuration, variant defaults, and any vendor-specific stage overrides.
 
 ## What It Does
 
-The pipeline runner orchestrates all build stages in sequence:
+The pipeline runner orchestrates the locally-executable stages in sequence:
 
 1. **Initialize** — clones the config repo; generates `pipeline-config.json`; archives it to `build_artifacts/`
 2. **Build** — clones `temurin-build`; runs `make-adopt-build-farm.sh`; archives JDK tarballs to `build_artifacts/`
-3. **Validate SBOM** — validates SBOM files (only when `CREATE_SBOM` stage parameter is true)
-4. **Sign Artifacts** — signs tarballs (only when `enableSigner=true`; stub unless vendor-overridden)
-5. **Build Installers** — creates platform installers (only when `enableInstallers=true`; stub unless vendor-overridden)
-6. **Smoke Tests** — extracts JDK and runs four basic checks (only when `enableTests=true`)
-7. **Reproducible Compare** — downloads Adoptium production binary and compares (only when `--compare-build` is set)
+3. **Validate SBOM** — validates SBOM files (gated: runs only when `CREATE_SBOM=true`)
+4. **Smoke Tests** — extracts JDK and runs basic checks (gated: runs only when `RUN_TESTS=true`)
+5. **AQA Tests** — runs AQAVit test suite (gated: runs only when `RUN_TESTS=true`)
+6. **Reproducible Compare** — downloads Adoptium production binary and compares (gated: runs only when `RUN_REPRODUCIBLE_COMPARE=true` and `SCM_REF` is non-empty)
 
-Stages 3–7 are each gated and will silently skip if their condition is not met.
+CI-only stages (code signing, assembling images, installers, publishing) are not executed by the local runner.
+
+Stage gates are driven by stage parameters loaded dynamically from `scripts/stages/*.params.json` (and any vendor-scripts overrides) — not hardcoded CLI flags. See **Stage Parameters** below.
 
 ---
 
@@ -41,6 +42,7 @@ Stages 3–7 are each gated and will silently skip if their condition is not met
 | `--jdk-version` | JDK version to build | `jdk<N>` — e.g. `jdk21`, `jdk17`, `jdk8` |
 | `--target-os` | Target OS | `mac`, `linux`, `windows`, `aix` |
 | `--architecture` | Target architecture | `aarch64`, `x64`, `x32`, `ppc64`, `s390x` |
+| `--config-repo-url` | URL of the config repo containing `configurations/`, `vendor-scripts/`, `adoptium_pipeline_config.json` | Any git-cloneable URL |
 
 Note: `--jdk-version` must match the pattern `jdk` followed by digits only (e.g. `jdk21`). Suffixes like `jdk21u` are not accepted.
 
@@ -48,28 +50,15 @@ Note: `--jdk-version` must match the pattern `jdk` followed by digits only (e.g.
 
 | Parameter | Description | Default |
 |---|---|---|
-| `--config-repo-url` | URL of the config repo containing `configurations/`, `vendor-scripts/`, `adoptium_pipeline_config.json` | `https://github.com/adoptium/ci-temurin-config.git` |
 | `--config-repo-branch` | Branch to clone | `main` |
 
-The config repo provides: build/AQA repo URLs and branches, the default variant, and active JDK version list. CLI `--build-ref`, `--build-repo-url`, `--aqa-ref`, `--aqa-repo-url` override values from the repo.
-
-### Build references (overrides)
-
-These override values from `adoptium_pipeline_config.json`. If neither the CLI flag nor the config repo provides a value, the runner errors.
-
-| Parameter | Description |
-|---|---|
-| `--build-ref` | `temurin-build` branch/tag |
-| `--build-repo-url` | `temurin-build` repository URL |
-| `--aqa-ref` | `aqa-tests` branch/tag |
-| `--aqa-repo-url` | `aqa-tests` repository URL |
+The config repo provides: build/AQA repo URLs and branches, the default variant, and active JDK version list.
 
 ### Release type
 
 | Parameter | Description |
 |---|---|
 | `--release-type` | `NIGHTLY` (default), `WEEKLY` (adds `--with-version-opt=ea`), or `RELEASE` (case-insensitive) |
-| `--scm-ref` | OpenJDK source tag/ref (e.g. `jdk-21.0.2+13`). Required with `--compare-build`. |
 
 ### Workspace control
 
@@ -91,13 +80,61 @@ These override values from `adoptium_pipeline_config.json`. If neither the CLI f
 | Parameter | Description |
 |---|---|
 | `--start-from-stage` | Start from a specific stage, skipping earlier ones (requires existing workspace) |
-| `--skip-build` | Generate configuration only; skip all subsequent stages |
-| `--no-tests` | Disable smoke tests |
-| `--no-installers` | Disable installer building |
-| `--no-signer` | Disable artifact signing |
-| `--compare-build` | Enable reproducible build comparison against Adoptium production binary (requires `--scm-ref`) |
 
-Valid `--start-from-stage` values: `initialize`, `build`, `sign`, `installer`, `smoke-tests`, `reproducible-compare`
+Valid `--start-from-stage` values (exact stage IDs from `pipeline-stages.json`):
+
+| Stage ID | Stage |
+|---|---|
+| `01-initialize` | Initialize |
+| `02-build` | Build |
+| `12-validate-sbom` | Validate SBOM |
+| `13-smoke-tests` | Smoke Tests |
+| `14-aqa-tests` | AQA Tests |
+| `20-reproducible-compare` | Reproducible Compare |
+
+Stage enable/disable is controlled via **stage parameters**, not dedicated CLI flags. See **Stage Parameters** below.
+
+---
+
+## Stage Parameters
+
+Stage-specific parameters are loaded dynamically from `scripts/stages/*.params.json` (and any `vendor-scripts/*.params.json` overrides in the checked-out config repo). This ensures the local runner always presents the same parameter surface as the Jenkins jobs.
+
+Pass stage parameters as `--<lower-kebab-case-name> <value>` after all fixed arguments. Both boolean and string parameters require an explicit value token:
+
+```bash
+--create-sbom true
+--run-tests false
+--scm-ref jdk-21.0.7+6_adopt
+--extra-build-args "--enable-dtrace"
+```
+
+Run `--help` to see all available stage parameters for a given config repo:
+
+```bash
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 --target-os mac --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --help
+```
+
+### Common stage parameters
+
+These are defined in the default `scripts/stages/*.params.json` files and apply to all builds unless overridden by a vendor config repo:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `--scm-ref` | string | `""` | OpenJDK source tag/ref (e.g. `jdk-21.0.7+6_adopt`). Required for `--run-reproducible-compare true`. |
+| `--build-ref` | string | `""` | `temurin-build` branch/tag. Empty = default from `adoptium_pipeline_config.json`. |
+| `--extra-build-args` | string | `""` | Additional arguments appended to the build stage invocation. |
+| `--extra-configure-args` | string | `""` | Extra options appended to the configure invocation. |
+| `--extra-make-options` | string | `""` | Extra options appended to the make invocation. |
+| `--create-sbom` | boolean | `false` | Generate an SBOM during build; also gates the Validate SBOM stage. |
+| `--run-tests` | boolean | `true` | Enable Smoke Tests and AQA Tests stages. |
+| `--enable-installers` | boolean | `true` | Enable the installer build stage (CI-only; has no effect in the local runner). |
+| `--sign-artifacts` | boolean | `false` | Enable artifact signing stages (CI-only; has no effect in the local runner). |
+| `--run-reproducible-compare` | boolean | `false` | Enable the Reproducible Compare stage. Requires `--scm-ref` to be set. |
+| `--aqa-ref` | string | `""` | AQA tests branch/tag. Empty = default from `adoptium_pipeline_config.json`. |
 
 ---
 
@@ -109,7 +146,8 @@ Valid `--start-from-stage` values: `initialize`, `build`, `sign`, `installer`, `
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
-    --architecture aarch64
+    --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git
 ```
 
 ### Clean build (remove existing workspace first)
@@ -119,39 +157,42 @@ python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --clean-workspace
 ```
 
-### Build only — no tests or installers
+### Build only — skip tests
 
 ```bash
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --no-tests \
-    --no-installers
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --run-tests false
 ```
 
-### Configuration inspection only — no build
+### Build with SBOM generation
 
 ```bash
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --skip-build
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --create-sbom true
 ```
 
-Generates and prints `pipeline-config.json` without running any build stages.
+Generates an SBOM during the build stage and also runs the Validate SBOM stage.
 
-### Release build with SCM ref (Linux x64)
+### Release build (Linux x64)
 
 ```bash
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk17 \
     --target-os linux \
     --architecture x64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --release-type RELEASE \
     --scm-ref jdk-17.0.10+7
 ```
@@ -163,6 +204,7 @@ python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --release-type WEEKLY
 ```
 
@@ -175,6 +217,7 @@ python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --build-ref develop
 ```
 
@@ -185,18 +228,20 @@ python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --workspace ~/my-jdk21-build
 ```
 
 ### Restart from a specific stage
 
 ```bash
-# After a failed sign stage, re-run from sign onwards
+# After a failed smoke-tests stage, re-run from there onwards
 python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --start-from-stage sign
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
+    --start-from-stage 13-smoke-tests
 ```
 
 The workspace and `build_artifacts/` from the previous run must exist.
@@ -208,24 +253,39 @@ python3 ci/local/run-pipeline.py \
     --jdk-version jdk21 \
     --target-os mac \
     --architecture aarch64 \
-    --scm-ref jdk-21.0.2+13 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --release-type RELEASE \
-    --compare-build
+    --scm-ref jdk-21.0.2+13 \
+    --run-reproducible-compare true
 ```
 
-Downloads the matching Adoptium production binary and compares it byte-by-byte against the locally built JDK. See [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md).
+Downloads the matching Adoptium production binary and compares it against the locally built JDK. See [REPRO_COMPARE_INTEGRATION.md](./REPRO_COMPARE_INTEGRATION.md).
 
 ### Parallel builds (different workspaces)
 
 ```bash
 # Terminal 1: JDK 21
 python3 ci/local/run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --workspace ~/jdk21-build
 
 # Terminal 2: JDK 17
 python3 ci/local/run-pipeline.py --jdk-version jdk17 --target-os mac --architecture aarch64 \
+    --config-repo-url https://github.com/adoptium/ci-temurin-config.git \
     --workspace ~/jdk17-build
 ```
+
+### Vendor fork with vendor-specific stage params
+
+```bash
+python3 ci/local/run-pipeline.py \
+    --jdk-version jdk21 --target-os linux --architecture s390x \
+    --config-repo-url https://github.com/myorg/ci-openj9-config.git \
+    --openj9-repo git@github.ibm.com:myuser/openj9.git \
+    --openj9-branch my-feature-branch
+```
+
+Vendor-specific parameters (like `--openj9-repo`) are declared in the vendor config repo's `vendor-scripts/*.params.json` files and are automatically recognised after the config repo is cloned.
 
 ---
 
@@ -251,7 +311,7 @@ python3 ci/local/run-pipeline.py --jdk-version jdk17 --target-os mac --architect
     ├── pipeline-config.json
     ├── OpenJDK*.tar.gz             # Built JDK (after Build stage)
     ├── *.json                      # SBOM, metadata
-    └── …                          # Signed artifacts, installer outputs, test results
+    └── …                          # Test results, reproducible compare outputs
 ```
 
 All final artifacts are in `build_artifacts/` after the pipeline completes.
@@ -268,6 +328,10 @@ All final artifacts are in `build_artifacts/` after the pipeline completes.
 | `TARGET_DIR` | `stage_workspace/target/` — stage writes outputs here |
 | `BUILD_NUMBER` | `local-YYYYMMDD-HHMMSS` (or `--build-number` value) |
 | `PIPELINE_ROOT` | Root of the `ci-adoptium-pipelines` checkout |
+| `RELEASE_TYPE` | `NIGHTLY`, `WEEKLY`, or `RELEASE` (from `--release-type`) |
+| `CLEAN_WORKSPACE_AFTER_STAGE` | `true` if `--clean-workspace` was passed, `false` otherwise |
+
+All collated stage parameters are also injected as environment variables (e.g. `RUN_TESTS`, `CREATE_SBOM`, `SCM_REF`) so that stage shell scripts can read them directly.
 
 ---
 
@@ -280,6 +344,15 @@ The runner refuses to overwrite an existing workspace without an explicit instru
 ### "build_artifacts/ does not exist" on restart
 
 The workspace was created by an older version of the local runner (which used `artifacts/` instead of `build_artifacts/`). Run with `--clean-workspace` to start fresh.
+
+### Unrecognised parameter error
+
+```
+❌ Unrecognised parameter(s) — not defined in any *.params.json for this config repo:
+   --no-tests
+```
+
+Dedicated `--no-*` flags no longer exist. Stage gates are now controlled via stage parameters: use `--run-tests false`, `--enable-installers false`, `--sign-artifacts false`, etc. Run with `--help` to see all available parameters for the current config repo.
 
 ### Initialize fails — configuration not found
 
@@ -294,7 +367,7 @@ Ensure the following are installed on the build machine: `git`, `make`, `gcc`/`c
 
 ### Build time
 
-A full JDK build typically takes 30–60 minutes. Use `--skip-build` to test configuration generation only, or `--no-tests --no-installers` to get just the JDK tarball.
+A full JDK build typically takes 30–60 minutes. Use `--run-tests false` to get just the JDK tarball without running test stages.
 
 ### Script not executable
 

@@ -46,14 +46,13 @@ main() {
     # 1. Validate environment
     validate_standard_environment
 
-    # 2. Read pipeline configuration
-    local config
-    config="$(load_config "${CONFIG_FILE}")"
-    local java_to_build variant target_os architecture
-    java_to_build="$(get_config_value "${config}" ".buildConfig.JAVA_TO_BUILD")"
-    variant="$(get_config_value       "${config}" ".buildConfig.VARIANT")"
-    target_os="$(get_config_value     "${config}" ".buildConfig.TARGET_OS")"
-    architecture="$(get_config_value  "${config}" ".buildConfig.ARCHITECTURE")"
+    # 2. Read build configuration from CONFIG_* env vars set by the pipeline.
+    #    These are pre-populated from pipeline-config.json by the orchestrator
+    #    so stage scripts do not need jq.
+    local java_to_build="${CONFIG_JAVA_TO_BUILD:-}"
+    local target_os="${CONFIG_TARGET_OS:-}"
+    local architecture="${CONFIG_ARCHITECTURE:-}"
+    local variant="${CONFIG_VARIANT:-}"
 
     log_info "Building: ${java_to_build} ${variant} ${target_os}-${architecture}"
 
@@ -64,7 +63,7 @@ main() {
     do_work
 
     # 5. Create stage metadata
-    create_stage_metadata "${STAGE_NAME}" "SUCCESS" "${TARGET_DIR}"
+    create_stage_metadata "${STAGE_NAME}" "success"
 
     log_section "${STAGE_NAME} Stage - Complete"
 }
@@ -111,12 +110,12 @@ Every stage that introduces new parameters or has runtime gate conditions needs 
 
 ```json
 {
-  "stageId": "08-code-sign-installer",
+  "stageId": "12-validate-sbom",
   "stageDisabled": false,
   "stageCondition": [
-    { "param": "ENABLE_INSTALLERS", "value": true },
-    { "param": "SIGN_ARTIFACTS",    "value": true }
-  ]
+    { "param": "CREATE_SBOM", "value": true }
+  ],
+  "description": "Gate-only params.json for the validate-sbom stage. Runs only when CREATE_SBOM is true."
 }
 ```
 
@@ -129,17 +128,27 @@ Every stage that introduces new parameters or has runtime gate conditions needs 
 | `set -euo pipefail` at the top | Any unhandled error exits immediately |
 | Source all three lib files | Ensures consistent logging and config access |
 | Call `validate_standard_environment` first | Fails fast if required vars are missing |
-| Read from `${INPUT_ARTIFACTS_DIR}` | Standard input location set by the pipeline |
+| Read build config from `CONFIG_*` env vars | Pre-populated from `pipeline-config.json` by the orchestrator — no `jq` needed |
+| Read inputs from `${INPUT_ARTIFACTS_DIR}` | Standard input location set by the pipeline |
 | Write to `${TARGET_DIR}` | Standard output location archived by Jenkins |
-| Create stage metadata at end | `create_stage_metadata` writes `stage-metadata.json` |
+| Call `create_stage_metadata "${STAGE_NAME}" "success"` at end | Writes `stage-metadata.json` to `${WORKSPACE}/`; takes exactly 2 args |
 | Exit 0 on success, non-zero on failure | The Jenkinsfile checks `stageRunner.run()` return value |
 
 ## Variable Conventions
 
 ```bash
+# Build configuration — read from CONFIG_* env vars pre-populated by the orchestrator
+local java_to_build="${CONFIG_JAVA_TO_BUILD:-}"
+local target_os="${CONFIG_TARGET_OS:-}"
+local architecture="${CONFIG_ARCHITECTURE:-}"
+local variant="${CONFIG_VARIANT:-}"
+
+# Stage params — injected as env vars by the orchestrator from *.params.json values
+local my_param="${MY_PARAM:-false}"      # boolean stage param
+local my_string="${MY_STRING_PARAM:-}"   # string stage param
+
 # Input artifacts from previous stages
 INPUT_ARTIFACTS_DIR="${INPUT_ARTIFACTS_DIR:?INPUT_ARTIFACTS_DIR must be set}"
-CONFIG_FILE="${INPUT_ARTIFACTS_DIR}/pipeline-config.json"
 
 # Output artifacts from this stage
 TARGET_DIR="${TARGET_DIR:?TARGET_DIR must be set}"
@@ -154,34 +163,42 @@ The `StageScriptRunner` checks `config-repo/vendor-scripts/<stem>.sh` before `sc
 
 Add the stage block to `ci/jenkins/Jenkinsfile.declarative` in numeric order. Use `stageConditionMet()` in the `when{}` block — it reads the `stageCondition` list from the params sidecar at runtime:
 
+First, declare a stage ID constant at the top of the Jenkinsfile alongside the others:
+
 ```groovy
-stage('My Stage') {
+@Field final NN_MY_STAGE = 'NN-my-stage'
+```
+
+Then add the stage block:
+
+```groovy
+stage(NN_MY_STAGE) {
     agent {
-        label getStageLabel('My Stage')
+        label getStageLabel(NN_MY_STAGE)
     }
     when {
         beforeAgent true
-        expression { stageConditionMet('NN-my-stage') }
+        expression { stageConditionMet(NN_MY_STAGE) }
     }
     steps {
         script {
-            ensureLibsLoaded()
-            nodeAgentHelper.waitForActiveNode(getStageLabel('My Stage'), getActiveNodeTimeout())
-            pipelineHelper.executeStageWithTracking('My Stage') {
+            ensureLibsLoaded(NN_MY_STAGE)
+            nodeAgentHelper.waitForActiveNode(getStageLabel(NN_MY_STAGE), getActiveNodeTimeout())
+            pipelineHelper.executeStageWithTracking(NN_MY_STAGE) {
                 def config = pipelineHelper.initializeStage(
-                    'My Stage',
-                    ['Build'],                           // prerequisite stages
+                    NN_MY_STAGE,
+                    [BUILD],                             // prerequisite stage constants
                     'pipeline-config.json,**/*.tar.gz'   // artifact filter
                 )
                 env.TARGET_DIR = "${WORKSPACE}/my_stage_output"
 
-                def exitCode = stageRunner.run('NN-my-stage', config)
+                def exitCode = stageRunner.run(NN_MY_STAGE, config)
                 if (exitCode != 0) { error("My Stage failed with exit code: ${exitCode}") }
 
                 dir(env.TARGET_DIR) {
                     archiveArtifacts artifacts: '**/*', allowEmptyArchive: true
                 }
-                pipelineHelper.finalizeStage('My Stage')
+                pipelineHelper.finalizeStage(NN_MY_STAGE)
             }
         }
     }
@@ -189,8 +206,9 @@ stage('My Stage') {
 ```
 
 - `beforeAgent true` — prevents allocating a node for skipped stages (important for efficiency).
-- `stageConditionMet('NN-my-stage')` — evaluates all `stageCondition` entries from the params sidecar. Returns `true` when no conditions are defined (unconditional stage).
-- Set the prerequisite list to the stages that must have passed before this one runs.
+- `stageConditionMet(NN_MY_STAGE)` — evaluates all `stageCondition` entries from the params sidecar. Returns `true` when no conditions are defined (unconditional stage).
+- All stage-ID arguments (`getStageLabel`, `ensureLibsLoaded`, `initializeStage`, `stageRunner.run`, `finalizeStage`) use the constant, not a display-name string.
+- Set the prerequisite list to the stage ID constants that must have passed before this one runs.
 - Set the artifact filter to exactly the files the stage script needs from previous stages.
 - Set `TARGET_DIR` to a unique directory name (avoids cross-stage artifact collisions).
 
@@ -198,16 +216,33 @@ stage('My Stage') {
 
 In `ci/local/run-pipeline.py`:
 
-1. Add the stage name to `PipelineRunner.STAGES` in execution order.
-2. Add a guarded call in `run()`:
+1. Add a module-level stage ID constant alongside the others:
 
 ```python
-if 'my-stage' in self.stages_to_run and self._stage_condition_met('NN-my-stage'):
-    self._run_stage('My Stage', 'NN-my-stage',
-                    'pipeline-config.json,**/*.tar.gz')
+NN_MY_STAGE = 'NN-my-stage'
 ```
 
-`_stage_condition_met()` checks `stageDisabled` first, then evaluates all `stageCondition` entries against the current `_stage_param_values` and environment.
+2. Add it to the `_LOCAL_STAGES` list in execution order (only if the stage should run locally — CI-only stages such as signing and publishing are excluded):
+
+```python
+_LOCAL_STAGES = [
+    INITIALIZE,
+    BUILD,
+    # ... existing stages ...
+    NN_MY_STAGE,
+    REPRODUCIBLE_COMPARE,
+]
+```
+
+3. Add a guarded call in `PipelineRunner.run()`:
+
+```python
+if NN_MY_STAGE in self.stages_to_run and self._stage_condition_met(NN_MY_STAGE):
+    if not _run(NN_MY_STAGE, 'pipeline-config.json,**/*.tar.gz'):
+        raise _PipelineAbort()
+```
+
+`_stage_condition_met()` checks `stageDisabled` first, then evaluates all `stageCondition` entries against `_stage_param_values` and the process environment. `_run_stage()` takes a stage ID and artifact filter; the display label is resolved automatically from `pipeline-stages.json`.
 
 ## Related Documentation
 

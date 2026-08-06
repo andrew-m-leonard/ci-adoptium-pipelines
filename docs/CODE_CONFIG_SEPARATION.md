@@ -91,27 +91,42 @@ This is the top-level config file that glues everything together. It tells the s
 
 Contains two distinct groups of settings:
 
-- **Job-creation settings** (`pipelineTimeoutHours`, `jobConfiguration`) — used by the seed job to configure Jenkins job definitions. Not needed at build runtime.
-- **Agent-selection settings** (`stageAgentLabels`) — used at build runtime to resolve which Jenkins node each pipeline stage runs on. The `{os}` and `{arch}` placeholders are substituted with `sw.os.*` / `hw.arch.*` schema label tokens derived from the platform's `os` and `arch` fields.
+- **Job-creation settings** (`jenkinsfilePath`, `pipelineTimeoutHours`, `activeNodeTimeoutMinutes`, `jobConfiguration`) — used by the seed job to configure Jenkins job definitions. Not needed at build runtime.
+- **Agent-selection settings** (`stageAgentLabels`) — used at build runtime to resolve which Jenkins node each pipeline stage runs on. Keys are **stage IDs** (from `pipeline-stages.json`), not display labels. The `{os}` and `{arch}` placeholders are substituted with `sw.os.*` / `hw.arch.*` schema label tokens derived from the platform's `os` and `arch` fields. The special key `__any__` provides the fallback label used for any stage whose ID is not explicitly listed.
 
 **Example structure**:
 ```json
 {
+  "jenkinsfilePath": "ci/jenkins/Jenkinsfile.declarative",
   "pipelineTimeoutHours": 8,
+  "activeNodeTimeoutMinutes": 10,
   "stageAgentLabels": {
-    "Initialize":            "ci.role.worker",
-    "Build":                 "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "Smoke Tests":           "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "AQA Tests":             "ci.role.test&&hw.arch.{arch}",
-    "Post-Build Code Sign":  "ci.role.sign&&sw.os.{os}",
-    "Build Installers":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "Publish Artifacts":     "ci.role.publish"
+    "__any__":               "ci.role.worker",
+    "01-initialize":         "ci.role.worker",
+    "02-build":              "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "03-internal-code-sign": "eclipse-codesign",
+    "04-assemble-images":    "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "06-post-build-code-sign": "ci.role.worker",
+    "07-installer":          "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "08-code-sign-installer": "ci.role.worker",
+    "09-sbom-sign":          "ci.role.worker",
+    "10-digital-artifact-sign": "ci.role.worker",
+    "11-verify-signing":     "ci.role.worker",
+    "12-validate-sbom":      "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "13-smoke-tests":        "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "14-aqa-tests":          "ci.role.build&&hw.arch.{arch}",
+    "15-tck-tests":          "ci.role.build&&hw.arch.{arch}",
+    "16-publish":            "ci.role.worker",
+    "20-reproducible-compare": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}"
   },
   "jobConfiguration": {
     "defaultParameters": {
-      "RUN_TESTS": false,
+      "VARIANT": "temurin",
+      "CLEAN_WORKSPACE_AFTER_STAGE": true,
+      "CREATE_SBOM": true,
+      "RUN_TESTS": true,
       "ENABLE_INSTALLERS": true,
-      "SIGN_ARTIFACTS": false,
+      "SIGN_ARTIFACTS": true,
       "PUBLISH_ARTIFACTS": false,
       "RUN_REPRODUCIBLE_COMPARE": false
     },
@@ -138,12 +153,12 @@ Contains two distinct groups of settings:
 **Location**: `configurations/` directory of the config repo (path determined by `configFilePrefix` / `configFileSuffix` in `adoptium_pipeline_config.json`)
 **Consumed by**: `scripts/lib/load-json-config.py` (invoked by `ConfigHelper.groovy` on Jenkins, or `run-pipeline.py` locally)
 
-One file per JDK version. Describes every supported build platform and its platform-specific settings. The filename pattern is `<configFilePrefix><version><configFileSuffix>`, e.g. `configurations/jdk21u_pipeline_config.json`.
+One file per JDK version. Describes every supported build platform and its platform-specific settings. The filename pattern is `<configFilePrefix><version><configFileSuffix>`, e.g. `configurations/jdk21_pipeline_config.json`.
 
 **Example structure**:
 ```json
 {
-  "openjdkVersion": "jdk21u",
+  "version": "jdk21",
   "buildConfigurations": {
     "aarch64_mac": {
       "os": "mac",
@@ -153,13 +168,11 @@ One file per JDK version. Describes every supported build platform and its platf
       "buildArgs": {
         "temurin": "--create-jre-image",
         "hotspot": "--create-jre-image"
-      },
-      "dockerImage": ""
+      }
     },
     "x86-64_linux": {
       "os": "linux",
       "arch": "x64",
-      "additionalNodeLabels": "",
       "dockerImage": "adoptopenjdk/centos7_build_image",
       "configureArgs": "--enable-unlimited-crypto",
       "buildArgs": "--create-jre-image"
@@ -230,26 +243,24 @@ This file is not stored in any repository — it is generated fresh for each bui
 ```json
 {
   "buildConfig": {
-    "JAVA_TO_BUILD": "jdk21u",
+    "JAVA_TO_BUILD": "jdk21",
     "TARGET_OS": "mac",
     "ARCHITECTURE": "aarch64",
     "VARIANT": "temurin",
     "BUILD_ARGS": "--create-jre-image",
     "CONFIGURE_ARGS": "--enable-dtrace",
     "NODE_LABEL": "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
-    "DOCKER_IMAGE": ""
+    "DOCKER_IMAGE": "",
+    "DOCKER_FILE": "",
+    "DOCKER_REGISTRY": "",
+    "DOCKER_CREDENTIAL": "",
+    "DOCKER_ARGS": "",
+    "PODMAN_ARGS": ""
   },
   "parameters": {
-    "enableTests": true,
-    "enableInstallers": true,
-    "enableSigner": false,
-    "cleanWorkspaceAfterStage": true,
-    "eaBetaBuild": false,
-    "compareBuild": false,
-    "release": false
+    "cleanWorkspaceAfterStage": true
   },
-  "refs": {
-    "scmRef": "",
+  "repoDefaults": {
     "buildRef": "master",
     "buildRepoUrl": "https://github.com/adoptium/temurin-build.git",
     "aqaRef": "master",
@@ -257,6 +268,8 @@ This file is not stored in any repository — it is generated fresh for each bui
   }
 }
 ```
+
+> **Stage parameters** (`SCM_REF`, `BUILD_REF`, `AQA_REF`, `CREATE_SBOM`, `RUN_TESTS`, `ENABLE_INSTALLERS`, `SIGN_ARTIFACTS`, `RUN_REPRODUCIBLE_COMPARE`, …) are **not** stored in this file. They flow exclusively through the process environment — injected by Jenkins job parameters or by `run-pipeline.py`'s `_stage_env()`. This keeps `pipeline-config.json` CI-agnostic and separates static platform config from per-run operator choices.
 
 On Jenkins it is immediately archived as a build artifact so that subsequent stages (which each start with a clean workspace) can retrieve it via `copyArtifacts`.
 
@@ -274,14 +287,16 @@ This file is Jenkins-specific and has no equivalent in the local runner. It is a
 ```json
 {
   "stageAgentLabels": {
-    "Initialize":  "ci.role.worker",
-    "Build":       "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
-    "Smoke Tests": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}"
+    "__any__":        "ci.role.worker",
+    "01-initialize":  "ci.role.worker",
+    "02-build":       "ci.role.build&&sw.os.{os}&&hw.arch.{arch}",
+    "13-smoke-tests": "ci.role.build&&sw.os.{os}&&hw.arch.{arch}"
   },
   "resolvedStageAgentLabels": {
-    "Initialize":  "ci.role.worker",
-    "Build":       "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
-    "Smoke Tests": "ci.role.build&&sw.os.mac&&hw.arch.aarch64"
+    "__any__":        "ci.role.worker",
+    "01-initialize":  "ci.role.worker",
+    "02-build":       "ci.role.build&&sw.os.mac&&hw.arch.aarch64",
+    "13-smoke-tests": "ci.role.build&&sw.os.mac&&hw.arch.aarch64"
   },
   "buildNodeLabel": "ci.role.build&&sw.os.mac&&hw.arch.aarch64"
 }
