@@ -126,6 +126,7 @@ def buildForwardedParams(List orderedGroups, Map platformCfg) {
         string(name: 'RELEASE_TYPE',       value: params.RELEASE_TYPE       ?: 'NIGHTLY'),
         string(name: 'GROUP_UID',          value: env.GROUP_UID),
         booleanParam(name: 'CLEAN_WORKSPACE_AFTER_STAGE', value: params.CLEAN_WORKSPACE_AFTER_STAGE ?: true),
+        string(name: 'PIPELINE_TIMEOUT_HOURS', value: env.PIPELINE_TIMEOUT_HOURS ?: '8'),
     ]
 
     // ── Collated stage params ─────────────────────────────────────────────────
@@ -214,6 +215,7 @@ pipeline {
                                 echo "✓ Worker label for launch stages: ${anyLabel.trim()}"
                             }
                         }
+                        env.PIPELINE_TIMEOUT_HOURS = (jenkinsJobConfig?.pipelineTimeoutHours ?: 8).toString()
                     }
                 }
             }

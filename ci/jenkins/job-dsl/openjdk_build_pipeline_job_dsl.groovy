@@ -167,10 +167,6 @@ pipelineJob(jobName) {
 
     quietPeriod(5)
 
-    environmentVariables {
-        env('PIPELINE_TIMEOUT_HOURS', (jenkinsConfig.pipelineTimeoutHours ?: 8).toString())
-    }
-
     parameters {
         // ── Build Configuration ───────────────────────────────────────────────
         separator {
@@ -194,6 +190,9 @@ pipelineJob(jobName) {
         booleanParam('CLEAN_WORKSPACE_AFTER_STAGE',
             defaultParams?.CLEAN_WORKSPACE_AFTER_STAGE != null ? defaultParams.CLEAN_WORKSPACE_AFTER_STAGE : true,
             'Clean workspace after each stage completes')
+        stringParam('PIPELINE_TIMEOUT_HOURS',
+            (jenkinsConfig.pipelineTimeoutHours ?: 8).toString(),
+            'Overall pipeline timeout in hours')
 
         // ── Collated stage parameters ─────────────────────────────────────────
         // Stage-gate booleans (RUN_TESTS, SIGN_ARTIFACTS, etc.) and all other
