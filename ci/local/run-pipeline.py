@@ -475,12 +475,6 @@ Examples:
   python3 run-pipeline.py --jdk-version jdk21 --target-os mac --architecture aarch64 \\
       --config-repo-url https://github.com/adoptium/ci-temurin-config.git
 
-  # Build without tests, installers, or SBOM
-  python3 run-pipeline.py \\
-      --jdk-version jdk21 --target-os mac --architecture aarch64 \\
-      --config-repo-url https://github.com/adoptium/ci-temurin-config.git \\
-      --run-tests false --enable-installers false --create-sbom false
-
   # Release build with reproducible compare, pinned source tag
   python3 run-pipeline.py \\
       --jdk-version jdk21 --target-os linux --architecture x64 \\
@@ -488,13 +482,6 @@ Examples:
       --release-type RELEASE \\
       --scm-ref jdk-21.0.7+6_adopt \\
       --run-reproducible-compare true
-
-  # Vendor fork with vendor-specific stage params
-  python3 run-pipeline.py \\
-      --jdk-version jdk21 --target-os linux --architecture s390x \\
-      --config-repo-url https://github.com/myorg/ci-openj9-config.git \\
-      --openj9-repo git@github.ibm.com:myuser/openj9.git \\
-      --openj9-branch my-feature-branch
 """ + stage_params_epilog
     )
 
