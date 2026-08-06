@@ -268,11 +268,12 @@ pipeline {
                         // separate script approval for the external DSL file.
                         def dslScript = readFile('ci/jenkins/job-dsl/openjdk_build_pipeline.groovy')
                         jobDsl(
-                            scriptText:          dslScript,
-                            removedJobAction:    'IGNORE',
-                            removedViewAction:   'IGNORE',
-                            ignoreExisting:      false,
-                            lookupStrategy:      'JENKINS_ROOT',
+                            scriptText:            dslScript,
+                            removedJobAction:      'IGNORE',
+                            removedViewAction:     'IGNORE',
+                            ignoreExisting:        false,
+                            lookupStrategy:        'JENKINS_ROOT',
+                            unstableOnModification: false,
                             additionalParameters: [
                                 JDK_VERSION:          env.JDK_VERSION,
                                 PLATFORM:             platform,
