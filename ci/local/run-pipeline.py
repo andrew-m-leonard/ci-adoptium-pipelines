@@ -26,6 +26,9 @@ from pathlib import Path
 from datetime import datetime
 from workspace_manager import WorkspaceManager
 from stage_resolver import StageResolver
+from lib.stage_params import collect_stage_params, parse_extra_args, build_stage_params_help
+from lib.stage_env import build_stage_env
+from lib.config_repo import sync_config_repo, load_adoptium_pipeline_config
 
 
 class StageResult(enum.Enum):
@@ -61,143 +64,6 @@ def _load_stage_registry(script_dir: Path) -> dict:
     with open(registry_path, 'r') as f:
         stages = json.load(f)['pipelineStages']
     return {s['id']: s['label'] for s in stages}
-
-
-# ---------------------------------------------------------------------------
-# Stage parameter collation (CI-agnostic helper)
-# ---------------------------------------------------------------------------
-
-def _collect_stage_params(script_dir: Path, vendor_scripts_dir: Path | None,
-                           silent: bool = False,
-                           orchestrated_stages: list[str] | None = None) -> dict:
-    """
-    Run scripts/lib/collect-stage-params.py and return the parsed output.
-
-    Args:
-        script_dir:           Root of the ci-adoptium-pipelines checkout.
-        vendor_scripts_dir:   Path to config-repo/vendor-scripts, or None.
-        silent:               Suppress stdout (used when building --help text).
-        orchestrated_stages:  List of stage IDs to include; stems not in this
-                              list are skipped by the collator.  Pass
-                              _LOCAL_STAGES to restrict output to only the
-                              stages this runner actually executes.
-
-    Returns:
-        Dict with keys 'groups' and 'paramNames', or empty structure on failure.
-    """
-    import tempfile
-
-    collector = script_dir / 'scripts' / 'lib' / 'collect-stage-params.py'
-    if not collector.exists():
-        return {'groups': [], 'paramNames': []}
-
-    stages_dir = script_dir / 'scripts' / 'stages'
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as tmp:
-        tmp_path = tmp.name
-
-    cmd = [
-        sys.executable, str(collector),
-        '--default-stages-dir', str(stages_dir),
-        '--output', tmp_path,
-    ]
-    if vendor_scripts_dir and vendor_scripts_dir.exists():
-        cmd += ['--vendor-scripts-dir', str(vendor_scripts_dir)]
-    if orchestrated_stages:
-        cmd += ['--orchestrated-stages', ','.join(orchestrated_stages)]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"WARNING: collect-stage-params.py failed — stage params not loaded.\n"
-              f"{result.stderr.strip()}", file=sys.stderr)
-        return {'groups': [], 'paramNames': []}
-
-    if not silent and result.stdout.strip():
-        print(f"  {result.stdout.strip()}")
-
-    with open(tmp_path, 'r') as f:
-        return json.load(f)
-
-
-def _param_name_to_cli_flag(name: str) -> str:
-    """Convert UPPER_SNAKE_CASE param name to --lower-kebab-case CLI flag."""
-    return '--' + name.lower().replace('_', '-')
-
-
-def _parse_extra_args(extra: list[str], collated: dict) -> tuple[dict, list[str], list[str]]:
-    """
-    Parse a list of raw unknown CLI tokens against the collated stage parameter
-    definitions.
-
-    Both boolean and string parameters now require an explicit value token:
-      --create-sbom true          boolean
-      --create-sbom false         boolean
-      --scm-ref jdk-21.0.7+6     string
-      --extra-build-args "..."    string
-
-    This mirrors the syntax used by Jenkins build parameters and avoids
-    ambiguity between a flag and the next positional token.
-
-    Returns:
-        (stage_params, unrecognised, errors)
-          stage_params   — dict of PARAM_NAME → value for every valid token
-          unrecognised   — list of flag names that matched no collated param
-          errors         — list of human-readable error strings for malformed
-                           tokens (missing value, wrong boolean value)
-    """
-    # Build a lookup: --lower-kebab-case flag → param def dict
-    flag_to_param: dict[str, dict] = {}
-    for group in collated.get('groups', []):
-        for p in group.get('parameters', []):
-            flag_to_param[_param_name_to_cli_flag(p['name'])] = p
-
-    stage_params: dict[str, str] = {}
-    unrecognised: list[str] = []
-    errors:       list[str] = []
-
-    i = 0
-    while i < len(extra):
-        token = extra[i]
-        if not token.startswith('--'):
-            i += 1
-            continue
-
-        # Handle --flag=value and --flag value forms
-        if '=' in token:
-            flag, value = token.split('=', 1)
-        else:
-            flag = token
-            value = None
-
-        p = flag_to_param.get(flag)
-        if p is None:
-            unrecognised.append(flag)
-            i += 1
-            continue
-
-        # All parameter types (boolean and string) require an explicit value token
-        if value is None:
-            if i + 1 < len(extra) and not extra[i + 1].startswith('--'):
-                value = extra[i + 1]
-                i += 2
-            else:
-                errors.append(
-                    f"  {flag}: missing value (expected {p['type']})"
-                )
-                i += 1
-                continue
-
-        if p['type'] == 'boolean':
-            if value.lower() not in ('true', 'false'):
-                errors.append(
-                    f"  {flag}: invalid value {value!r} — boolean must be 'true' or 'false'"
-                )
-                i += 1
-                continue
-            stage_params[p['name']] = value.lower()
-        else:
-            stage_params[p['name']] = value
-
-    return stage_params, unrecognised, errors
 
 
 # ---------------------------------------------------------------------------
@@ -362,60 +228,17 @@ class PipelineRunner:
         return self._resolver
 
     def _stage_env(self, extra: dict | None = None) -> dict:
-        """
-        Build the standard environment dict passed to every stage script.
-        Mirrors PipelineHelper.initializeStage() in Jenkins.
-
-        All five standard variables are set:
-          WORKSPACE, CONFIG_FILE, INPUT_ARTIFACTS_DIR, TARGET_DIR, BUILD_NUMBER
-        plus PIPELINE_ROOT for vendor scripts that source shared lib utilities.
-
-        CONFIG_* variables are populated from pipeline-config.json so that
-        stage scripts (e.g. 02-build.sh) can read them without needing jq.
-        """
-        env = os.environ.copy()
-        env['WORKSPACE']                  = str(self.stage_workspace)
-        env['PIPELINE_ROOT']              = str(self.script_dir)
-        env['CONFIG_FILE']                = str(self.stage_workspace / 'pipeline-config.json')
-        env['INPUT_ARTIFACTS_DIR']        = str(self.stage_workspace)
-        env['TARGET_DIR']                 = str(self.stage_workspace / 'target')
-        env['BUILD_NUMBER']               = self.build_number
-        # Fixed job-level params that stage scripts read directly (not in pipeline-config.json)
-        env['RELEASE_TYPE']               = (self.args.release_type or 'NIGHTLY').upper()
-        env['CLEAN_WORKSPACE_AFTER_STAGE'] = 'true' if self.args.clean_workspace else 'false'
-
-        # Inject CONFIG_* variables from pipeline-config.json so that stage
-        # shell scripts can consume them without a jq dependency.
-        config_path = self.build_artifacts_dir / 'pipeline-config.json'
-        if config_path.exists():
-            with open(config_path, 'r') as f:
-                cfg = json.load(f)
-
-            build_cfg = cfg.get('buildConfig', {})
-            # Map every buildConfig key → CONFIG_<KEY>
-            for key, value in build_cfg.items():
-                env[f'CONFIG_{key}'] = str(value) if value is not None else ''
-
-            repo_defaults = cfg.get('repoDefaults', {})
-            if repo_defaults.get('buildRef'):
-                env['CONFIG_BUILD_REF'] = repo_defaults['buildRef']
-            if repo_defaults.get('buildRepoUrl'):
-                env['CONFIG_BUILD_REPO_URL'] = repo_defaults['buildRepoUrl']
-            if repo_defaults.get('aqaRef'):
-                env['CONFIG_AQA_REF'] = repo_defaults['aqaRef']
-            if repo_defaults.get('aqaRepoUrl'):
-                env['CONFIG_AQA_REPO_URL'] = repo_defaults['aqaRepoUrl']
-
-        # Inject collated stage params so vendor stage scripts can read them
-        # as environment variables without needing any other mechanism.
-        # Stage params always override ambient env — the stage script itself
-        # decides how to merge its param with the CONFIG_* repo defaults.
-        for name, value in self._stage_param_values.items():
-            env[name] = str(value)
-
-        if extra:
-            env.update(extra)
-        return env
+        """Build the standard environment dict passed to every stage script."""
+        return build_stage_env(
+            script_dir=self.script_dir,
+            stage_workspace=self.stage_workspace,
+            build_artifacts_dir=self.build_artifacts_dir,
+            build_number=self.build_number,
+            release_type=self.args.release_type or 'NIGHTLY',
+            clean_workspace=self.args.clean_workspace,
+            stage_param_values=self._stage_param_values,
+            extra=extra,
+        )
 
     def _run_stage(self, stage_id: str, artifact_filter: str,
                    extra_env: dict | None = None) -> StageResult:
@@ -465,23 +288,6 @@ class PipelineRunner:
             print(f"\n❌ {stage_label} FAILED (exit code: {exit_code})")
 
         return result
-
-    def _load_adoptium_pipeline_config(self, config_repo_dir: Path) -> dict:
-        """Load adoptium_pipeline_config.json from the config repo directory."""
-        cfg_path = config_repo_dir / 'adoptium_pipeline_config.json'
-        if not cfg_path.exists():
-            print("ℹ️  adoptium_pipeline_config.json not found in config repo — using defaults")
-            return {}
-
-        with open(cfg_path, 'r') as f:
-            cfg = json.load(f)
-
-        print("✅ Loaded adoptium_pipeline_config.json")
-        print(f"   Default variant: {cfg.get('defaultVariant', 'temurin')}")
-        active = [v['version'] for v in cfg.get('activeJdkVersions', []) if v.get('enabled')]
-        if active:
-            print(f"   Active JDK versions: {', '.join(active)}")
-        return cfg
 
     # ------------------------------------------------------------------
     # Pipeline entry point
@@ -595,74 +401,18 @@ class PipelineRunner:
 
         self.workspace_mgr.cleanup_stage_workspace('pre')
 
-        config_repo_dir = self.workspace / 'config-repo'
-        if config_repo_dir.exists():
-            # Verify the existing clone's remote origin matches the requested URL.
-            # A mismatch means the workspace holds a different repo (e.g. a different
-            # fork) — re-clone unconditionally so we always use the right content.
-            try:
-                url_result = subprocess.run(
-                    ['git', '-C', str(config_repo_dir), 'remote', 'get-url', 'origin'],
-                    capture_output=True, text=True, check=True
-                )
-                existing_url = url_result.stdout.strip()
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(
-                    f"Could not determine remote URL of existing config-repo at "
-                    f"{config_repo_dir}: {e.stderr.strip()}"
-                ) from e
+        config_repo_dir = sync_config_repo(
+            self.workspace,
+            self.args.config_repo_url,
+            self.args.config_repo_branch,
+        )
 
-            if existing_url != self.args.config_repo_url:
-                raise RuntimeError(
-                    f"ERROR: Existing config-repo remote URL does not match --config-repo-url.\n"
-                    f"\n"
-                    f"  Existing:  {existing_url}\n"
-                    f"  Requested: {self.args.config_repo_url}\n"
-                    f"\n"
-                    f"Use --clean-workspace to remove the existing workspace and re-clone "
-                    f"from the requested URL.\n"
-                )
+        pipeline_config = load_adoptium_pipeline_config(config_repo_dir)
 
-            # Same repo — fetch latest and reset to the requested branch tip so we
-            # always use the most up-to-date content from the remote.
-            print(f"ℹ️  Configuration repository already exists: {config_repo_dir}")
-            print(f"   Fetching latest from origin/{self.args.config_repo_branch}...")
-            try:
-                subprocess.run(
-                    ['git', '-C', str(config_repo_dir), 'fetch', '--depth', '1',
-                     'origin', self.args.config_repo_branch],
-                    check=True
-                )
-                subprocess.run(
-                    ['git', '-C', str(config_repo_dir), 'reset', '--hard',
-                     f'origin/{self.args.config_repo_branch}'],
-                    check=True
-                )
-                print("✅ Configuration repository updated to latest")
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(
-                    f"Failed to update config-repo from remote: {e}"
-                ) from e
-
-        if not config_repo_dir.exists():
-            print(f"📥 Cloning configuration repository...")
-            print(f"   URL: {self.args.config_repo_url}")
-            print(f"   Branch: {self.args.config_repo_branch}")
-            subprocess.run([
-                'git', 'clone',
-                '--branch', self.args.config_repo_branch,
-                '--depth', '1',
-                self.args.config_repo_url,
-                str(config_repo_dir)
-            ], check=True)
-            print("✅ Configuration repository cloned")
-
-        # load-json-config.py reads adoptium_pipeline_config.json itself from
-        # the config repo root — no ref args needed here.
         cmd = [
             sys.executable, str(self.script_dir / 'scripts' / 'lib' / 'load-json-config.py'),
             '--jdk-version',      self.args.jdk_version,
-            '--variant',          self._load_adoptium_pipeline_config(config_repo_dir).get('defaultVariant', 'temurin'),
+            '--variant',          pipeline_config.get('defaultVariant', 'temurin'),
             '--target-os',        self.args.target_os,
             '--architecture',     self.args.architecture,
             '--config-repo-path', str(config_repo_dir),
@@ -697,152 +447,6 @@ class PipelineRunner:
         self.workspace_mgr.cleanup_stage_workspace('post')
 
 
-
-def _build_stage_params_help(script_dir: Path, argv: list[str]) -> str:
-    """
-    Build the stage parameters section for --help output.
-
-    If --config-repo-url is present in argv, clone/reuse that repo into a
-    temporary directory and collate the full vendor param set (default +
-    vendor-scripts overrides).  Otherwise collate from the default
-    scripts/stages/*.params.json files only.
-
-    Returns a formatted string ready to append to the argparse epilog.
-    """
-    import tempfile
-    import shutil
-
-    # Only do any work when --help or -h is actually requested
-    if '--help' not in argv and '-h' not in argv:
-        return ''
-
-    # Extract --config-repo-url and --config-repo-branch from raw argv
-    config_repo_url    = None
-    config_repo_branch = 'main'
-    for i, tok in enumerate(argv):
-        if tok == '--config-repo-url' and i + 1 < len(argv):
-            config_repo_url = argv[i + 1]
-        elif tok.startswith('--config-repo-url='):
-            config_repo_url = tok.split('=', 1)[1]
-        elif tok == '--config-repo-branch' and i + 1 < len(argv):
-            config_repo_branch = argv[i + 1]
-        elif tok.startswith('--config-repo-branch='):
-            config_repo_branch = tok.split('=', 1)[1]
-
-    # Also check --workspace so we can reuse an already-cloned config repo
-    workspace = Path('~/openjdk-build').expanduser()
-    for i, tok in enumerate(argv):
-        if tok == '--workspace' and i + 1 < len(argv):
-            workspace = Path(argv[i + 1]).expanduser()
-        elif tok.startswith('--workspace='):
-            workspace = Path(tok.split('=', 1)[1]).expanduser()
-
-    vendor_scripts_dir = None
-    tmp_dir            = None
-
-    if config_repo_url:
-        # Reuse the already-cloned repo in the workspace only when its remote
-        # origin URL matches the requested --config-repo-url exactly.  A mismatch
-        # (different fork / repo) means the existing clone is stale or wrong, so
-        # we fall through and clone a fresh copy into a temp directory instead.
-        existing = workspace / 'config-repo'
-        reused   = False
-        if existing.exists():
-            try:
-                result = subprocess.run(
-                    ['git', '-C', str(existing), 'remote', 'get-url', 'origin'],
-                    capture_output=True, text=True, check=True
-                )
-                existing_url = result.stdout.strip()
-            except Exception:
-                existing_url = ''
-            if existing_url == config_repo_url:
-                # URL matches — fetch latest so we always collate against
-                # up-to-date vendor params (stale clones cause duplicate-param
-                # errors when the remote has already fixed the conflict).
-                try:
-                    subprocess.run(
-                        ['git', '-C', str(existing), 'fetch', '--depth', '1',
-                         'origin', config_repo_branch],
-                        check=True, capture_output=True
-                    )
-                    subprocess.run(
-                        ['git', '-C', str(existing), 'reset', '--hard',
-                         f'origin/{config_repo_branch}'],
-                        check=True, capture_output=True
-                    )
-                except Exception:
-                    pass  # best-effort; stale content is better than no help output
-                candidate = existing / 'vendor-scripts'
-                if candidate.exists():
-                    vendor_scripts_dir = candidate
-                source_note = f"(from existing clone: {existing})"
-                reused = True
-            else:
-                source_note = (
-                    f"(existing clone at {existing} is for a different repo "
-                    f"({existing_url!r} ≠ {config_repo_url!r}) — cloning fresh)"
-                )
-        if not reused:
-            # Clone into a temp dir — cleaned up after help is printed
-            try:
-                tmp_dir = Path(tempfile.mkdtemp(prefix='run-pipeline-help-'))
-                subprocess.run(
-                    ['git', 'clone', '--depth', '1',
-                     '--branch', config_repo_branch,
-                     config_repo_url, str(tmp_dir)],
-                    check=True, capture_output=True
-                )
-                candidate = tmp_dir / 'vendor-scripts'
-                if candidate.exists():
-                    vendor_scripts_dir = candidate
-                source_note = f"(cloned from {config_repo_url})"
-            except Exception:
-                source_note = f"(clone of {config_repo_url} failed — showing defaults only)"
-    else:
-        source_note = "(defaults only — add --config-repo-url for vendor params)"
-
-    try:
-        collated = _collect_stage_params(script_dir, vendor_scripts_dir, silent=True,
-                                         orchestrated_stages=_LOCAL_STAGES)
-    except Exception:
-        collated = {'groups': [], 'paramNames': []}
-    finally:
-        if tmp_dir and tmp_dir.exists():
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    if not collated.get('paramNames'):
-        return ''
-
-    lines = [
-        '',
-        f"Stage parameters {source_note}:",
-        "  Pass as --<lower-kebab-case-name> <value>",
-        "  Boolean params accept: true | false",
-        '',
-    ]
-
-    for group in collated.get('groups', []):
-        params = group.get('parameters', [])
-        if not params:
-            continue
-        # Prefer stageIds list; fall back to scalar stageId
-        stage_ids = group.get('stageIds') or [group.get('stageId', '?')]
-        stage_str = ', '.join(stage_ids)
-        lines.append(f"  [{stage_str}]  {group['name']}")
-        for p in params:
-            flag    = _param_name_to_cli_flag(p['name'])
-            default = str(p.get('default', '')).lower() if p['type'] == 'boolean' else repr(p.get('default', ''))
-            desc = p.get('description', '').strip()
-            lines.append(f"    {flag} <{p['type']}>  default: {default}")
-            if desc:
-                lines.append(f"      {desc}")
-        lines.append('')
-
-    return '\n'.join(lines)
-
-
-
 def main():
     script_dir = Path(__file__).parent.parent.parent.resolve()
 
@@ -855,7 +459,7 @@ def main():
     # the full vendor param set.  Otherwise we fall back to the default
     # scripts/stages/*.params.json files (always available locally).
     # -----------------------------------------------------------------------
-    stage_params_epilog = _build_stage_params_help(script_dir, sys.argv)
+    stage_params_epilog = build_stage_params_help(script_dir, sys.argv, _LOCAL_STAGES)
 
     # -----------------------------------------------------------------------
     # Parse known fixed args; capture everything else as raw tokens.
@@ -976,13 +580,13 @@ Examples:
     # *.params.json overrides so vendor-specific params are also recognised.
     # -----------------------------------------------------------------------
     vendor_dir = runner.workspace / 'config-repo' / 'vendor-scripts'
-    collated   = _collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None,
-                                       orchestrated_stages=_LOCAL_STAGES)
+    collated   = collect_stage_params(script_dir, vendor_dir if vendor_dir.exists() else None,
+                                      orchestrated_stages=_LOCAL_STAGES)
 
     # Load stage metadata (disabled flags, conditions) from the collated output.
     runner._load_stage_metadata(collated)
 
-    stage_params, unrecognised, param_errors = _parse_extra_args(extra_tokens, collated)
+    stage_params, unrecognised, param_errors = parse_extra_args(extra_tokens, collated)
 
     failed = False
     if unrecognised:
