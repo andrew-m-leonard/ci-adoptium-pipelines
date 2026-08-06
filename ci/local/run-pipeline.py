@@ -597,9 +597,54 @@ class PipelineRunner:
 
         config_repo_dir = self.workspace / 'config-repo'
         if config_repo_dir.exists():
+            # Verify the existing clone's remote origin matches the requested URL.
+            # A mismatch means the workspace holds a different repo (e.g. a different
+            # fork) — re-clone unconditionally so we always use the right content.
+            try:
+                url_result = subprocess.run(
+                    ['git', '-C', str(config_repo_dir), 'remote', 'get-url', 'origin'],
+                    capture_output=True, text=True, check=True
+                )
+                existing_url = url_result.stdout.strip()
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f"Could not determine remote URL of existing config-repo at "
+                    f"{config_repo_dir}: {e.stderr.strip()}"
+                ) from e
+
+            if existing_url != self.args.config_repo_url:
+                raise RuntimeError(
+                    f"ERROR: Existing config-repo remote URL does not match --config-repo-url.\n"
+                    f"\n"
+                    f"  Existing:  {existing_url}\n"
+                    f"  Requested: {self.args.config_repo_url}\n"
+                    f"\n"
+                    f"Use --clean-workspace to remove the existing workspace and re-clone "
+                    f"from the requested URL.\n"
+                )
+
+            # Same repo — fetch latest and reset to the requested branch tip so we
+            # always use the most up-to-date content from the remote.
             print(f"ℹ️  Configuration repository already exists: {config_repo_dir}")
-            print("   (Use --clean-workspace to re-clone)")
-        else:
+            print(f"   Fetching latest from origin/{self.args.config_repo_branch}...")
+            try:
+                subprocess.run(
+                    ['git', '-C', str(config_repo_dir), 'fetch', '--depth', '1',
+                     'origin', self.args.config_repo_branch],
+                    check=True
+                )
+                subprocess.run(
+                    ['git', '-C', str(config_repo_dir), 'reset', '--hard',
+                     f'origin/{self.args.config_repo_branch}'],
+                    check=True
+                )
+                print("✅ Configuration repository updated to latest")
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    f"Failed to update config-repo from remote: {e}"
+                ) from e
+
+        if not config_repo_dir.exists():
             print(f"📥 Cloning configuration repository...")
             print(f"   URL: {self.args.config_repo_url}")
             print(f"   Branch: {self.args.config_repo_branch}")
@@ -696,14 +741,33 @@ def _build_stage_params_help(script_dir: Path, argv: list[str]) -> str:
     tmp_dir            = None
 
     if config_repo_url:
-        # Prefer the already-cloned repo in the workspace if it exists
+        # Reuse the already-cloned repo in the workspace only when its remote
+        # origin URL matches the requested --config-repo-url exactly.  A mismatch
+        # (different fork / repo) means the existing clone is stale or wrong, so
+        # we fall through and clone a fresh copy into a temp directory instead.
         existing = workspace / 'config-repo'
+        reused   = False
         if existing.exists():
-            candidate = existing / 'vendor-scripts'
-            if candidate.exists():
-                vendor_scripts_dir = candidate
+            try:
+                result = subprocess.run(
+                    ['git', '-C', str(existing), 'remote', 'get-url', 'origin'],
+                    capture_output=True, text=True, check=True
+                )
+                existing_url = result.stdout.strip()
+            except Exception:
+                existing_url = ''
+            if existing_url == config_repo_url:
+                candidate = existing / 'vendor-scripts'
+                if candidate.exists():
+                    vendor_scripts_dir = candidate
                 source_note = f"(from existing clone: {existing})"
-        if vendor_scripts_dir is None:
+                reused = True
+            else:
+                source_note = (
+                    f"(existing clone at {existing} is for a different repo "
+                    f"({existing_url!r} ≠ {config_repo_url!r}) — cloning fresh)"
+                )
+        if not reused:
             # Clone into a temp dir — cleaned up after help is printed
             try:
                 tmp_dir = Path(tempfile.mkdtemp(prefix='run-pipeline-help-'))
